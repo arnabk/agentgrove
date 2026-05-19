@@ -9,6 +9,12 @@ description = "HTTP + WS API layer for AgentGrove."
 
 [dependencies]
 agentgrove-core = { path = "../agentgrove-core" }
+agentgrove-store = { path = "../agentgrove-store" }
+agentgrove-git = { path = "../agentgrove-git" }
+agentgrove-scripts = { path = "../agentgrove-scripts" }
+agentgrove-pty = { path = "../agentgrove-pty" }
+agentgrove-agents = { path = "../agentgrove-agents" }
+portable-pty = { workspace = true }
 axum = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
@@ -16,13 +22,24 @@ hyper = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
 
 [dev-dependencies]
 reqwest = { workspace = true }
 tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }
+tempfile = { workspace = true }
+serde_json = { workspace = true }
+urlencoding = "2"
+agentgrove-git = { path = "../agentgrove-git" }
 
 [[test]]
 name = "e2e"

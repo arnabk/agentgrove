@@ -12,7 +12,7 @@ use axum::{
     response::Response,
 };
 
-use crate::router::AppState;
+use crate::state::AppState;
 
 /// Axum middleware that enforces `Authorization: Bearer <token>` on
 /// protected routes.

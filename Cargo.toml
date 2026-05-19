@@ -7,6 +7,7 @@ members = [
     "crates/agentgrove-pty",
     "crates/agentgrove-fswatch",
     "crates/agentgrove-agents",
+    "crates/agentgrove-scripts",
     "crates/agentgrove-api",
     "crates/agentgrove-server",
 ]
