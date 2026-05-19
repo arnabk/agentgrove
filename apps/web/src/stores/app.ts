@@ -6,7 +6,9 @@ import { api, type Chat, type Project, type Theme, type Worktree } from "../api/
 
 export interface AppState {
   ready: boolean;
+  probed: boolean;
   authError: string | null;
+  authRequired: boolean;
   projects: Project[];
   selectedProjectId: string | null;
   worktrees: Record<string, Worktree[]>;
@@ -19,7 +21,9 @@ export interface AppState {
 
 export const [state, setState] = createStore<AppState>({
   ready: false,
+  probed: false,
   authError: null,
+  authRequired: true,
   projects: [],
   selectedProjectId: null,
   worktrees: {},
@@ -86,9 +90,11 @@ export function selectChat(id: string) {
 }
 
 export async function bootstrap() {
-  // Confirm auth.
+  // Confirm reachability. If /whoami succeeds without a stored token,
+  // the server has auth disabled.
   try {
     await api.whoami();
+    setState("authRequired", !!api.getToken());
   } catch (e) {
     if (e instanceof Error) setState("authError", e.message);
     setState("ready", true);

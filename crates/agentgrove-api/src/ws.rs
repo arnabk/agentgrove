@@ -19,7 +19,8 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 pub struct WsQuery {
     pub topic: String,
-    pub token: String,
+    #[serde(default)]
+    pub token: Option<String>,
 }
 
 pub async fn handler(
@@ -27,8 +28,11 @@ pub async fn handler(
     Query(q): Query<WsQuery>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    if q.token != *state.token {
-        return (StatusCode::UNAUTHORIZED, "bad token").into_response();
+    if let Some(expected) = state.token.as_deref() {
+        let presented = q.token.as_deref().unwrap_or("");
+        if presented != expected {
+            return (StatusCode::UNAUTHORIZED, "bad token").into_response();
+        }
     }
     let topic = q.topic.clone();
     let state2 = state.clone();

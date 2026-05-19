@@ -24,7 +24,11 @@ async fn main() -> Result<()> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    let token = env::var("AGENTGROVE_TOKEN").unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+    // Auth is disabled by default. Set AGENTGROVE_TOKEN to enable.
+    let token = env::var("AGENTGROVE_TOKEN")
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty());
 
     let state_dir = match env::var("AGENTGROVE_STATE_DIR") {
         Ok(v) => PathBuf::from(v),
@@ -47,10 +51,13 @@ async fn main() -> Result<()> {
     let addr = SocketAddr::new(bind_addr, port);
     let listener = TcpListener::bind(addr).await.context("bind tcp listener")?;
     let local = listener.local_addr().context("local_addr")?;
-    tracing::info!(%local, state_dir = %state_dir.display(), "agentgrove server listening");
+    tracing::info!(%local, state_dir = %state_dir.display(), auth = token.is_some(), "agentgrove server listening");
     println!("agentgrove listening on http://{local}");
     println!("state dir: {}", state_dir.display());
-    println!("token: {token}");
+    match &token {
+        Some(t) => println!("token: {t}"),
+        None => println!("auth: disabled (set AGENTGROVE_TOKEN to enable)"),
+    }
     axum::serve(listener, app).await.context("axum serve")?;
     Ok(())
 }

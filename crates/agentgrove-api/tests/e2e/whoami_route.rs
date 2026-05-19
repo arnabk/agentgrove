@@ -29,3 +29,19 @@ async fn whoami_accepts_correct_token() {
     assert_eq!(res.status(), 200);
     assert_eq!(res.text().await.unwrap(), "authenticated");
 }
+
+#[tokio::test]
+async fn whoami_open_when_auth_disabled() {
+    let h = BeHarness::start_no_auth().await;
+    // No Authorization header.
+    let res = h.get_anon("/whoami").send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    assert_eq!(res.text().await.unwrap(), "authenticated");
+}
+
+#[tokio::test]
+async fn projects_open_when_auth_disabled() {
+    let h = BeHarness::start_no_auth().await;
+    let res = h.get_anon("/api/projects").send().await.unwrap();
+    assert_eq!(res.status(), 200);
+}

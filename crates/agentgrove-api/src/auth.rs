@@ -1,9 +1,9 @@
 //! Bearer-token authentication middleware.
 //!
-//! The token is configured at startup. All routes other than `/health` and
-//! `/openapi.json` (later) require `Authorization: Bearer <token>`.
-//!
-//! Constant-time comparison is used to avoid timing oracles.
+//! Auth is **opt-in**. When `AppState.token` is `None` (the default for
+//! local dev), all routes are open. When a token is configured, every
+//! protected route requires `Authorization: Bearer <token>` and the
+//! token is compared in constant time to avoid timing oracles.
 
 use axum::{
     extract::{Request, State},
@@ -15,12 +15,17 @@ use axum::{
 use crate::state::AppState;
 
 /// Axum middleware that enforces `Authorization: Bearer <token>` on
-/// protected routes.
+/// protected routes when a token is configured. Pass-through otherwise.
 pub async fn require_bearer(
     State(state): State<AppState>,
     req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
+    let Some(expected) = state.token.as_deref() else {
+        // Auth disabled — pass through.
+        return Ok(next.run(req).await);
+    };
+
     let header_value = req
         .headers()
         .get(header::AUTHORIZATION)
@@ -31,7 +36,7 @@ pub async fn require_bearer(
         .strip_prefix("Bearer ")
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    if !constant_time_eq(presented.as_bytes(), state.token.as_bytes()) {
+    if !constant_time_eq(presented.as_bytes(), expected.as_bytes()) {
         return Err(StatusCode::UNAUTHORIZED);
     }
 

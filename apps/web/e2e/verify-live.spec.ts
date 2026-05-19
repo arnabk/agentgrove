@@ -11,26 +11,25 @@ const TOKEN = process.env.AGENTGROVE_TOKEN ?? "";
 const BE_URL = process.env.AGENTGROVE_BE_URL ?? "http://127.0.0.1:4317";
 const REPO_ROOT = process.env.REPO_ROOT ?? process.cwd();
 
-async function seedToken(page: import("@playwright/test").Page) {
+async function seedBackend(page: import("@playwright/test").Page, opts: { token?: string } = {}) {
   await page.addInitScript(
     ({ token, beUrl }) => {
-      localStorage.setItem("ag-token", token);
-      // The client picks up VITE_API_URL only at build time; for dev, the
-      // client defaults to http://127.0.0.1:4317 when on port 5173.
-      // Persist BE override for any future use.
+      localStorage.removeItem("ag-token");
+      if (token) localStorage.setItem("ag-token", token);
       localStorage.setItem("ag-be", beUrl);
     },
-    { token: TOKEN, beUrl: BE_URL },
+    { token: opts.token ?? TOKEN, beUrl: BE_URL },
   );
 }
 
 test.describe("live app", () => {
-  test("login form shows without token", async ({ page }) => {
+  test("auth-disabled default: app skips login and renders shell", async ({ page }) => {
+    await seedBackend(page);
     await page.goto(BASE);
-    await expect(page.getByTestId("login-form")).toBeVisible();
+    await expect(page.getByTestId("app-root")).toBeVisible({ timeout: 15_000 });
   });
 
-  test("authenticated shell renders all panes and feature flows work", async ({ page }) => {
+  test("full UI flow against default (auth-disabled) backend", async ({ page }) => {
     const visualDir = path.join(REPO_ROOT, ".data", "logs", "visuals");
     fs.mkdirSync(visualDir, { recursive: true });
     const shot = (name: string) =>
@@ -42,7 +41,7 @@ test.describe("live app", () => {
       if (m.type() === "error") errors.push(`console.error: ${m.text()}`);
     });
 
-    await seedToken(page);
+    await seedBackend(page);
     await page.goto(BASE, { waitUntil: "networkidle" });
 
     // 1. Shell appears (left rail + tabs).

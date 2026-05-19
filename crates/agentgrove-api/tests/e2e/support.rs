@@ -18,12 +18,20 @@ pub struct BeHarness {
 
 impl BeHarness {
     pub async fn start() -> Self {
+        Self::start_with_token(Some("test-token-abc123".to_string())).await
+    }
+
+    pub async fn start_no_auth() -> Self {
+        Self::start_with_token(None).await
+    }
+
+    async fn start_with_token(token_opt: Option<String>) -> Self {
         let tmp = tempfile::tempdir().expect("tempdir");
         let pool = open_pool(tmp.path()).await.expect("pool");
         run_migrations(&pool).await.expect("migrate");
 
-        let token = "test-token-abc123".to_string();
-        let state = AppState::new(token.clone(), tmp.path().to_path_buf(), pool);
+        let token = token_opt.clone().unwrap_or_default();
+        let state = AppState::new(token_opt, tmp.path().to_path_buf(), pool);
         let app = build_router(state);
 
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");

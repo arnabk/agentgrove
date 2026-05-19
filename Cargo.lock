@@ -120,13 +120,11 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "axum",
- "directories-next",
  "predicates",
  "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
