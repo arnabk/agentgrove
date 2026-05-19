@@ -19,6 +19,7 @@ export default [
         console: "readonly",
         process: "readonly",
         HTMLElement: "readonly",
+        getComputedStyle: "readonly",
         __dirname: "readonly",
         __filename: "readonly",
       },

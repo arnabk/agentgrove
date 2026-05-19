@@ -1,7 +1,13 @@
-import { createSignal } from "solid-js";
+import { createEffect, createSignal } from "solid-js";
 
 export default function App() {
   const [theme, setTheme] = createSignal<"light" | "dark">("dark");
+
+  // Reflect theme on <html> so global CSS variable overrides take effect
+  // for <body> (which carries the Tailwind bg-bg / text-fg classes).
+  createEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme());
+  });
 
   return (
     <main data-testid="app-root" data-theme={theme()} class="min-h-screen p-8 flex flex-col gap-4">

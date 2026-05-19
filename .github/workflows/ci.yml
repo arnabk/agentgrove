@@ -78,7 +78,7 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile=false
       - run: pnpm -C apps/web exec playwright install --with-deps chromium
-      - run: bash scripts/test-live.sh
+      - run: bash scripts/verify.sh
       - if: failure()
         uses: actions/upload-artifact@v4
         with:

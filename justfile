@@ -66,6 +66,15 @@ coverage-fe:
 # Aggregate: mirrors PR CI.
 check: fmt-check lint typecheck test-unit test-component test-be-e2e test-fe-unit
 
+# Live end-to-end acceptance of every feature M0 ships.
+[unix]
+verify:
+    @bash {{justfile_directory()}}/scripts/verify.sh
+
+[windows]
+verify:
+    @pwsh {{justfile_directory()}}/scripts/verify.ps1
+
 # Dev: run only the BE.
 [unix]
 dev-be:
