@@ -96,3 +96,12 @@ start:
 [windows]
 start:
     @pwsh {{justfile_directory()}}/scripts/start.ps1
+
+# Start BE + FE with hot reload for development.
+[unix]
+dev:
+    @bash {{justfile_directory()}}/scripts/dev.sh
+
+[windows]
+dev:
+    @pwsh {{justfile_directory()}}/scripts/dev.ps1

@@ -1,4 +1,4 @@
-import { createSignal, onCleanup } from "solid-js";
+import { Show, createSignal, onCleanup } from "solid-js";
 import { MergeView } from "@codemirror/merge";
 import { EditorView } from "@codemirror/view";
 import { oneDark } from "@codemirror/theme-one-dark";
@@ -20,14 +20,8 @@ export default function DiffPane() {
     host.innerHTML = "";
     view = new MergeView({
       parent: host,
-      a: {
-        doc: d.head,
-        extensions: [oneDark, EditorView.editable.of(false)],
-      },
-      b: {
-        doc: d.working,
-        extensions: [oneDark, EditorView.editable.of(false)],
-      },
+      a: { doc: d.head, extensions: [oneDark, EditorView.editable.of(false)] },
+      b: { doc: d.working, extensions: [oneDark, EditorView.editable.of(false)] },
     });
   }
 
@@ -35,28 +29,24 @@ export default function DiffPane() {
 
   return (
     <section data-testid="diff-pane" class="flex flex-col h-full">
-      <header class="px-4 py-2 border-b border-[var(--ag-muted)] flex items-center gap-2">
+      <header class="h-11 px-3 flex items-center gap-2 border-b border-border bg-bg-1">
         <form onSubmit={open} class="flex-1 flex gap-2">
           <input
-            class="flex-1 px-2 py-1 rounded bg-transparent border border-[var(--ag-muted)] text-sm"
-            placeholder="absolute file path"
+            class="ag-input font-mono"
+            placeholder="/absolute/path/to/file"
             value={path()}
             onInput={(e) => setPath(e.currentTarget.value)}
             data-testid="diff-path"
           />
-          <button
-            type="submit"
-            class="px-3 py-1 rounded bg-[var(--ag-accent)] text-white text-sm"
-            data-testid="diff-open"
-          >
+          <button type="submit" class="ag-btn ag-btn-primary" data-testid="diff-open">
             Diff vs HEAD
           </button>
         </form>
-        {loaded() && (
-          <span class="text-xs text-[var(--ag-muted)]" data-testid="diff-loaded">
+        <Show when={loaded()}>
+          <span class="ag-chip font-mono" data-testid="diff-loaded">
             {loaded()}
           </span>
-        )}
+        </Show>
       </header>
       <div ref={(el) => (host = el)} class="flex-1 overflow-auto" data-testid="diff-host" />
     </section>

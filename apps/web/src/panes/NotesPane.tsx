@@ -38,17 +38,17 @@ export default function NotesPane() {
 
   return (
     <section data-testid="notes-pane" class="flex flex-col h-full">
-      <header class="px-4 py-2 border-b border-[var(--ag-muted)]">
-        <h2 class="font-semibold">Notes</h2>
+      <header class="h-11 px-4 flex items-center border-b border-border bg-bg-1">
+        <h2 class="text-[13px] font-semibold tracking-tight">Notes</h2>
       </header>
       <form
         onSubmit={add}
-        class="p-3 border-b border-[var(--ag-muted)] flex gap-2"
+        class="px-4 py-3 border-b border-border bg-bg-1 flex gap-2"
         data-testid="notes-form"
       >
         <input
-          class="flex-1 px-2 py-1 rounded bg-transparent border border-[var(--ag-muted)] text-sm"
-          placeholder="Note something for this chat..."
+          class="ag-input"
+          placeholder="Jot a quick note about this chat…"
           value={body()}
           onInput={(e) => setBody(e.currentTarget.value)}
           disabled={!state.selectedChatId}
@@ -56,23 +56,27 @@ export default function NotesPane() {
         />
         <button
           type="submit"
-          class="px-3 py-1 rounded bg-[var(--ag-accent)] text-white text-sm"
-          disabled={!state.selectedChatId}
+          class="ag-btn ag-btn-primary"
+          disabled={!state.selectedChatId || !body().trim()}
           data-testid="note-add"
         >
           Add
         </button>
       </form>
-      <ul class="flex-1 overflow-y-auto p-3 space-y-2" data-testid="notes-list">
-        <For each={notes()}>
+      <ul class="flex-1 overflow-y-auto p-4 space-y-2" data-testid="notes-list">
+        <For
+          each={notes()}
+          fallback={<li class="text-center text-fg-subtle text-sm py-10">No notes yet.</li>}
+        >
           {(n) => (
             <li
-              class="flex items-start gap-2 border border-[var(--ag-muted)] rounded p-2 text-sm"
+              class="group flex items-start gap-3 rounded-md bg-bg-1 border border-border px-3 py-2.5 text-[13px]"
               data-testid={`note-${n.id}`}
             >
-              <span class="flex-1">{n.body}</span>
+              <span class="text-fg-subtle mt-0.5">✦</span>
+              <span class="flex-1 whitespace-pre-wrap">{n.body}</span>
               <button
-                class="text-xs text-red-400"
+                class="ag-btn ag-btn-danger !py-0.5 !px-1.5 !text-[11px] opacity-0 group-hover:opacity-100"
                 onClick={() => remove(n)}
                 data-testid={`note-delete-${n.id}`}
               >

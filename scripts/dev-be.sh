@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# dev-be.sh — run only the backend with the project-pinned Rust toolchain,
-# regardless of whether a system/brew Rust is earlier on PATH.
+# dev-be.sh — run the backend with hot reload via cargo-watch.
+# Re-runs the server on every change under crates/.
 
 set -eu
 
@@ -11,4 +11,9 @@ if [ -d "$HOME/.cargo/bin" ]; then PATH="$HOME/.cargo/bin:$PATH"; fi
 if [ -d "/opt/homebrew/opt/rustup/bin" ]; then PATH="/opt/homebrew/opt/rustup/bin:$PATH"; fi
 export PATH
 
-exec cargo run -p agentgrove-server
+if ! command -v cargo-watch >/dev/null 2>&1; then
+  echo "[dev-be] installing cargo-watch (one-time)..."
+  cargo install --locked cargo-watch
+fi
+
+exec cargo watch -q -c -w crates -s "cargo run -q -p agentgrove-server"

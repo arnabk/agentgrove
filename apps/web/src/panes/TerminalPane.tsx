@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -30,7 +30,7 @@ export default function TerminalPane() {
         } catch {
           break;
         }
-        await new Promise((r) => setTimeout(r, 250));
+        await new Promise((r) => setTimeout(r, 200));
       }
     };
     void loop();
@@ -38,9 +38,15 @@ export default function TerminalPane() {
 
   onMount(() => {
     term = new Terminal({
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+      fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 13,
-      theme: { background: "#0b0d10" },
+      lineHeight: 1.3,
+      theme: {
+        background: "var(--ag-bg-1)" as unknown as string,
+        foreground: "#e8ecf2",
+        cursor: "#7c5cff",
+      },
+      cursorBlink: true,
     });
     fit = new FitAddon();
     term.loadAddon(fit);
@@ -65,17 +71,21 @@ export default function TerminalPane() {
 
   return (
     <section data-testid="terminal-pane" class="flex flex-col h-full">
-      <header class="px-4 py-2 border-b border-[var(--ag-muted)] flex items-center gap-2">
+      <header class="h-11 px-3 flex items-center gap-2 border-b border-border bg-bg-1">
         <button
-          class="px-3 py-1 rounded bg-[var(--ag-accent)] text-white text-sm"
+          class="ag-btn ag-btn-primary"
           onClick={spawn}
           disabled={!!termId()}
           data-testid="term-spawn"
         >
-          {termId() ? `Session ${termId()!.slice(0, 8)}…` : "Open terminal"}
+          ❯_ {termId() ? "Running" : "Open terminal"}
         </button>
+        <Show when={termId()}>
+          <span class="ag-chip font-mono">{termId()!.slice(0, 8)}</span>
+          <span class="ag-chip ag-chip-success">live</span>
+        </Show>
       </header>
-      <div ref={(el) => (host = el)} class="flex-1" data-testid="term-host" />
+      <div ref={(el) => (host = el)} class="flex-1 bg-bg-1" data-testid="term-host" />
     </section>
   );
 }

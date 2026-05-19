@@ -21,20 +21,24 @@ export default function Login() {
   }
 
   return (
-    <div class="min-h-screen flex items-center justify-center p-8">
+    <div class="min-h-screen flex items-center justify-center p-8 bg-bg">
       <form
         onSubmit={submit}
-        class="w-full max-w-md flex flex-col gap-4 bg-[var(--ag-bg-elev)] p-6 rounded-lg border border-[var(--ag-muted)]"
+        class="w-full max-w-sm rounded-xl border border-border bg-bg-1 p-7 shadow-2xl"
         data-testid="login-form"
       >
-        <h1 class="text-2xl font-semibold">AgentGrove</h1>
-        <p class="text-sm text-[var(--ag-muted)]">
-          Paste the token printed by <code>just start</code>.
+        <div class="flex items-center gap-2.5 mb-1">
+          <Logo />
+          <h1 class="text-base font-semibold tracking-tight text-fg">AgentGrove</h1>
+        </div>
+        <p class="text-[13px] text-fg-muted mb-5">
+          Paste the token printed by <code class="font-mono text-[12px] text-fg">just start</code>.
         </p>
+        <label class="block text-[12px] font-medium text-fg-muted mb-1.5">Bearer token</label>
         <input
           type="password"
-          placeholder="bearer token"
-          class="px-3 py-2 rounded bg-transparent border border-[var(--ag-muted)] focus:outline-none focus:border-[var(--ag-accent)]"
+          placeholder="•••••••••••••••••"
+          class="ag-input mb-4"
           value={token()}
           onInput={(e) => setToken(e.currentTarget.value)}
           aria-label="bearer token"
@@ -43,22 +47,41 @@ export default function Login() {
         />
         <button
           type="submit"
-          class="px-4 py-2 rounded bg-[var(--ag-accent)] text-white"
+          class="ag-btn ag-btn-primary w-full justify-center"
           data-testid="login-submit"
         >
           Connect
         </button>
         {err() && (
-          <p class="text-red-400 text-sm" data-testid="login-error">
+          <p class="mt-3 text-[12px] text-danger" data-testid="login-error">
             {err()}
           </p>
         )}
         {state.authError && !err() && (
-          <p class="text-red-400 text-sm" data-testid="login-server-error">
+          <p class="mt-3 text-[12px] text-danger" data-testid="login-server-error">
             {state.authError}
           </p>
         )}
       </form>
     </div>
+  );
+}
+
+function Logo() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 2 4 7v10l8 5 8-5V7l-8-5Z"
+        stroke="var(--ag-accent)"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M12 12 4 7m8 5 8-5m-8 5v10"
+        stroke="var(--ag-accent)"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+      />
+    </svg>
   );
 }

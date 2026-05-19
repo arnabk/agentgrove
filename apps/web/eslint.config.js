@@ -22,6 +22,7 @@ export default [
         HTMLDivElement: "readonly",
         HTMLInputElement: "readonly",
         HTMLSelectElement: "readonly",
+        HTMLTextAreaElement: "readonly",
         WebSocket: "readonly",
         URL: "readonly",
         Request: "readonly",

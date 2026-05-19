@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -23,20 +23,23 @@ export default function EditorPane() {
   const [path, setPath] = createSignal("");
   const [openPath, setOpenPath] = createSignal<string | null>(null);
   const [saved, setSaved] = createSignal<string | null>(null);
+  const [busy, setBusy] = createSignal(false);
   let view: EditorView | null = null;
 
   onMount(() => {
     view = new EditorView({
       parent: host,
       state: EditorState.create({
-        doc: "// Open a file to begin editing.",
+        doc: "",
         extensions: [
           lineNumbers(),
           history(),
           keymap.of([...defaultKeymap, ...historyKeymap]),
           oneDark,
           langComp.of([]),
-          EditorView.theme({ "&": { height: "100%", fontSize: "13px" } }),
+          EditorView.theme({
+            "&": { height: "100%", fontSize: "13px" },
+          }),
         ],
       }),
     });
@@ -48,20 +51,29 @@ export default function EditorPane() {
     ev.preventDefault();
     const p = path().trim();
     if (!p) return;
-    const f = await api.readFile(p);
-    setOpenPath(f.path);
-    view?.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: f.content },
-      effects: langComp.reconfigure(langFor(f.path)),
-    });
+    setBusy(true);
+    try {
+      const f = await api.readFile(p);
+      setOpenPath(f.path);
+      view?.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: f.content },
+        effects: langComp.reconfigure(langFor(f.path)),
+      });
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function save() {
     const p = openPath();
     if (!p || !view) return;
-    const content = view.state.doc.toString();
-    await api.writeFile(p, content);
-    setSaved(new Date().toLocaleTimeString());
+    setBusy(true);
+    try {
+      await api.writeFile(p, view.state.doc.toString());
+      setSaved(new Date().toLocaleTimeString());
+    } finally {
+      setBusy(false);
+    }
   }
 
   createEffect(() => {
@@ -71,36 +83,40 @@ export default function EditorPane() {
 
   return (
     <section data-testid="editor-pane" class="flex flex-col h-full">
-      <header class="px-4 py-2 border-b border-[var(--ag-muted)] flex items-center gap-2">
+      <header class="h-11 px-3 flex items-center gap-2 border-b border-border bg-bg-1">
         <form onSubmit={open} class="flex-1 flex gap-2" data-testid="editor-open-form">
           <input
-            class="flex-1 px-2 py-1 rounded bg-transparent border border-[var(--ag-muted)] text-sm"
-            placeholder="absolute file path"
+            class="ag-input font-mono"
+            placeholder="/absolute/path/to/file"
             value={path()}
             onInput={(e) => setPath(e.currentTarget.value)}
             data-testid="editor-path"
           />
           <button
             type="submit"
-            class="px-3 py-1 rounded bg-[var(--ag-accent)] text-white text-sm"
+            class="ag-btn ag-btn-secondary"
+            disabled={busy()}
             data-testid="editor-open"
           >
             Open
           </button>
         </form>
         <button
-          class="px-3 py-1 rounded border border-[var(--ag-muted)] text-sm"
+          class="ag-btn ag-btn-primary"
           onClick={save}
-          disabled={!openPath()}
+          disabled={!openPath() || busy()}
           data-testid="editor-save"
         >
-          Save
+          Save{" "}
+          <span class="ag-kbd !bg-transparent !border-transparent text-[var(--ag-accent-fg)] opacity-80">
+            ⌘S
+          </span>
         </button>
-        {saved() && (
-          <span class="text-xs text-emerald-400" data-testid="editor-saved-at">
+        <Show when={saved()}>
+          <span class="ag-chip ag-chip-success" data-testid="editor-saved-at">
             saved {saved()}
           </span>
-        )}
+        </Show>
       </header>
       <div ref={(el) => (host = el)} class="flex-1" data-testid="editor-host" />
     </section>

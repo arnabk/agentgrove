@@ -24,23 +24,23 @@ fn builtin() -> Vec<Theme> {
     vec![
         Theme {
             id: "dark-default".into(),
-            name: "Dark".into(),
+            name: "AgentGrove Dark".into(),
             kind: "dark".into(),
             colors: ThemeColors {
-                bg: "#0b0d10".into(),
-                fg: "#e7e9ee".into(),
-                muted: "#6b7280".into(),
+                bg: "#0e1014".into(),
+                fg: "#e8ecf2".into(),
+                muted: "#98a2b3".into(),
                 accent: "#7c5cff".into(),
             },
         },
         Theme {
             id: "light-default".into(),
-            name: "Light".into(),
+            name: "AgentGrove Light".into(),
             kind: "light".into(),
             colors: ThemeColors {
-                bg: "#ffffff".into(),
-                fg: "#0b0d10".into(),
-                muted: "#6b7280".into(),
+                bg: "#fafafa".into(),
+                fg: "#0e1014".into(),
+                muted: "#4b5563".into(),
                 accent: "#5b3df5".into(),
             },
         },

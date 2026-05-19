@@ -118,9 +118,12 @@ export function setTheme(themeId: string) {
   if (!t) return;
   const root = document.documentElement;
   root.setAttribute("data-theme", t.kind);
+  // Switch the active background/foreground; the rest of the surface
+  // scale derives from these in styles.css via the [data-theme="*"]
+  // selectors. We additionally let the theme override the accent.
   root.style.setProperty("--ag-bg", t.colors.bg);
   root.style.setProperty("--ag-fg", t.colors.fg);
-  root.style.setProperty("--ag-muted", t.colors.muted);
+  root.style.setProperty("--ag-fg-muted", t.colors.muted);
   root.style.setProperty("--ag-accent", t.colors.accent);
   localStorage.setItem("ag-theme", themeId);
 }
