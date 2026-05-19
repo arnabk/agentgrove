@@ -1,0 +1,88 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/agentgrove-core",
+    "crates/agentgrove-store",
+    "crates/agentgrove-git",
+    "crates/agentgrove-pty",
+    "crates/agentgrove-fswatch",
+    "crates/agentgrove-agents",
+    "crates/agentgrove-api",
+    "crates/agentgrove-server",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/agentgrove/agentgrove"
+homepage = "https://github.com/agentgrove/agentgrove"
+authors = ["AgentGrove contributors"]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.41", features = ["full"] }
+tokio-util = "0.7"
+futures = "0.3"
+async-trait = "0.1"
+
+# HTTP / WS
+axum = { version = "0.7", features = ["ws", "macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors", "fs", "auth"] }
+hyper = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+
+# Serde + schemas
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "0.8"
+utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
+
+# Errors / logging
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# IDs / time
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# DB
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "sqlite", "macros", "migrate", "chrono", "uuid"] }
+
+# Git / FS / PTY (cross-platform)
+gix = { version = "0.66", default-features = false, features = ["max-performance-safe"] }
+notify = "6"
+notify-debouncer-full = "0.3"
+portable-pty = "0.8"
+
+# Paths / dirs
+directories-next = "2"
+which = "6"
+
+# Hashing
+sha2 = "0.10"
+hex = "0.4"
+
+# Testing
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"
+insta = { version = "1", features = ["json", "yaml"] }
+proptest = "1"
+rstest = "0.23"
+tokio-tungstenite = "0.24"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = 1

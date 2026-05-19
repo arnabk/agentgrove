@@ -1,0 +1,16 @@
+[package]
+name = "agentgrove-git"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Git operations (worktrees, diff, status) via gix."
+
+[dependencies]
+agentgrove-core = { path = "../agentgrove-core" }
+gix = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

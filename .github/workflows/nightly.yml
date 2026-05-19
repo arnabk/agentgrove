@@ -1,0 +1,61 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cross-platform:
+    name: live e2e ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm -C apps/web exec playwright install --with-deps chromium
+      - name: Live E2E (POSIX)
+        if: runner.os != 'Windows'
+        run: bash scripts/test-live.sh
+      - name: Live E2E (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/test-live.ps1
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.os }}
+          path: apps/web/playwright-report
+
+  fe-cross-browser:
+    name: playwright firefox + webkit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm -C apps/web exec playwright install --with-deps
+      - run: cargo build --release -p agentgrove-server
+      - run: pnpm -C apps/web build
+      - run: pnpm -C apps/web exec playwright test --project=firefox
+        continue-on-error: true
+      - run: pnpm -C apps/web exec playwright test --project=webkit
+        continue-on-error: true

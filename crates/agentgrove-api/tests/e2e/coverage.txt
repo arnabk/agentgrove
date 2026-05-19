@@ -1,0 +1,4 @@
+# Canonical list of routes covered by L4 BE endpoint tests.
+# Add a line here only after writing a test that hits the route.
+GET /health
+GET /whoami

@@ -1,0 +1,36 @@
+# Rust
+/target
+**/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# Node
+node_modules
+.pnpm-store
+dist
+.vite
+coverage
+.nyc_output
+playwright-report
+test-results
+.playwright
+
+# Editors / OS
+.idea
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+*.swp
+
+# Local state
+.data/
+.agentgrove
+*.sqlite
+*.sqlite-*
+blobs/
+
+# Env
+.env
+.env.*
+!.env.example

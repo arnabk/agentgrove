@@ -1,0 +1,18 @@
+[package]
+name = "agentgrove-fswatch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Debounced filesystem watcher via notify-rs."
+
+[dependencies]
+notify = { workspace = true }
+notify-debouncer-full = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true }

@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ag-bg: #0b0d10;
+  --ag-fg: #e7e9ee;
+  --ag-muted: #6b7280;
+  --ag-accent: #7c5cff;
+}
+
+[data-theme="light"] {
+  --ag-bg: #ffffff;
+  --ag-fg: #0b0d10;
+  --ag-muted: #6b7280;
+  --ag-accent: #5b3df5;
+}
