@@ -17,8 +17,19 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@codemirror/commands": "^6.7.1",
+    "@codemirror/lang-javascript": "^6.2.2",
+    "@codemirror/lang-json": "^6.0.1",
+    "@codemirror/lang-markdown": "^6.3.1",
+    "@codemirror/lang-rust": "^6.0.1",
+    "@codemirror/merge": "^6.7.4",
+    "@codemirror/state": "^6.5.1",
+    "@codemirror/theme-one-dark": "^6.1.2",
+    "@codemirror/view": "^6.36.1",
     "@kobalte/core": "^0.13.7",
     "@solidjs/router": "^0.15.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "solid-js": "^1.9.3"
   },
   "devDependencies": {

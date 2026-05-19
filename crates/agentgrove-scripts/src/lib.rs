@@ -52,9 +52,10 @@ pub enum ScriptError {
 }
 
 /// How the runner picks the OS shell.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum Shell {
     /// Auto-detect: `pwsh`/`powershell`/`cmd` on Windows; `$SHELL` else `sh` on Unix.
+    #[default]
     Auto,
     /// Use this absolute path. Caller-provided flag is `-c` on Unix or
     /// `/C` on Windows by default; override here for unusual shells.
@@ -64,12 +65,6 @@ pub enum Shell {
         /// Argument flag passed before the script body (e.g. "-c").
         flag: String,
     },
-}
-
-impl Default for Shell {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 fn resolve_shell(s: &Shell) -> Result<(PathBuf, String), ScriptError> {

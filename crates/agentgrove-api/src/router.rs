@@ -5,10 +5,12 @@ use crate::{
     terminal, themes, worktrees, ws,
 };
 use axum::{
+    http::Method,
     middleware,
     routing::{delete, get, post},
     Router,
 };
+use tower_http::cors::{Any, CorsLayer};
 
 /// Build the full router. Used by both the binary and L4 endpoint tests.
 pub fn build_router(state: AppState) -> Router {
@@ -75,9 +77,15 @@ pub fn build_router(state: AppState) -> Router {
             require_bearer,
         ));
 
+    let cors = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_headers(Any)
+        .allow_origin(Any);
+
     Router::new()
         .merge(public)
         .merge(protected)
+        .layer(cors)
         .with_state(state)
 }
 

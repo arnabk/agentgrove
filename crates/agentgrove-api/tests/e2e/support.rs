@@ -10,6 +10,7 @@ pub struct BeHarness {
     pub base_url: String,
     pub token: String,
     pub client: reqwest::Client,
+    #[allow(dead_code)]
     pub state_dir: std::path::PathBuf,
     _tmp: TempDir,
     _shutdown: tokio::sync::oneshot::Sender<()>,

@@ -1,28 +1,80 @@
-import { createEffect, createSignal } from "solid-js";
+import { For, Show, createEffect, onMount } from "solid-js";
+import { Dynamic } from "solid-js/web";
+import { api } from "./api/client";
+import Login from "./components/Login";
+import LeftRail from "./components/LeftRail";
+import ChatPane from "./panes/ChatPane";
+import EditorPane from "./panes/EditorPane";
+import DiffPane from "./panes/DiffPane";
+import TerminalPane from "./panes/TerminalPane";
+import QueuePane from "./panes/QueuePane";
+import NotesPane from "./panes/NotesPane";
+import { activePane, bootstrap, setActivePane, setTheme, state } from "./stores/app";
+
+const PANES = {
+  chat: ChatPane,
+  editor: EditorPane,
+  diff: DiffPane,
+  terminal: TerminalPane,
+  queue: QueuePane,
+  notes: NotesPane,
+};
+
+const PANE_LABELS: Record<keyof typeof PANES, string> = {
+  chat: "Chat",
+  editor: "Editor",
+  diff: "Diff",
+  terminal: "Terminal",
+  queue: "Queue",
+  notes: "Notes",
+};
 
 export default function App() {
-  const [theme, setTheme] = createSignal<"light" | "dark">("dark");
+  onMount(async () => {
+    const persisted = localStorage.getItem("ag-theme");
+    if (persisted) {
+      // Theme is applied after themes load via createEffect below.
+    }
+    if (api.getToken()) {
+      await bootstrap();
+    }
+  });
 
-  // Reflect theme on <html> so global CSS variable overrides take effect
-  // for <body> (which carries the Tailwind bg-bg / text-fg classes).
   createEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme());
+    if (state.themes.length > 0) {
+      const persisted = localStorage.getItem("ag-theme");
+      setTheme(persisted ?? state.themeId);
+    }
   });
 
   return (
-    <main data-testid="app-root" data-theme={theme()} class="min-h-screen p-8 flex flex-col gap-4">
-      <header class="flex items-center justify-between">
-        <h1 class="text-2xl font-semibold">AgentGrove</h1>
-        <button
-          type="button"
-          class="px-3 py-1 rounded border border-muted"
-          aria-label="Toggle theme"
-          onClick={() => setTheme(theme() === "dark" ? "light" : "dark")}
-        >
-          Theme: {theme()}
-        </button>
-      </header>
-      <p class="text-muted">Local-first agentic developer workspace.</p>
-    </main>
+    <Show when={api.getToken() && !state.authError} fallback={<Login />}>
+      <Show when={state.ready} fallback={<div class="p-8">Loading…</div>}>
+        <div class="flex h-screen" data-testid="app-root" data-theme="dark">
+          <LeftRail />
+          <main class="flex-1 flex flex-col min-w-0" data-testid="main-area">
+            <nav class="flex border-b border-[var(--ag-muted)]" data-testid="pane-tabs">
+              <For each={Object.keys(PANES) as Array<keyof typeof PANES>}>
+                {(k) => (
+                  <button
+                    class="px-4 py-2 text-sm border-r border-[var(--ag-muted)]"
+                    classList={{
+                      "bg-[var(--ag-accent)]/30": activePane() === k,
+                    }}
+                    onClick={() => setActivePane(k)}
+                    data-testid={`tab-${k}`}
+                  >
+                    {PANE_LABELS[k]}
+                  </button>
+                )}
+              </For>
+            </nav>
+            <div class="flex-1 min-h-0" data-testid={`pane-${activePane()}-host`}>
+              <Dynamic component={PANES[activePane()]} />
+            </div>
+          </main>
+        </div>
+      </Show>
+    </Show>
   );
 }
