@@ -11,6 +11,9 @@ description = "Git operations (worktrees, diff, status) via gix."
 agentgrove-core = { path = "../agentgrove-core" }
 gix = { workspace = true }
 thiserror = { workspace = true }
+which = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true }

@@ -24,3 +24,4 @@ Single source of truth. Root [`README.md`](../README.md) only points here.
   - [ADR-0001 TDD policy](./adr/0001-tdd-policy.md)
   - [ADR-0002 Frontend stack](./adr/0002-frontend-stack.md)
   - [ADR-0003 Cross-platform support](./adr/0003-cross-platform.md)
+  - [ADR-0004 Use git binary for worktree mutations](./adr/0004-git-binary-for-worktrees.md)
