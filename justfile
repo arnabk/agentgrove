@@ -66,6 +66,24 @@ coverage-fe:
 # Aggregate: mirrors PR CI.
 check: fmt-check lint typecheck test-unit test-component test-be-e2e test-fe-unit
 
-# Dev: run BE on ephemeral port + FE dev server.
-dev:
-    cargo run -p agentgrove-server
+# Dev: run only the BE.
+[unix]
+dev-be:
+    @bash {{justfile_directory()}}/scripts/dev-be.sh
+
+[windows]
+dev-be:
+    @pwsh {{justfile_directory()}}/scripts/dev-be.ps1
+
+# Dev: run only the FE.
+dev-fe:
+    pnpm -C apps/web dev
+
+# Start the full app (BE + FE) in one command. Cross-platform.
+[unix]
+start:
+    @bash {{justfile_directory()}}/scripts/start.sh
+
+[windows]
+start:
+    @pwsh {{justfile_directory()}}/scripts/start.ps1

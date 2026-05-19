@@ -29,3 +29,21 @@ See [running-tests.md](./running-tests.md).
 Every recipe in the `justfile` has a documented equivalent under
 `scripts/`. Use `scripts/<name>.sh` on Unix or `scripts/<name>.ps1` on
 Windows.
+
+## Rust toolchain notes (macOS)
+
+If you previously installed Rust via Homebrew (`brew install rust`),
+that ships an older cargo at `/opt/homebrew/bin/cargo` which will shadow
+rustup. AgentGrove pins a newer toolchain in `rust-toolchain.toml` and
+some transitive dependencies require Cargo 1.85+.
+
+The bundled scripts under `scripts/` (used by `just start`, `just dev-be`,
+etc.) automatically prepend the rustup toolchain to `PATH`, so they work
+regardless of brew Rust being installed.
+
+If you run `cargo` directly and hit `feature \`edition2024\` is required`,
+either:
+
+- prepend rustup to your shell PATH:
+  `export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`
+- or remove the brew rust: `brew uninstall rust`.
