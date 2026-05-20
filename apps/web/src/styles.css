@@ -724,3 +724,14 @@ textarea::placeholder {
   height: 0;
   pointer-events: none;
 }
+
+/* When .ag-prose is embedded inside another bubble (e.g. the chat
+   assistant reply), trim top/bottom margins so the first paragraph
+   sits flush against the bubble padding. Affects Markdown-rendered
+   chat output. */
+.ag-prose > :first-child {
+  margin-top: 0;
+}
+.ag-prose > :last-child {
+  margin-bottom: 0;
+}

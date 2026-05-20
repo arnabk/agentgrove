@@ -23,6 +23,7 @@ import {
   type Prompt,
 } from "../api/client";
 import { confirm } from "../components/dialog";
+import Markdown from "../components/Markdown";
 import {
   closeChatTab,
   currentScope,
@@ -606,12 +607,12 @@ function PromptRow(props: {
       </div>
       <Show when={assistantText() || tools().length > 0}>
         <div class="flex justify-start">
-          <div class="max-w-[80%] rounded-2xl rounded-bl-md bg-bg-1 border border-border text-[13.5px] leading-relaxed whitespace-pre-wrap px-4 py-2.5">
+          <div class="max-w-[80%] rounded-2xl rounded-bl-md bg-bg-1 border border-border text-[13.5px] leading-relaxed px-4 py-2.5">
             <Show
               when={assistantText()}
               fallback={<em class="text-fg-subtle">working…</em>}
             >
-              {assistantText()}
+              <Markdown source={assistantText()} />
             </Show>
             <For each={tools()}>{(ev) => <ToolBadge ev={ev} />}</For>
           </div>
