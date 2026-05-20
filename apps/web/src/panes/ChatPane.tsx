@@ -27,7 +27,7 @@ import {
 import ChatSettingsDialog from "../components/ChatSettingsDialog";
 import { confirm } from "../components/dialog";
 import Markdown from "../components/Markdown";
-import QueuePanel from "../components/QueuePanel";
+import QueueDrawer from "../components/QueueDrawer";
 import {
   closeChatTab,
   currentScope,
@@ -102,13 +102,47 @@ export default function ChatPane() {
   const [renameDraft, setRenameDraft] = createSignal("");
   // Per-chat settings dialog (model / effort / slash commands).
   const [chatSettingsOpen, setChatSettingsOpen] = createSignal(false);
-  // Queue panel visibility. Persisted across reloads so users who
+  // Queue drawer visibility. Persisted across reloads so users who
   // rely on it don't have to re-open after every refresh.
   const [queueOpen, setQueueOpen] = createSignal(
     localStorage.getItem("ag-chat-queue-open") === "1",
   );
   createEffect(() => {
     localStorage.setItem("ag-chat-queue-open", queueOpen() ? "1" : "0");
+  });
+  // Lightweight queue summary used to drive the header badge. Polled
+  // even while the drawer is closed so the count + status stay live.
+  const [queueSummary, setQueueSummary] = createSignal<{
+    total: number;
+    pending: number;
+    running: number;
+  } | null>(null);
+  createEffect(() => {
+    const id = activeId();
+    if (!id) {
+      setQueueSummary(null);
+      return;
+    }
+    let cancelled = false;
+    async function poll() {
+      try {
+        const q = await api.getQueue(id!);
+        if (cancelled) return;
+        setQueueSummary({
+          total: q.items.length,
+          pending: q.items.filter((i) => i.status === "pending").length,
+          running: q.items.filter((i) => i.status === "running").length,
+        });
+      } catch {
+        // ignore — badge is best-effort
+      }
+    }
+    void poll();
+    const handle = setInterval(() => void poll(), 2000);
+    onCleanup(() => {
+      cancelled = true;
+      clearInterval(handle);
+    });
   });
 
   const scope = () => currentScope();
@@ -569,6 +603,26 @@ export default function ChatPane() {
             </Show>
           </button>
         </Show>
+        <Show when={activeId() && (queueSummary()?.total ?? 0) > 0}>
+          <button
+            type="button"
+            class="ml-1 ag-chip flex items-center gap-1 hover:bg-bg-3"
+            classList={{
+              "!border-accent": (queueSummary()?.running ?? 0) > 0,
+            }}
+            onClick={() => setQueueOpen(!queueOpen())}
+            title={`Queue: ${queueSummary()?.pending ?? 0} pending, ${queueSummary()?.running ?? 0} running, ${queueSummary()?.total ?? 0} total`}
+            data-testid="chat-queue-badge"
+          >
+            <span class="text-fg-subtle">⏳ queue</span>
+            <span class="text-fg font-mono">
+              {queueSummary()?.pending ?? 0}
+            </span>
+            <Show when={(queueSummary()?.running ?? 0) > 0}>
+              <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+            </Show>
+          </button>
+        </Show>
         <Show when={err()}>
           <span
             class="ml-auto text-[11.5px] text-danger"
@@ -591,10 +645,10 @@ export default function ChatPane() {
       />
 
       <Show when={activeId()}>
-        <QueuePanel
+        <QueueDrawer
           chatId={activeId()!}
           open={queueOpen()}
-          onToggle={(v) => setQueueOpen(v)}
+          onClose={() => setQueueOpen(false)}
         />
       </Show>
 
