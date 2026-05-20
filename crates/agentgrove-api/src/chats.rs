@@ -579,14 +579,65 @@ pub async fn add_prompt(
         dispatch_echo(&state, &id, &prompt, &topic, &body.content).await;
     }
 
-    // TODO: auto-drain the chat's queue when mode=auto. Naively
-    // recursing into add_prompt here trips Rust's Send bound on the
-    // resulting future (the async-trait provider impls aren't Send-
-    // safe to call inside a tokio::spawn). The cleanest fix is to
-    // refactor dispatch_via_provider into a sync-runnable form or to
-    // run the drain through a queue-worker task. Tracked in the
-    // backlog; for now, /api/chats/:id/queue/next still pops items
-    // on-demand.
+    // Auto-drain: while the chat is in auto mode and the queue has
+    // pending items, pop them one at a time and dispatch through the
+    // same provider/echo path used above. We drain inline (still
+    // holding the original HTTP request open) rather than spawning a
+    // worker task so the existing per-chat ordering is preserved and
+    // the FE's `busy` signal stays accurate end-to-end.
+    //
+    // The loop fetches the latest chat record each iteration so
+    // session_id updates captured during a turn (Claude resume token)
+    // carry forward to the next drained prompt.
+    while state.queues.read().await.is_auto(&id) {
+        let next_item = state.queues.write().await.pop_next_pending(&id);
+        let Some(item) = next_item else { break };
+
+        let (drain_prompt, drain_provider_id, drain_model, drain_session, drain_effort, drain_cwd) = {
+            let mut reg = state.chats.write().await;
+            let chat = match reg.get(&id) {
+                Some(c) => c.clone(),
+                None => break,
+            };
+            let Some(p) = reg.add_prompt(&id, item.body.clone()) else {
+                break;
+            };
+            let cwd = resolve_cwd(&state, &chat).await;
+            (
+                p,
+                chat.provider.clone(),
+                chat.model.clone(),
+                chat.session_id.clone(),
+                chat.effort.clone(),
+                cwd,
+            )
+        };
+        let drain_topic = format!("chat:{id}");
+        let drain_provider = state.providers.get(&drain_provider_id);
+        if let Some(p) = drain_provider {
+            dispatch_via_provider(
+                &state,
+                &id,
+                &drain_prompt,
+                &drain_topic,
+                p,
+                &item.body,
+                &drain_model,
+                drain_session,
+                drain_effort,
+                drain_cwd,
+            )
+            .await;
+        } else {
+            dispatch_echo(&state, &id, &drain_prompt, &drain_topic, &item.body).await;
+        }
+        state.queues.write().await.mark_done(&id, &item.id);
+        // Notify FE so the timeline + queue panel refresh together.
+        state.logbus.publish(
+            &drain_topic,
+            serde_json::json!({ "queue_dispatched": item.id }).to_string(),
+        );
+    }
 
     Ok(Json(prompt))
 }

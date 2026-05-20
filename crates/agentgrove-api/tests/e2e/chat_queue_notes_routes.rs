@@ -462,3 +462,130 @@ async fn patch_chat_rejects_empty_model() {
         .unwrap();
     assert_eq!(res.status(), 400);
 }
+
+#[tokio::test]
+async fn queue_auto_drains_pending_items_after_send() {
+    let h = BeHarness::start().await;
+    // Use a fake/echo chat so the dispatch is synchronous and the
+    // inline auto-drain finishes before the HTTP response returns.
+    let chat: Value = h
+        .post_auth("/api/worktrees/wt-drain/chats")
+        .json(&json!({"title":"drain","provider":"fake","model":"echo"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let chat_id = chat["id"].as_str().unwrap().to_owned();
+
+    // Pre-queue two items while no turn is in flight (mode defaults
+    // to auto).
+    for body in ["alpha", "beta"] {
+        let res = h
+            .post_auth(&format!("/api/chats/{chat_id}/queue"))
+            .json(&json!({"body": body}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+    }
+
+    // Fire a normal prompt. The handler dispatches it, then auto-drains
+    // the queue inline before returning.
+    let res = h
+        .post_auth(&format!("/api/chats/{chat_id}/prompts"))
+        .json(&json!({"content":"first"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    // Chat now has 3 prompts: first + alpha + beta.
+    let view: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let prompts = view["prompts"].as_array().unwrap();
+    assert_eq!(prompts.len(), 3, "expected first + 2 drained, got {:?}",
+        prompts.iter().map(|p| &p["content"]).collect::<Vec<_>>());
+    assert_eq!(prompts[0]["content"], "first");
+    assert_eq!(prompts[1]["content"], "alpha");
+    assert_eq!(prompts[2]["content"], "beta");
+
+    // Queue state: both items marked done.
+    let q: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}/queue"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let items = q["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    for it in items {
+        assert_eq!(it["status"], "done", "expected done, got {:?}", it);
+    }
+}
+
+#[tokio::test]
+async fn queue_manual_mode_does_not_auto_drain() {
+    let h = BeHarness::start().await;
+    let chat: Value = h
+        .post_auth("/api/worktrees/wt-manual/chats")
+        .json(&json!({"title":"m","provider":"fake","model":"echo"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let chat_id = chat["id"].as_str().unwrap().to_owned();
+
+    // Flip to manual.
+    let res = h
+        .post_auth(&format!("/api/chats/{chat_id}/queue/mode"))
+        .json(&json!({"mode":"manual"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 204);
+
+    h.post_auth(&format!("/api/chats/{chat_id}/queue"))
+        .json(&json!({"body":"x"}))
+        .send()
+        .await
+        .unwrap();
+
+    // Normal send: should NOT drain.
+    h.post_auth(&format!("/api/chats/{chat_id}/prompts"))
+        .json(&json!({"content":"hi"}))
+        .send()
+        .await
+        .unwrap();
+
+    let view: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(view["prompts"].as_array().unwrap().len(), 1);
+
+    let q: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}/queue"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(q["items"][0]["status"], "pending");
+}
