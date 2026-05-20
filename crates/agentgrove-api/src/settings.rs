@@ -6,6 +6,20 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tokio::fs;
 
+/// A reusable prompt template. Users define these once and pick from
+/// them in the chat input. Bodies can contain any text; the FE simply
+/// inserts the body verbatim at the cursor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptTemplate {
+    /// Stable id (uuid). Kept on update so existing references in
+    /// the FE survive renames.
+    pub id: String,
+    /// Short human label shown in the picker.
+    pub name: String,
+    /// Body text inserted into the chat input on selection.
+    pub body: String,
+}
+
 /// User-tunable preferences. All fields optional in the JSON form so we
 /// can extend without breaking existing files.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -22,6 +36,10 @@ pub struct Settings {
     /// Base UI font size in px.
     #[serde(default)]
     pub font_size: Option<u32>,
+    /// User-defined reusable prompt templates. Order is preserved so
+    /// the FE picker shows them as the user arranged them.
+    #[serde(default)]
+    pub prompts: Vec<PromptTemplate>,
 }
 
 fn settings_path(state_dir: &std::path::Path) -> PathBuf {

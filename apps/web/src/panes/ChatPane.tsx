@@ -5,6 +5,7 @@ import {
   createMemo,
   createSignal,
   onCleanup,
+  onMount,
 } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import { createVirtualizer } from "@tanstack/solid-virtual";
@@ -63,6 +64,10 @@ interface ChatStore {
    *  prompt's events array so we avoid re-walking thousands of events
    *  on every keystroke. */
   liveTokens: Record<string, string>;
+  /** Live thinking accumulators keyed by promptId. Same shape as
+   *  liveTokens but separate so the thinking and answer streams
+   *  don't collide while both are arriving. */
+  liveThinking: Record<string, string>;
   /** True when a backfill request is in flight. */
   loadingOlder: boolean;
   /** True when there are no more older prompts to load. */
@@ -73,6 +78,7 @@ const freshChatStore = (): ChatStore => ({
   view: null,
   prompts: [],
   liveTokens: {},
+  liveThinking: {},
   loadingOlder: false,
   atStart: false,
 });
@@ -222,6 +228,9 @@ export default function ChatPane() {
       }
     }
     for (const live of Object.values(chatStore.liveTokens)) {
+      bytes += estimateStringBytes(live);
+    }
+    for (const live of Object.values(chatStore.liveThinking)) {
       bytes += estimateStringBytes(live);
     }
     recordMemoryUsage("chat.activeView", bytes);
@@ -499,6 +508,7 @@ export default function ChatPane() {
       <VirtualizedTimeline
         prompts={chatStore.prompts}
         liveTokens={chatStore.liveTokens}
+        liveThinking={chatStore.liveThinking}
         atStart={chatStore.atStart}
         loadingOlder={chatStore.loadingOlder}
         onLoadOlder={() => void loadOlder()}
@@ -586,6 +596,24 @@ export default function ChatPane() {
               if (files.length > 0) void uploadFileList(files);
             }}
           />
+          <PromptsPicker
+            onInsert={(body) => {
+              const ta = document.querySelector<HTMLTextAreaElement>(
+                '[data-testid="chat-input"]',
+              );
+              if (!ta) return;
+              const start = ta.selectionStart;
+              const end = ta.selectionEnd;
+              const newValue =
+                ta.value.slice(0, start) + body + ta.value.slice(end);
+              ta.value = newValue;
+              setInput(newValue);
+              const caret = start + body.length;
+              ta.focus();
+              ta.setSelectionRange(caret, caret);
+              autoResizeTextarea(ta);
+            }}
+          />
           <textarea
             rows="3"
             class="ag-input resize-none max-h-60 min-h-[3.2em] flex-1 leading-relaxed"
@@ -643,6 +671,7 @@ export default function ChatPane() {
 function VirtualizedTimeline(props: {
   prompts: Prompt[];
   liveTokens: Record<string, string>;
+  liveThinking: Record<string, string>;
   atStart: boolean;
   loadingOlder: boolean;
   onLoadOlder: () => void;
@@ -681,12 +710,15 @@ function VirtualizedTimeline(props: {
     prevFirstId = firstId;
   });
 
-  // Live token deltas grow the active prompt's text — make sure the
-  // virtualizer re-measures its row.
+  // Live token / thinking deltas grow the active prompt's bubble —
+  // tell the virtualizer to re-measure so the row height stays in
+  // sync.
   createEffect(() => {
-    // Touch the liveTokens map so the effect re-runs on append.
+    // Touch both maps so the effect re-runs on append.
     void Object.keys(props.liveTokens).length;
     void Object.values(props.liveTokens).reduce((n, s) => n + s.length, 0);
+    void Object.keys(props.liveThinking).length;
+    void Object.values(props.liveThinking).reduce((n, s) => n + s.length, 0);
     virtualizer.measure();
   });
 
@@ -734,6 +766,7 @@ function VirtualizedTimeline(props: {
                 <PromptRow
                   prompt={prompt}
                   liveToken={props.liveTokens[prompt.id]}
+                  liveThinking={props.liveThinking[prompt.id]}
                   onRevert={() => props.onRevert(prompt)}
                 />
               </div>
@@ -750,6 +783,7 @@ function VirtualizedTimeline(props: {
 function PromptRow(props: {
   prompt: Prompt;
   liveToken: string | undefined;
+  liveThinking: string | undefined;
   onRevert: () => void;
 }) {
   function assistantText(): string {
@@ -757,6 +791,19 @@ function PromptRow(props: {
     let out = "";
     for (const ev of props.prompt.events) {
       if (ev.type === "token") out += ev.text;
+    }
+    return out;
+  }
+
+  /** Concatenate the model's thinking trace (extended-thinking
+   *  output). Prefers the in-flight live buffer over walking the
+   *  events array. Returns the empty string when the model wasn't
+   *  asked to think (or doesn't support it). */
+  function thinkingText(): string {
+    if (props.liveThinking !== undefined) return props.liveThinking;
+    let out = "";
+    for (const ev of props.prompt.events) {
+      if (ev.type === "thinking") out += ev.text;
     }
     return out;
   }
@@ -771,6 +818,10 @@ function PromptRow(props: {
     );
   }
 
+  // Thinking blocks collapse by default — they're verbose and most
+  // users don't want them in the way. Sticky to true once expanded.
+  const [thinkingOpen, setThinkingOpen] = createSignal(false);
+
   return (
     <article
       class="space-y-3 group py-2.5"
@@ -781,6 +832,26 @@ function PromptRow(props: {
           {props.prompt.content}
         </div>
       </div>
+      <Show when={thinkingText()}>
+        <div class="flex justify-start">
+          <details
+            class="max-w-[80%] w-full rounded-xl bg-bg-2/40 border border-dashed border-border text-[12.5px] px-3 py-2 text-fg-muted"
+            data-testid={`thinking-${props.prompt.id}`}
+            open={thinkingOpen()}
+            onToggle={(e) => setThinkingOpen(e.currentTarget.open)}
+          >
+            <summary class="cursor-pointer select-none text-[11.5px] uppercase tracking-wide text-fg-subtle">
+              ✦ Thinking{" "}
+              <span class="text-fg-subtle">
+                ({fmtBytes(thinkingText().length)})
+              </span>
+            </summary>
+            <div class="mt-2 ag-prose">
+              <Markdown source={thinkingText()} />
+            </div>
+          </details>
+        </div>
+      </Show>
       <Show when={assistantText() || tools().length > 0}>
         <div class="flex justify-start">
           <div class="max-w-[80%] rounded-2xl rounded-bl-md bg-bg-1 border border-border text-[13.5px] leading-relaxed px-4 py-2.5">
@@ -903,6 +974,106 @@ function onChatInputKeyDown(
       }
     }
   }
+}
+
+/** Popover button that lists the user's saved prompt templates and
+ *  inserts the chosen body at the chat-input cursor. Uses the
+ *  existing `state.settings.prompts` (managed in Settings → Prompts).
+ *  No prompts -> the button is still rendered but disabled with a
+ *  hint pointing the user at the settings tab. */
+function PromptsPicker(props: { onInsert: (body: string) => void }) {
+  const [open, setOpen] = createSignal(false);
+  let rootEl: HTMLDivElement | undefined;
+
+  function onDocDown(e: MouseEvent) {
+    if (!open()) return;
+    if (rootEl && !rootEl.contains(e.target as Node)) setOpen(false);
+  }
+  onMount(() => document.addEventListener("mousedown", onDocDown));
+  onCleanup(() => document.removeEventListener("mousedown", onDocDown));
+
+  const prompts = () => state.settings.prompts ?? [];
+
+  return (
+    <div ref={(el) => (rootEl = el)} class="relative">
+      <button
+        type="button"
+        class="ag-btn ag-btn-ghost ag-btn-icon"
+        title={
+          prompts().length > 0
+            ? "Insert a saved prompt"
+            : "No prompts saved yet — add some in Settings → Prompts"
+        }
+        aria-label="Insert prompt"
+        data-testid="chat-prompts-toggle"
+        onClick={() => setOpen(!open())}
+      >
+        <SparkleIcon />
+      </button>
+      <Show when={open()}>
+        <div
+          class="absolute bottom-full left-0 mb-2 w-72 max-h-72 overflow-y-auto rounded-lg border border-border bg-bg-1 shadow-2xl z-30"
+          data-testid="chat-prompts-menu"
+        >
+          <div class="px-3 py-2 border-b border-border text-[11.5px] uppercase tracking-wider text-fg-subtle">
+            Saved prompts
+          </div>
+          <Show
+            when={prompts().length > 0}
+            fallback={
+              <p class="px-3 py-3 text-[12.5px] text-fg-subtle">
+                No prompts yet. Open Settings → Prompts to add one.
+              </p>
+            }
+          >
+            <ul>
+              <For each={prompts()}>
+                {(p) => (
+                  <li>
+                    <button
+                      type="button"
+                      class="w-full text-left px-3 py-2 hover:bg-bg-2 border-b border-border last:border-b-0"
+                      onClick={() => {
+                        props.onInsert(p.body);
+                        setOpen(false);
+                      }}
+                      data-testid={`chat-prompt-pick-${p.id}`}
+                    >
+                      <div class="text-[12.5px] font-medium text-fg truncate">
+                        {p.name}
+                      </div>
+                      <div class="text-[11px] text-fg-subtle truncate">
+                        {p.body.split("\n")[0] || "(empty)"}
+                      </div>
+                    </button>
+                  </li>
+                )}
+              </For>
+            </ul>
+          </Show>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+/** Lucide `sparkles` — used by the prompts picker button. */
+function SparkleIcon() {
+  return (
+    <svg
+      width="1em"
+      height="1em"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6 7.7 7.7M16.3 16.3l2.1 2.1M5.6 18.4 7.7 16.3M16.3 7.7l2.1-2.1" />
+    </svg>
+  );
 }
 
 /** Lucide `paperclip` — used by the chat input's attach button. */
@@ -1037,14 +1208,19 @@ function applyWsFrame(s: ChatStore, frame: WsFrame): void {
     s.liveTokens[promptId] = (s.liveTokens[promptId] ?? "") + ev.text;
     return;
   }
+  if (ev.type === "thinking") {
+    s.liveThinking[promptId] = (s.liveThinking[promptId] ?? "") + ev.text;
+    return;
+  }
   const idx = s.prompts.findIndex((p) => p.id === promptId);
   if (idx < 0) return;
   const prompt = s.prompts[idx]!;
   prompt.events.push(ev);
   if (ev.type === "done" || ev.type === "error") {
-    // Stream finished — drop the live buffer so PromptRow falls back
-    // to the events array (which holds the canonical, persisted text).
+    // Stream finished — drop the live buffers so PromptRow falls
+    // back to the events array (canonical, persisted text).
     delete s.liveTokens[promptId];
+    delete s.liveThinking[promptId];
   }
 }
 

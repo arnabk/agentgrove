@@ -464,12 +464,21 @@ export interface Scratchpad {
   updated_at: string;
 }
 
+/** A reusable prompt template the user can insert into a chat. */
+export interface PromptTemplate {
+  id: string;
+  name: string;
+  body: string;
+}
+
 /** User preferences persisted at <state_dir>/settings.json on the BE. */
 export interface UserSettings {
   theme?: string;
   ui_font?: string;
   mono_font?: string;
   font_size?: number;
+  /** User-defined reusable prompt templates. */
+  prompts?: PromptTemplate[];
 }
 
 export interface TreeEntry {
