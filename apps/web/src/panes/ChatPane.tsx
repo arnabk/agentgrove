@@ -23,9 +23,7 @@ import {
   type Prompt,
 } from "../api/client";
 import { confirm } from "../components/dialog";
-import NewChatDialog from "../components/NewChatDialog";
 import {
-  addChatTab,
   closeChatTab,
   currentScope,
   currentWorktreeId,
@@ -86,9 +84,6 @@ export default function ChatPane() {
   // `renameDraft` holds the in-flight input value.
   const [renamingId, setRenamingId] = createSignal<string | null>(null);
   const [renameDraft, setRenameDraft] = createSignal("");
-  // New-chat dialog visibility. The dialog itself handles provider /
-  // model selection and the POST call.
-  const [newChatOpen, setNewChatOpen] = createSignal(false);
 
   const scope = () => currentScope();
   const tabs = () => scope()?.chats ?? [];
@@ -223,12 +218,6 @@ export default function ChatPane() {
     }
     recordMemoryUsage("chat.activeView", bytes);
   });
-
-  function openNewChatDialog() {
-    if (!state.selectedProjectId) return;
-    setErr(null);
-    setNewChatOpen(true);
-  }
 
   function startRename(id: string, current: string) {
     setRenamingId(id);
@@ -404,15 +393,6 @@ export default function ChatPane() {
             </div>
           )}
         </For>
-        <button
-          class="ag-btn ag-btn-ghost ag-btn-sm ml-1"
-          onClick={() => openNewChatDialog()}
-          disabled={!state.selectedProjectId}
-          title="New chat in this scope"
-          data-testid="chat-new"
-        >
-          + New
-        </button>
         <Show when={chat()}>
           <span class="ml-2 ag-chip ag-chip-accent" data-testid="chat-provider">
             {chat()!.provider}/{chat()!.model}
@@ -471,19 +451,6 @@ export default function ChatPane() {
           </span>
         </button>
       </form>
-
-      <Show when={newChatOpen()}>
-        <NewChatDialog
-          projectId={state.selectedProjectId!}
-          worktreeId={currentWorktreeId()}
-          defaultTitle={`chat ${tabs().length + 1}`}
-          onCancel={() => setNewChatOpen(false)}
-          onCreated={(chat) => {
-            addChatTab({ id: chat.id, title: chat.title });
-            setNewChatOpen(false);
-          }}
-        />
-      </Show>
     </section>
   );
 }
