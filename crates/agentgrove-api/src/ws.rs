@@ -30,10 +30,16 @@ pub async fn handler(
 }
 
 async fn handle_socket(mut socket: WebSocket, state: AppState, topic: String) {
-    let mut rx = state.logbus.subscribe(&topic);
+    let (mut rx, history) = state.logbus.subscribe(&topic);
     let _ = socket
         .send(Message::Text(format!("{{\"subscribed\":\"{topic}\"}}")))
         .await;
+    // Replay any buffered history so a late subscriber catches up.
+    for entry in history {
+        if socket.send(Message::Text(entry)).await.is_err() {
+            return;
+        }
+    }
     loop {
         tokio::select! {
             msg = rx.recv() => {

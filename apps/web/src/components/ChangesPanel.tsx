@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { MergeView } from "@codemirror/merge";
-import { EditorView } from "@codemirror/view";
+import { EditorView, lineNumbers } from "@codemirror/view";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { api, type GitStatusEntry } from "../api/client";
 import { changesScope, setChangesScope } from "../stores/app";
@@ -14,13 +14,31 @@ import { changesScope, setChangesScope } from "../stores/app";
  * Mounted at the App-shell level and shown whenever `changesScope` is
  * non-null. Closing it sets `changesScope(null)`.
  */
+/** Persisted toggle for soft-wrapping long lines in the diff view. */
+const WRAP_LS_KEY = "ag-changes-wrap";
+
 export default function ChangesPanel() {
   const [entries, setEntries] = createSignal<GitStatusEntry[]>([]);
   const [selected, setSelected] = createSignal<string | null>(null);
   const [err, setErr] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
+  const [wrap, setWrap] = createSignal(localStorage.getItem(WRAP_LS_KEY) !== "0");
   let host: HTMLDivElement | undefined;
   let view: MergeView | null = null;
+
+  function commonExts() {
+    const exts = [
+      oneDark,
+      lineNumbers(),
+      EditorView.editable.of(false),
+      EditorView.theme({
+        "&": { height: "100%" },
+        ".cm-scroller": { fontFamily: "var(--ag-font-mono)" },
+      }),
+    ];
+    if (wrap()) exts.push(EditorView.lineWrapping);
+    return exts;
+  }
 
   async function refresh() {
     const scope = changesScope();
@@ -64,8 +82,8 @@ export default function ChangesPanel() {
       if (!host) return;
       view = new MergeView({
         parent: host,
-        a: { doc: d.head, extensions: [oneDark, EditorView.editable.of(false)] },
-        b: { doc: d.working, extensions: [oneDark, EditorView.editable.of(false)] },
+        a: { doc: d.head, extensions: commonExts() },
+        b: { doc: d.working, extensions: commonExts() },
       });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -81,6 +99,16 @@ export default function ChangesPanel() {
     tearDownView();
     setSelected(null);
     void refresh();
+  });
+
+  // Rebuild the diff view when the wrap toggle changes so the new
+  // extensions take effect. CodeMirror MergeView extensions are
+  // immutable once attached; the cheapest reliable refresh is to
+  // recreate it.
+  createEffect(() => {
+    void wrap();
+    const sel = selected();
+    if (sel) void openDiff(sel);
   });
 
   onCleanup(() => tearDownView());
@@ -121,6 +149,21 @@ export default function ChangesPanel() {
           <button
             type="button"
             class="ag-btn ag-btn-ghost ag-btn-sm ml-auto"
+            classList={{ "!bg-bg-3 !text-fg": wrap() }}
+            onClick={() => {
+              const next = !wrap();
+              setWrap(next);
+              localStorage.setItem(WRAP_LS_KEY, next ? "1" : "0");
+            }}
+            title={wrap() ? "Disable line wrapping" : "Enable line wrapping"}
+            aria-pressed={wrap()}
+            data-testid="changes-wrap"
+          >
+            ↩ wrap
+          </button>
+          <button
+            type="button"
+            class="ag-btn ag-btn-ghost ag-btn-sm"
             onClick={() => void refresh()}
             disabled={loading()}
             title="Refresh"

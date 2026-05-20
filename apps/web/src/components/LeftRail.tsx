@@ -386,20 +386,23 @@ export default function LeftRail() {
                       </button>
 
                       {/* Changes (git diff) — opens the right-side
-                          Changes panel scoped to this project root. */}
-                      <button
-                        type="button"
-                        class="shrink-0 p-1 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setChangesScope({ path: p.root, label: p.name });
-                        }}
-                        aria-label={`View changes in ${p.name}`}
-                        title="View changes"
-                        data-testid={`changes-${p.id}`}
-                      >
-                        <DiffIcon />
-                      </button>
+                          Changes panel scoped to this project root.
+                          Only meaningful for git-tracked projects. */}
+                      <Show when={p.is_git}>
+                        <button
+                          type="button"
+                          class="shrink-0 p-1 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setChangesScope({ path: p.root, label: p.name });
+                          }}
+                          aria-label={`View changes in ${p.name}`}
+                          title="View changes"
+                          data-testid={`changes-${p.id}`}
+                        >
+                          <DiffIcon />
+                        </button>
+                      </Show>
 
                       {/* + worktree (icon-only). Only for projects with a remote.
                           Always visible (not hover-only) so users can find it
