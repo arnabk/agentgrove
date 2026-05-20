@@ -7,6 +7,7 @@ import {
   onCleanup,
 } from "solid-js";
 import { createStore, produce } from "solid-js/store";
+import { createVirtualizer } from "@tanstack/solid-virtual";
 import {
   api,
   type AgentEvent,
@@ -286,32 +287,6 @@ export default function ChatPane() {
     await loadChat();
   }
 
-  /** Concatenate the token deltas for a prompt, preferring the live
-   *  in-memory buffer (which accumulates without touching the heavy
-   *  `events` array). */
-  function assistantText(p: Prompt): string {
-    const live = chatStore.liveTokens[p.id];
-    if (live !== undefined) return live;
-    let out = "";
-    for (const ev of p.events) {
-      if (ev.type === "token") out += ev.text;
-    }
-    return out;
-  }
-
-  /** Tool-call events for a prompt (kept separate so they render as
-   *  inline annotations beside the assistant text). */
-  function toolEvents(p: Prompt): AgentEvent[] {
-    return p.events.filter(
-      (e) =>
-        e.type === "tool_call" ||
-        e.type === "tool_result" ||
-        e.type === "error" ||
-        e.type === "truncated",
-    );
-  }
-
-  const hasMoreOlder = createMemo(() => !chatStore.atStart);
   const chat = createMemo(() => chatStore.view);
 
   return (
@@ -426,60 +401,14 @@ export default function ChatPane() {
         </Show>
       </header>
 
-      <div class="flex-1 overflow-y-auto px-6 py-6 space-y-5" data-testid="chat-timeline">
-        <Show when={hasMoreOlder() && chatStore.prompts.length > 0}>
-          <div class="flex justify-center">
-            <button
-              class="ag-btn ag-btn-ghost ag-btn-sm"
-              onClick={() => void loadOlder()}
-              disabled={chatStore.loadingOlder}
-              data-testid="chat-load-older"
-            >
-              {chatStore.loadingOlder ? "Loading…" : "↑ Load older messages"}
-            </button>
-          </div>
-        </Show>
-
-        <For each={chatStore.prompts}>
-          {(p) => (
-            <article class="space-y-3 group" data-testid={`prompt-${p.id}`}>
-              <div class="flex justify-end">
-                <div class="max-w-[80%] rounded-2xl rounded-br-md bg-accent text-[var(--ag-accent-fg)] px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap shadow-sm">
-                  {p.content}
-                </div>
-              </div>
-              <Show when={assistantText(p) || toolEvents(p).length > 0}>
-                <div class="flex justify-start">
-                  <div class="max-w-[80%] rounded-2xl rounded-bl-md bg-bg-1 border border-border text-[13.5px] leading-relaxed whitespace-pre-wrap px-4 py-2.5">
-                    <Show
-                      when={assistantText(p)}
-                      fallback={
-                        <em class="text-fg-subtle">working…</em>
-                      }
-                    >
-                      {assistantText(p)}
-                    </Show>
-                    <For each={toolEvents(p)}>
-                      {(ev) => <ToolBadge ev={ev} />}
-                    </For>
-                  </div>
-                </div>
-              </Show>
-              <div class="flex items-center gap-2 text-[11px] text-fg-subtle opacity-0 group-hover:opacity-100 transition-opacity">
-                <span class="ag-chip">#{p.seq}</span>
-                <button
-                  class="ag-btn ag-btn-ghost !py-0.5 !px-1.5 !text-[11px]"
-                  onClick={() => revert(p)}
-                  data-testid={`revert-${p.id}`}
-                  title="Ask AI to revert this prompt's changes"
-                >
-                  ↺ Revert
-                </button>
-              </div>
-            </article>
-          )}
-        </For>
-      </div>
+      <VirtualizedTimeline
+        prompts={chatStore.prompts}
+        liveTokens={chatStore.liveTokens}
+        atStart={chatStore.atStart}
+        loadingOlder={chatStore.loadingOlder}
+        onLoadOlder={() => void loadOlder()}
+        onRevert={(p) => void revert(p)}
+      />
 
       <form
         onSubmit={send}
@@ -528,6 +457,183 @@ export default function ChatPane() {
         />
       </Show>
     </section>
+  );
+}
+
+/** Windowed timeline rendered through `@tanstack/solid-virtual`. Only
+ *  rows in the viewport (plus a small overscan) are mounted into the
+ *  DOM, keeping the tab memory budget under control even for chats
+ *  with thousands of prompts. See ADR-0006.
+ *
+ *  Each row's height is measured on first layout and cached by the
+ *  virtualizer's `measureElement` so variable-length user / assistant
+ *  bubbles size correctly. */
+function VirtualizedTimeline(props: {
+  prompts: Prompt[];
+  liveTokens: Record<string, string>;
+  atStart: boolean;
+  loadingOlder: boolean;
+  onLoadOlder: () => void;
+  onRevert: (p: Prompt) => void;
+}) {
+  let scrollRef!: HTMLDivElement;
+  let prevLength = props.prompts.length;
+  let prevFirstId: string | undefined = props.prompts[0]?.id;
+
+  const virtualizer = createVirtualizer({
+    get count() {
+      return props.prompts.length;
+    },
+    getScrollElement: () => scrollRef,
+    estimateSize: () => 120,
+    overscan: 6,
+    // Use prompt id as the key when in bounds; the virtualizer may
+    // call this with a stale index briefly after a refresh shrinks
+    // the array, so fall back to the index to avoid a TypeError.
+    getItemKey: (i) => props.prompts[i]?.id ?? i,
+  });
+
+  // Auto-scroll to bottom when a new prompt is appended at the tail
+  // (the user just hit send). Don't auto-scroll on backfill of older
+  // prompts — that would yank the viewport away from what the user
+  // was reading.
+  createEffect(() => {
+    const ps = props.prompts;
+    const len = ps.length;
+    const firstId = ps[0]?.id;
+    if (len > prevLength && firstId === prevFirstId) {
+      // Tail growth.
+      virtualizer.scrollToIndex(len - 1, { align: "end" });
+    }
+    prevLength = len;
+    prevFirstId = firstId;
+  });
+
+  // Live token deltas grow the active prompt's text — make sure the
+  // virtualizer re-measures its row.
+  createEffect(() => {
+    // Touch the liveTokens map so the effect re-runs on append.
+    void Object.keys(props.liveTokens).length;
+    void Object.values(props.liveTokens).reduce((n, s) => n + s.length, 0);
+    virtualizer.measure();
+  });
+
+  return (
+    <div
+      ref={(el) => (scrollRef = el)}
+      class="flex-1 overflow-y-auto px-6"
+      data-testid="chat-timeline"
+    >
+      <Show when={!props.atStart && props.prompts.length > 0}>
+        <div class="flex justify-center pt-4 pb-2">
+          <button
+            class="ag-btn ag-btn-ghost ag-btn-sm"
+            onClick={() => props.onLoadOlder()}
+            disabled={props.loadingOlder}
+            data-testid="chat-load-older"
+          >
+            {props.loadingOlder ? "Loading…" : "↑ Load older messages"}
+          </button>
+        </div>
+      </Show>
+      <div
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          width: "100%",
+          position: "relative",
+        }}
+      >
+        <For each={virtualizer.getVirtualItems()}>
+          {(vi) => {
+            const prompt = props.prompts[vi.index];
+            if (!prompt) return null;
+            return (
+              <div
+                ref={(el) => virtualizer.measureElement(el)}
+                data-index={vi.index}
+                style={{
+                  position: "absolute",
+                  top: "0px",
+                  left: "0px",
+                  width: "100%",
+                  transform: `translateY(${vi.start}px)`,
+                }}
+              >
+                <PromptRow
+                  prompt={prompt}
+                  liveToken={props.liveTokens[prompt.id]}
+                  onRevert={() => props.onRevert(prompt)}
+                />
+              </div>
+            );
+          }}
+        </For>
+      </div>
+    </div>
+  );
+}
+
+/** A single prompt row: user bubble + assistant bubble + footer.
+ *  Pulled out so the virtualizer can measure / remount independently. */
+function PromptRow(props: {
+  prompt: Prompt;
+  liveToken: string | undefined;
+  onRevert: () => void;
+}) {
+  function assistantText(): string {
+    if (props.liveToken !== undefined) return props.liveToken;
+    let out = "";
+    for (const ev of props.prompt.events) {
+      if (ev.type === "token") out += ev.text;
+    }
+    return out;
+  }
+
+  function tools(): AgentEvent[] {
+    return props.prompt.events.filter(
+      (e) =>
+        e.type === "tool_call" ||
+        e.type === "tool_result" ||
+        e.type === "error" ||
+        e.type === "truncated",
+    );
+  }
+
+  return (
+    <article
+      class="space-y-3 group py-2.5"
+      data-testid={`prompt-${props.prompt.id}`}
+    >
+      <div class="flex justify-end">
+        <div class="max-w-[80%] rounded-2xl rounded-br-md bg-accent text-[var(--ag-accent-fg)] px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap shadow-sm">
+          {props.prompt.content}
+        </div>
+      </div>
+      <Show when={assistantText() || tools().length > 0}>
+        <div class="flex justify-start">
+          <div class="max-w-[80%] rounded-2xl rounded-bl-md bg-bg-1 border border-border text-[13.5px] leading-relaxed whitespace-pre-wrap px-4 py-2.5">
+            <Show
+              when={assistantText()}
+              fallback={<em class="text-fg-subtle">working…</em>}
+            >
+              {assistantText()}
+            </Show>
+            <For each={tools()}>{(ev) => <ToolBadge ev={ev} />}</For>
+          </div>
+        </div>
+      </Show>
+      <div class="flex items-center gap-2 text-[11px] text-fg-subtle opacity-0 group-hover:opacity-100 transition-opacity">
+        <span class="ag-chip">#{props.prompt.seq}</span>
+        <button
+          class="ag-btn ag-btn-ghost !py-0.5 !px-1.5 !text-[11px]"
+          onClick={() => props.onRevert()}
+          data-testid={`revert-${props.prompt.id}`}
+          title="Ask AI to revert this prompt's changes"
+        >
+          ↺ Revert
+        </button>
+      </div>
+    </article>
   );
 }
 
@@ -612,12 +718,22 @@ function parseWsFrame(raw: unknown): WsFrame | null {
 }
 
 /** Apply a decoded WS frame to the chat store. Called inside a
- *  `produce` block so all mutations are batched into one update. */
+ *  `produce` block so all mutations are batched into one update.
+ *
+ *  Note on persistence: token deltas are tracked in `liveTokens` for
+ *  cheap rendering while a turn is in flight. The BE *also* writes
+ *  the same coalesced Token events into the prompt's `events` array
+ *  (so a subsequent GET /api/chats/:id replays the full text). We
+ *  therefore must NOT inject a synthetic token back into events on
+ *  `done` — the canonical text is already there. We only need to
+ *  drop the liveTokens entry so subsequent renders read from events. */
 function applyWsFrame(s: ChatStore, frame: WsFrame): void {
   const { promptId, event: ev } = frame;
   if (ev.type === "token") {
     // Append to the per-prompt live buffer — single string update
-    // instead of walking the events array on every render.
+    // instead of walking the events array on every render. The
+    // event itself is mirrored into prompts[].events server-side
+    // via append_event, so we don't push it here.
     s.liveTokens[promptId] = (s.liveTokens[promptId] ?? "") + ev.text;
     return;
   }
@@ -625,16 +741,9 @@ function applyWsFrame(s: ChatStore, frame: WsFrame): void {
   if (idx < 0) return;
   const prompt = s.prompts[idx]!;
   prompt.events.push(ev);
-  if (ev.type === "done") {
-    // Lock the final assistant text into the events array as a single
-    // synthetic token so re-fetching the chat renders the same. The
-    // live buffer is no longer needed.
-    const finalText = s.liveTokens[promptId];
-    if (finalText && finalText.length > 0) {
-      prompt.events.unshift({ type: "token", text: finalText });
-      delete s.liveTokens[promptId];
-    }
-  } else if (ev.type === "error") {
+  if (ev.type === "done" || ev.type === "error") {
+    // Stream finished — drop the live buffer so PromptRow falls back
+    // to the events array (which holds the canonical, persisted text).
     delete s.liveTokens[promptId];
   }
 }
