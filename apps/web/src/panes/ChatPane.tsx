@@ -363,26 +363,65 @@ export default function ChatPane() {
     }
   }
 
+  /**
+   * Send the user's input. Behaviour depends on whether the agent is
+   * already processing a turn for this chat:
+   *
+   *   - **idle** → POST /api/chats/:id/prompts (the normal dispatch).
+   *     The chat goes busy until the turn finishes; the FE flips back
+   *     when the response resolves.
+   *   - **busy** → POST /api/chats/:id/queue (enqueue the prompt).
+   *     The user sees their entry land in the Queue panel instantly.
+   *     The BE will drain it when the current turn finishes (manual
+   *     mode: user clicks Run next; auto mode: BE auto-drains —
+   *     wiring still pending).
+   *
+   * Attachments are bundled into the prompt body the same way for
+   * both paths; queue items carry the full body so the dispatch
+   * later picks them up via the agent's Read tool.
+   */
   async function send(ev: SubmitEvent) {
     ev.preventDefault();
     const id = activeId();
     let body = input().trim();
     const atts = uploads();
     if (!id || (!body && atts.length === 0)) return;
+    if (atts.length > 0) {
+      const lines = atts
+        .map(
+          (u) =>
+            `- ${u.path}${u.content_type ? ` (${u.content_type})` : ""}`,
+        )
+        .join("\n");
+      body = `${body}${body ? "\n\n" : ""}Attached files (absolute paths, read with your Read tool):\n${lines}`;
+    }
+
+    // Snapshot the busy state *before* we mutate it so we know which
+    // branch the user actually intended.
+    const wasBusy = busy();
+    if (wasBusy) {
+      // Agent is mid-turn: enqueue instead of dispatching. Don't flip
+      // the busy signal — that belongs to the in-flight dispatch.
+      try {
+        await api.enqueue(id, body);
+        setInput("");
+        setUploads([]);
+        queueMicrotask(() => {
+          const el = document.querySelector<HTMLTextAreaElement>(
+            '[data-testid="chat-input"]',
+          );
+          autoResizeTextarea(el);
+        });
+        // Auto-open the queue panel so the user sees what just landed.
+        if (!queueOpen()) setQueueOpen(true);
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+
     setBusy(true);
     try {
-      // Tack file paths onto the prompt body so the agent's Read tool
-      // can pull them in. Format chosen to be unambiguous when the
-      // model parses it.
-      if (atts.length > 0) {
-        const lines = atts
-          .map(
-            (u) =>
-              `- ${u.path}${u.content_type ? ` (${u.content_type})` : ""}`,
-          )
-          .join("\n");
-        body = `${body}${body ? "\n\n" : ""}Attached files (absolute paths, read with your Read tool):\n${lines}`;
-      }
       // Optimistically add a prompt placeholder; the BE returns the
       // canonical record we replace it with. Token + tool events
       // flow in via the WS subscription.
@@ -661,7 +700,11 @@ export default function ChatPane() {
           <textarea
             rows="3"
             class="ag-input resize-none max-h-60 min-h-[3.2em] flex-1 leading-relaxed"
-            placeholder="Message the agent…  (⏎ to send, ⇧⏎ for newline, - for bullets, paste/drop files to attach)"
+            placeholder={
+              busy()
+                ? "Agent is working… ⏎ to enqueue, ⇧⏎ for newline"
+                : "Message the agent…  (⏎ to send, ⇧⏎ for newline, - for bullets, paste/drop files to attach)"
+            }
             value={input()}
             onInput={(e) => {
               setInput(e.currentTarget.value);
@@ -680,7 +723,7 @@ export default function ChatPane() {
               // after send).
               queueMicrotask(() => autoResizeTextarea(el));
             }}
-            disabled={!activeId() || busy()}
+            disabled={!activeId()}
             data-testid="chat-input"
           />
           <button
@@ -688,12 +731,16 @@ export default function ChatPane() {
             class="ag-btn ag-btn-primary"
             disabled={
               !activeId() ||
-              busy() ||
               (!input().trim() && uploads().length === 0)
+            }
+            title={
+              busy()
+                ? "Agent is busy — your message will be queued"
+                : "Send to the agent"
             }
             data-testid="chat-send"
           >
-            Send
+            {busy() ? "Enqueue" : "Send"}
             <span class="ag-kbd !bg-transparent !border-transparent text-[var(--ag-accent-fg)] opacity-80">
               ⏎
             </span>

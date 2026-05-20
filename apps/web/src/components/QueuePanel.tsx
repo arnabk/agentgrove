@@ -33,7 +33,6 @@ interface Props {
 
 export default function QueuePanel(props: Props) {
   const [qstate, setQstate] = createSignal<QueueState | null>(null);
-  const [draft, setDraft] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [err, setErr] = createSignal<string | null>(null);
 
@@ -63,22 +62,6 @@ export default function QueuePanel(props: Props) {
     setErr(null);
     try {
       await api.setQueueMode(props.chatId, mode);
-      await refresh();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function enqueue() {
-    const body = draft().trim();
-    if (!body) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      await api.enqueue(props.chatId, body);
-      setDraft("");
       await refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -237,30 +220,10 @@ export default function QueuePanel(props: Props) {
             </ul>
           </Show>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void enqueue();
-            }}
-            class="flex gap-2"
-          >
-            <input
-              class="ag-input flex-1"
-              placeholder="Enqueue a prompt to run later…"
-              value={draft()}
-              onInput={(e) => setDraft(e.currentTarget.value)}
-              disabled={busy()}
-              data-testid="chat-queue-input"
-            />
-            <button
-              type="submit"
-              class="ag-btn ag-btn-primary ag-btn-sm"
-              disabled={busy() || !draft().trim()}
-              data-testid="chat-queue-add"
-            >
-              Add
-            </button>
-          </form>
+          <p class="text-[11px] text-fg-subtle">
+            Type a message below and hit ⏎ while the agent is working
+            to enqueue it here.
+          </p>
         </div>
       </Show>
     </div>
