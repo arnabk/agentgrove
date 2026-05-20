@@ -14,6 +14,7 @@ import {
   type Prompt,
 } from "../api/client";
 import { confirm } from "../components/dialog";
+import NewChatDialog from "../components/NewChatDialog";
 import {
   addChatTab,
   closeChatTab,
@@ -71,12 +72,14 @@ export default function ChatPane() {
   const [chatStore, setChatStore] = createStore<ChatStore>(freshChatStore());
   const [input, setInput] = createSignal("");
   const [busy, setBusy] = createSignal(false);
-  const [creating, setCreating] = createSignal(false);
   const [err, setErr] = createSignal<string | null>(null);
   // Inline rename state. `renamingId` is the chat being edited (or null);
   // `renameDraft` holds the in-flight input value.
   const [renamingId, setRenamingId] = createSignal<string | null>(null);
   const [renameDraft, setRenameDraft] = createSignal("");
+  // New-chat dialog visibility. The dialog itself handles provider /
+  // model selection and the POST call.
+  const [newChatOpen, setNewChatOpen] = createSignal(false);
 
   const scope = () => currentScope();
   const tabs = () => scope()?.chats ?? [];
@@ -192,31 +195,10 @@ export default function ChatPane() {
     void loadChat();
   });
 
-  async function newChat() {
-    const pid = state.selectedProjectId;
-    if (!pid) return;
+  function openNewChatDialog() {
+    if (!state.selectedProjectId) return;
     setErr(null);
-    setCreating(true);
-    try {
-      const wt = currentWorktreeId();
-      const body: {
-        title: string;
-        provider: string;
-        model: string;
-        worktree_id?: string;
-      } = {
-        title: `chat ${tabs().length + 1}`,
-        provider: "claude",
-        model: "sonnet",
-      };
-      if (wt) body.worktree_id = wt;
-      const created = await api.createProjectChat(pid, body);
-      addChatTab({ id: created.id, title: created.title });
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setCreating(false);
-    }
+    setNewChatOpen(true);
   }
 
   function startRename(id: string, current: string) {
@@ -421,8 +403,8 @@ export default function ChatPane() {
         </For>
         <button
           class="ag-btn ag-btn-ghost ag-btn-sm ml-1"
-          onClick={() => void newChat()}
-          disabled={creating() || !state.selectedProjectId}
+          onClick={() => openNewChatDialog()}
+          disabled={!state.selectedProjectId}
           title="New chat in this scope"
           data-testid="chat-new"
         >
@@ -532,6 +514,19 @@ export default function ChatPane() {
           </span>
         </button>
       </form>
+
+      <Show when={newChatOpen()}>
+        <NewChatDialog
+          projectId={state.selectedProjectId!}
+          worktreeId={currentWorktreeId()}
+          defaultTitle={`chat ${tabs().length + 1}`}
+          onCancel={() => setNewChatOpen(false)}
+          onCreated={(chat) => {
+            addChatTab({ id: chat.id, title: chat.title });
+            setNewChatOpen(false);
+          }}
+        />
+      </Show>
     </section>
   );
 }

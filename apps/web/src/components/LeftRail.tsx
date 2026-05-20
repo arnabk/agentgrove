@@ -14,6 +14,7 @@ import {
 } from "../stores/app";
 import { confirm } from "./dialog";
 import FolderPicker from "./FolderPicker";
+import NewChatDialog from "./NewChatDialog";
 import WorktreeDialog from "./WorktreeDialog";
 import WorktreeHistoryDialog from "./WorktreeHistoryDialog";
 
@@ -65,6 +66,13 @@ export default function LeftRail() {
   const [wtFor, setWtFor] = createSignal<string | null>(null);
   // Active project id whose history dialog is open; null when closed.
   const [historyFor, setHistoryFor] = createSignal<string | null>(null);
+  // Pending new-chat context. null when the dialog is closed.
+  interface NewChatCtx {
+    projectId: string;
+    worktreeId: string | null;
+    parentName: string;
+  }
+  const [newChatFor, setNewChatFor] = createSignal<NewChatCtx | null>(null);
 
   // Per-project expansion. Independent of selection — many can be open.
   const [expanded, setExpanded] = createStore<Record<string, true>>(loadExpanded());
@@ -111,38 +119,18 @@ export default function LeftRail() {
     }
   }
 
-  /** Create a new chat scoped to (projectId, optional worktreeId). The new
-   *  chat becomes the active tab in the Chat pane and the active scope
-   *  flips to match — so the new chat is visible immediately. */
-  async function newChat(
+  /** Open the new-chat dialog scoped to (projectId, optional worktreeId).
+   *  The dialog handles provider / model selection; on success we
+   *  switch to the new chat and add it to the tab strip. */
+  function openNewChatDialog(
     projectId: string,
     worktreeId: string | null,
     parentName: string,
   ) {
     setErr(null);
-    try {
-      // Focus the scope first so addChatTab writes into the right scope.
-      selectWorktree(projectId, worktreeId);
-      // Default new chats to Claude. The provider picker (BE-driven
-      // via /api/providers) will replace this with a user-selectable
-      // dropdown later; for now Claude is the only real provider in
-      // the registry, with `fake/echo` reserved for tests.
-      const body: {
-        title: string;
-        provider: string;
-        model: string;
-        worktree_id?: string;
-      } = {
-        title: `chat in ${parentName}`,
-        provider: "claude",
-        model: "sonnet",
-      };
-      if (worktreeId) body.worktree_id = worktreeId;
-      const chat = await api.createProjectChat(projectId, body);
-      addChatTab({ id: chat.id, title: chat.title });
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    }
+    // Focus the scope first so addChatTab on creation writes into it.
+    selectWorktree(projectId, worktreeId);
+    setNewChatFor({ projectId, worktreeId, parentName });
   }
 
   // Resize state.
@@ -380,7 +368,7 @@ export default function LeftRail() {
                         class="shrink-0 p-1 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
                         onClick={(e) => {
                           e.stopPropagation();
-                          void newChat(p.id, null, p.name);
+                          openNewChatDialog(p.id, null, p.name);
                         }}
                         aria-label={`New chat in ${p.name}`}
                         title="New chat"
@@ -534,7 +522,7 @@ export default function LeftRail() {
                                     }}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      void newChat(p.id, w.id, w.branch);
+                                      openNewChatDialog(p.id, w.id, w.branch);
                                     }}
                                     aria-label={`New chat in worktree ${w.branch}`}
                                     title="New chat"
@@ -642,6 +630,21 @@ export default function LeftRail() {
             projectId={pid}
             onClose={() => setHistoryFor(null)}
             onRestored={() => void refreshWorktreesForProject(pid)}
+          />
+        )}
+      </Show>
+
+      <Show when={newChatFor()} keyed>
+        {(ctx) => (
+          <NewChatDialog
+            projectId={ctx.projectId}
+            worktreeId={ctx.worktreeId}
+            defaultTitle={`chat in ${ctx.parentName}`}
+            onCancel={() => setNewChatFor(null)}
+            onCreated={(chat) => {
+              addChatTab({ id: chat.id, title: chat.title });
+              setNewChatFor(null);
+            }}
           />
         )}
       </Show>
