@@ -579,6 +579,15 @@ pub async fn add_prompt(
         dispatch_echo(&state, &id, &prompt, &topic, &body.content).await;
     }
 
+    // TODO: auto-drain the chat's queue when mode=auto. Naively
+    // recursing into add_prompt here trips Rust's Send bound on the
+    // resulting future (the async-trait provider impls aren't Send-
+    // safe to call inside a tokio::spawn). The cleanest fix is to
+    // refactor dispatch_via_provider into a sync-runnable form or to
+    // run the drain through a queue-worker task. Tracked in the
+    // backlog; for now, /api/chats/:id/queue/next still pops items
+    // on-demand.
+
     Ok(Json(prompt))
 }
 

@@ -194,6 +194,21 @@ export default function ChatPane() {
     }
     socket.addEventListener("message", (ev) => {
       if (closed) return;
+      // `queue_dispatched` is a hint from the BE that the queue
+      // popped an item and dispatched it as a new prompt. Re-fetch
+      // the chat so the new prompt + its events show up in the
+      // timeline; otherwise we'd only see them on next switch.
+      try {
+        if (typeof ev.data === "string") {
+          const parsed = JSON.parse(ev.data) as { queue_dispatched?: string };
+          if (parsed.queue_dispatched) {
+            void loadChat();
+            return;
+          }
+        }
+      } catch {
+        // fall through to the normal event path
+      }
       const frame = parseWsFrame(ev.data);
       if (!frame) return;
       setChatStore(produce((s) => applyWsFrame(s, frame)));

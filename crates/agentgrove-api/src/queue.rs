@@ -87,18 +87,40 @@ impl QueueRegistry {
         false
     }
 
+    /// Move the head pending item to `Running` and return a clone.
+    /// The caller is responsible for calling [`mark_done`] (success)
+    /// or [`mark_cancelled`] (failure) once dispatch finishes; without
+    /// that, the item stays Running on subsequent GETs so the UI can
+    /// reflect the live state.
     pub fn pop_next_pending(&mut self, chat_id: &str) -> Option<QueueItem> {
         let q = self.ensure(chat_id);
         for it in q.items.iter_mut() {
             if it.status == Status::Pending {
                 it.status = Status::Running;
-                let cloned = it.clone();
-                // Mark as done immediately for FakeProvider.
-                it.status = Status::Done;
-                return Some(cloned);
+                return Some(it.clone());
             }
         }
         None
+    }
+
+    /// Mark a previously-running item as done.
+    pub fn mark_done(&mut self, chat_id: &str, item_id: &str) -> bool {
+        let q = self.ensure(chat_id);
+        if let Some(it) = q.items.iter_mut().find(|i| i.id == item_id) {
+            if it.status == Status::Running {
+                it.status = Status::Done;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// True if the chat's queue is set to auto-drain mode.
+    pub fn is_auto(&self, chat_id: &str) -> bool {
+        self.by_chat
+            .get(chat_id)
+            .map(|q| q.mode == Mode::Auto)
+            .unwrap_or(true)
     }
 
     pub fn state(&self, chat_id: &str) -> QueueState {
@@ -154,15 +176,30 @@ pub async fn run_next(
         .await
         .pop_next_pending(&chat_id)
         .ok_or(StatusCode::NOT_FOUND)?;
-    // Forward to chat (FakeProvider).
+    // Forward to chat dispatch (real provider when registered, else
+    // synchronous echo). The handler returns when the turn is done.
     let _ = crate::chats::add_prompt(
         State(state.clone()),
-        Path(chat_id),
+        Path(chat_id.clone()),
         Json(crate::chats::AddPromptBody {
             content: item.body.clone(),
         }),
     )
     .await;
+    // Mark the item as done so the UI reflects it.
+    state
+        .queues
+        .write()
+        .await
+        .mark_done(&chat_id, &item.id);
+    // Notify any FE clients listening on the chat topic that the
+    // timeline now has new prompts to fetch. The payload is just a
+    // hint; clients re-GET the chat view.
+    let topic = format!("chat:{chat_id}");
+    state.logbus.publish(
+        &topic,
+        serde_json::json!({ "queue_dispatched": item.id }).to_string(),
+    );
     Ok(Json(item))
 }
 
