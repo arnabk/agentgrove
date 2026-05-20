@@ -15,7 +15,10 @@
 //! users as plain **"Claude"**, never "Claude Code". The CLI is
 //! "Claude Code" internally, but the AgentGrove product is not.
 
-use crate::{AgentEvent, AgentProvider, ProviderDescriptor, ProviderError, ProviderId, SpawnOptions};
+use crate::{
+    AgentEvent, AgentProvider, ProviderDescriptor, ProviderError, ProviderId, SlashCommand,
+    SpawnOptions,
+};
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -113,6 +116,11 @@ impl AgentProvider for ClaudeProvider {
         if let Some(session) = opts.resume_session_id.as_deref() {
             cmd.arg("--resume").arg(session);
         }
+        if let Some(effort) = opts.effort.as_deref() {
+            // Maps to the CLI's `--effort` flag (low|medium|high|xhigh|max).
+            // Unlocks extended-thinking output on capable models.
+            cmd.arg("--effort").arg(effort);
+        }
         cmd.current_dir(&opts.cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -193,6 +201,35 @@ impl AgentProvider for ClaudeProvider {
 
         Ok(())
     }
+
+    /// Static set of Claude Code slash commands surfaced to the FE
+    /// picker. Mirrors the universal commands the CLI reports under
+    /// the `slash_commands` field of its `system/init` event; we keep
+    /// this list curated so the picker shows only commands that make
+    /// sense to invoke from a chat input (e.g. `/clear`, `/compact`).
+    /// MCP-server-specific commands the user may have installed are
+    /// intentionally omitted — they typically require flags the
+    /// picker can't supply.
+    fn slash_commands(&self) -> Vec<SlashCommand> {
+        const ITEMS: &[(&str, &str)] = &[
+            ("clear", "Reset the conversation history."),
+            ("compact", "Summarise older turns to free context budget."),
+            ("context", "Show current context window usage."),
+            ("init", "Initialise a CLAUDE.md for this project."),
+            ("review", "Ask Claude to review the staged diff."),
+            ("security-review", "Ask Claude for a security-focused review."),
+            ("usage", "Show today's cost/usage summary."),
+            ("extra-usage", "Show detailed model-level usage."),
+            ("insights", "Surface project insights Claude has gathered."),
+        ];
+        ITEMS
+            .iter()
+            .map(|(name, description)| SlashCommand {
+                name: (*name).to_string(),
+                description: (*description).to_string(),
+            })
+            .collect()
+    }
 }
 
 /// Translate one JSON line from `claude --output-format stream-json`
@@ -252,18 +289,38 @@ fn translate_stream_event(v: &serde_json::Value) -> Vec<AgentEvent> {
         Some(d) => d,
         None => return vec![],
     };
-    if delta.get("type").and_then(|x| x.as_str()) != Some("text_delta") {
-        return vec![];
-    }
-    let Some(text) = delta.get("text").and_then(|x| x.as_str()) else {
-        return vec![];
-    };
-    if text.is_empty() {
-        vec![]
-    } else {
-        vec![AgentEvent::Token {
-            text: text.to_string(),
-        }]
+    let delta_kind = delta.get("type").and_then(|x| x.as_str()).unwrap_or("");
+    match delta_kind {
+        "text_delta" => {
+            let Some(text) = delta.get("text").and_then(|x| x.as_str()) else {
+                return vec![];
+            };
+            if text.is_empty() {
+                vec![]
+            } else {
+                vec![AgentEvent::Token {
+                    text: text.to_string(),
+                }]
+            }
+        }
+        // Extended thinking trace. Anthropic emits this when the model
+        // is run with a thinking budget (`--effort` ≥ medium on
+        // capable models). The chunked text reads like the model's
+        // internal reasoning and is rendered in the FE under a
+        // collapsible "Thinking" block separate from the answer.
+        "thinking_delta" => {
+            let Some(text) = delta.get("thinking").and_then(|x| x.as_str()) else {
+                return vec![];
+            };
+            if text.is_empty() {
+                vec![]
+            } else {
+                vec![AgentEvent::Thinking {
+                    text: text.to_string(),
+                }]
+            }
+        }
+        _ => vec![],
     }
 }
 
@@ -275,17 +332,37 @@ fn translate_assistant(v: &serde_json::Value) -> Vec<AgentEvent> {
         .unwrap_or_default();
     let mut out = Vec::new();
     for block in content {
-        if block.get("type").and_then(|x| x.as_str()) != Some("tool_use") {
-            continue;
+        match block.get("type").and_then(|x| x.as_str()) {
+            Some("tool_use") => {
+                let name = block
+                    .get("name")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let id = block.get("id").and_then(|x| x.as_str()).map(String::from);
+                let args = block
+                    .get("input")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                out.push(AgentEvent::ToolCall { name, args, id });
+            }
+            // Final-form thinking block (sent on message completion
+            // when the model produced reasoning). Streaming
+            // thinking_delta events are handled in
+            // translate_stream_event. We emit the concatenated
+            // result so a client that missed the deltas still has
+            // the full text.
+            Some("thinking") => {
+                if let Some(text) = block.get("thinking").and_then(|x| x.as_str()) {
+                    if !text.is_empty() {
+                        out.push(AgentEvent::Thinking {
+                            text: text.to_string(),
+                        });
+                    }
+                }
+            }
+            _ => {}
         }
-        let name = block
-            .get("name")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .to_string();
-        let id = block.get("id").and_then(|x| x.as_str()).map(String::from);
-        let args = block.get("input").cloned().unwrap_or(serde_json::Value::Null);
-        out.push(AgentEvent::ToolCall { name, args, id });
     }
     out
 }
@@ -382,6 +459,43 @@ mod tests {
             }
         });
         assert!(translate(&line).is_empty());
+    }
+
+    #[test]
+    fn thinking_delta_becomes_thinking_event() {
+        let line = json!({
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "delta": { "type": "thinking_delta", "thinking": "Let me work this out…" }
+            }
+        });
+        let evs = translate(&line);
+        assert_eq!(
+            evs,
+            vec![AgentEvent::Thinking {
+                text: "Let me work this out…".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn assistant_thinking_block_becomes_thinking_event() {
+        let line = json!({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    { "type": "thinking", "thinking": "consider three options" }
+                ]
+            }
+        });
+        let evs = translate(&line);
+        assert_eq!(
+            evs,
+            vec![AgentEvent::Thinking {
+                text: "consider three options".into()
+            }]
+        );
     }
 
     #[test]

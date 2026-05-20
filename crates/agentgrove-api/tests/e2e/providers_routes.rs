@@ -60,3 +60,31 @@ async fn providers_route_reports_version_when_cli_present() {
         assert!(claude["version"].is_null());
     }
 }
+
+#[tokio::test]
+async fn providers_commands_returns_static_claude_set() {
+    let h = BeHarness::start().await;
+    let res = h.get_auth("/api/providers/claude/commands").send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let arr: serde_json::Value = res.json().await.unwrap();
+    let items = arr.as_array().unwrap();
+    assert!(items.len() >= 5, "expected several built-in slash commands");
+    let names: std::collections::BTreeSet<&str> = items
+        .iter()
+        .filter_map(|c| c["name"].as_str())
+        .collect();
+    for required in ["clear", "compact", "review", "usage"] {
+        assert!(names.contains(required), "missing command: {required}");
+    }
+    // Each item carries a non-empty description.
+    for item in items {
+        assert!(item["description"].as_str().unwrap().len() > 0);
+    }
+}
+
+#[tokio::test]
+async fn providers_commands_unknown_id_returns_404() {
+    let h = BeHarness::start().await;
+    let res = h.get_auth("/api/providers/nope/commands").send().await.unwrap();
+    assert_eq!(res.status(), 404);
+}

@@ -56,8 +56,8 @@ export default function Markdown(props: Props) {
 
   return (
     <div
-      // eslint-disable-next-line solid/no-innerhtml
       class={`ag-prose ${props.class ?? ""}`}
+      // eslint-disable-next-line solid/no-innerhtml -- output is sanitized through DOMPurify above
       innerHTML={html()}
     />
   );

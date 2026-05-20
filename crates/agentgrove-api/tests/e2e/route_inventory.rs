@@ -59,6 +59,9 @@ fn expected_routes() -> BTreeSet<&'static str> {
         "GET /api/themes",
         "POST /api/themes",
         "GET /api/providers",
+        "GET /api/providers/{id}/commands",
+        "POST /api/uploads",
+        "GET /api/uploads/{id}/raw",
     ]
     .into_iter()
     .collect()

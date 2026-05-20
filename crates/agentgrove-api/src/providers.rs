@@ -8,8 +8,12 @@
 //! installed CLI; we do not embed API SDKs).
 
 use crate::state::AppState;
-use agentgrove_agents::{AgentProvider, ProviderDescriptor};
-use axum::{extract::State, Json};
+use agentgrove_agents::{AgentProvider, ProviderDescriptor, SlashCommand};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    Json,
+};
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -93,4 +97,14 @@ pub async fn list(State(state): State<AppState>) -> Json<Vec<ProviderDto>> {
         out.push(ProviderDto::from_descriptor(p.detect().await));
     }
     Json(out)
+}
+
+/// `GET /api/providers/:id/commands` — slash commands the provider's
+/// CLI exposes. The FE renders these in the chat input's `/` picker.
+pub async fn commands(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<SlashCommand>>, StatusCode> {
+    let p = state.providers.get(&id).ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(p.slash_commands()))
 }

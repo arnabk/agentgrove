@@ -54,3 +54,6 @@ GET /api/diag/memory
 GET /api/themes
 POST /api/themes
 GET /api/providers
+GET /api/providers/{id}/commands
+POST /api/uploads
+GET /api/uploads/{id}/raw

@@ -35,6 +35,11 @@ pub struct ChatRecord {
     /// turn completes (or for providers that don't report sessions).
     #[serde(default)]
     pub session_id: Option<String>,
+    /// Provider-specific "thinking effort" hint. Forwarded to the
+    /// provider on each turn via `SpawnOptions::effort` (Claude: maps
+    /// to `--effort`). None ⇒ provider default.
+    #[serde(default)]
+    pub effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +68,7 @@ impl ChatRegistry {
         title: String,
         provider: String,
         model: String,
+        effort: Option<String>,
     ) -> ChatRecord {
         let rec = ChatRecord {
             id: Uuid::now_v7().to_string(),
@@ -74,6 +80,7 @@ impl ChatRegistry {
             created_at: Utc::now(),
             prompts: vec![],
             session_id: None,
+            effort,
         };
         self.by_project
             .entry(project_id)
@@ -192,6 +199,33 @@ impl ChatRegistry {
             false
         }
     }
+
+    /// Switch the model used for future turns. Caller validates the
+    /// string is non-empty. Also clears any captured session_id since
+    /// a resume token issued by one model cannot generally be replayed
+    /// against another.
+    pub fn set_model(&mut self, chat_id: &str, model: String) -> bool {
+        if let Some(chat) = self.by_id.get_mut(chat_id) {
+            if chat.model != model {
+                chat.model = model;
+                chat.session_id = None;
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Set or clear the provider effort hint. `None` resets to the
+    /// provider default.
+    pub fn set_effort(&mut self, chat_id: &str, effort: Option<String>) -> bool {
+        if let Some(chat) = self.by_id.get_mut(chat_id) {
+            chat.effort = effort;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -203,6 +237,11 @@ pub struct CreateChatBody {
     /// (which derives this from the URL).
     #[serde(default)]
     pub worktree_id: Option<String>,
+    /// Provider-specific thinking effort hint (Claude: low|medium|
+    /// high|xhigh|max). When set, the chat unlocks extended thinking
+    /// output. Defaults to None (provider default — usually off).
+    #[serde(default)]
+    pub effort: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -246,6 +285,7 @@ pub async fn create_for_project_handler(
         body.title,
         body.provider,
         body.model,
+        body.effort,
     )))
 }
 
@@ -275,6 +315,7 @@ pub async fn create(
         body.title,
         body.provider,
         body.model,
+        body.effort,
     )))
 }
 
@@ -292,6 +333,8 @@ pub struct ChatView {
     pub title: String,
     pub provider: String,
     pub model: String,
+    /// Provider thinking-effort hint (Claude: low|medium|high|xhigh|max).
+    pub effort: Option<String>,
     pub created_at: DateTime<Utc>,
     pub session_id: Option<String>,
     /// Most recent `<= prompts_window>` prompts, oldest first. Each
@@ -334,6 +377,7 @@ fn window_chat(rec: &ChatRecord) -> ChatView {
         title: rec.title.clone(),
         provider: rec.provider.clone(),
         model: rec.model.clone(),
+        effort: rec.effort.clone(),
         created_at: rec.created_at,
         session_id: rec.session_id.clone(),
         prompts: windowed,
@@ -354,21 +398,46 @@ pub async fn get_one(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
-/// Body for `PATCH /api/chats/:id`. Today only `title` is mutable;
-/// further fields land later behind the same envelope.
+/// Body for `PATCH /api/chats/:id`. Each field is optional; unset
+/// fields leave the corresponding chat property unchanged.
 #[derive(Debug, Deserialize)]
 pub struct UpdateChatBody {
     pub title: Option<String>,
+    /// Override the model used for future turns of this chat (e.g.
+    /// `"sonnet"` -> `"opus"`). Empty / whitespace-only is rejected.
+    pub model: Option<String>,
+    /// Provider thinking-effort hint. `Some(Some(_))` sets a new
+    /// value, `Some(None)` clears it back to the provider default.
+    /// (Using `Option<Option<…>>` lets the client express "leave
+    /// untouched" vs "clear".)
+    #[serde(default, deserialize_with = "deser_optional_option_string")]
+    pub effort: Option<Option<String>>,
 }
 
-/// `PATCH /api/chats/:id` — rename the chat (and, later, edit other
-/// metadata). Empty/whitespace titles return 400.
+/// Custom serde adapter for the `effort: Option<Option<String>>`
+/// pattern. Distinguishes "field absent" (don't touch) from
+/// "field=null" (clear it).
+fn deser_optional_option_string<'de, D>(de: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    Ok(Some(Option::<String>::deserialize(de)?))
+}
+
+/// `PATCH /api/chats/:id` — update title, model, or effort. Empty
+/// `title`/`model` returns 400. Unknown id returns 404.
 pub async fn patch(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<UpdateChatBody>,
 ) -> Result<Json<ChatView>, (StatusCode, String)> {
     let mut reg = state.chats.write().await;
+    // Ensure the chat exists before mutating, so all field updates
+    // either all succeed or all roll back via early return.
+    if reg.get(&id).is_none() {
+        return Err((StatusCode::NOT_FOUND, format!("chat {id} not found")));
+    }
     if let Some(raw) = body.title {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
@@ -377,9 +446,19 @@ pub async fn patch(
                 "title cannot be empty".into(),
             ));
         }
-        if !reg.rename(&id, trimmed.to_string()) {
-            return Err((StatusCode::NOT_FOUND, format!("chat {id} not found")));
+        reg.rename(&id, trimmed.to_string());
+    }
+    if let Some(raw) = body.model {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err((StatusCode::BAD_REQUEST, "model cannot be empty".into()));
         }
+        reg.set_model(&id, trimmed.to_string());
+    }
+    if let Some(eff) = body.effort {
+        // Inner `None` clears; inner `Some(_)` sets.
+        let normalized = eff.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+        reg.set_effort(&id, normalized);
     }
     let rec = reg
         .get(&id)
@@ -459,7 +538,7 @@ pub async fn add_prompt(
     // provider call. We drop the lock before awaiting any I/O so other
     // requests on the chat (e.g. polling GET) don't deadlock during a
     // multi-second model turn.
-    let (prompt, provider_id, model, session_id, cwd) = {
+    let (prompt, provider_id, model, session_id, effort, cwd) = {
         let mut reg = state.chats.write().await;
         let chat = reg.get(&id).ok_or(StatusCode::NOT_FOUND)?.clone();
         let prompt = reg
@@ -471,6 +550,7 @@ pub async fn add_prompt(
             chat.provider.clone(),
             chat.model.clone(),
             chat.session_id.clone(),
+            chat.effort.clone(),
             cwd,
         )
     };
@@ -491,6 +571,7 @@ pub async fn add_prompt(
             &body.content,
             &model,
             session_id,
+            effort,
             cwd,
         )
         .await;
@@ -528,6 +609,7 @@ async fn dispatch_via_provider(
     user_text: &str,
     model: &str,
     resume_session_id: Option<String>,
+    effort: Option<String>,
     cwd: std::path::PathBuf,
 ) {
     use agentgrove_agents::SpawnOptions;
@@ -536,6 +618,7 @@ async fn dispatch_via_provider(
         cwd,
         model: Some(model.to_string()),
         resume_session_id,
+        effort,
     };
     let prompt_text = user_text.to_string();
     let provider_for_task = provider.clone();
@@ -543,29 +626,41 @@ async fn dispatch_via_provider(
         provider_for_task.spawn(&prompt_text, opts, tx).await
     });
 
-    // Token-coalescing state. Providers (Claude in particular) emit
-    // one Token event per text-delta — sometimes per character. We
-    // buffer consecutive Token deltas and flush when either:
-    //   - the buffer reaches `TOKEN_FLUSH_BYTES`, or
-    //   - `TOKEN_FLUSH_INTERVAL` has passed since the last flush, or
-    //   - a non-Token event arrives.
+    // Coalescing state. Providers (Claude in particular) emit one
+    // Token / Thinking event per text-delta — sometimes per character.
+    // We keep two independent buffers and flush each when either:
+    //   - the buffer reaches `FLUSH_BYTES`, or
+    //   - `FLUSH_INTERVAL` has passed since the last flush, or
+    //   - a non-matching event arrives (forces ordering).
     // See ADR-0006 for the budget rationale.
-    const TOKEN_FLUSH_BYTES: usize = 64;
-    const TOKEN_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
-    let mut pending_text = String::new();
+    const FLUSH_BYTES: usize = 64;
+    const FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+    let mut pending_token = String::new();
+    let mut pending_thinking = String::new();
+
+    /// Kind of streaming-text buffer the coalescer is flushing. Lets a
+    /// single `flush_pending` helper emit either AgentEvent variant.
+    #[derive(Clone, Copy)]
+    enum BufKind {
+        Token,
+        Thinking,
+    }
 
     async fn flush_pending(
         state: &AppState,
         chat_id: &str,
         prompt: &PromptRecord,
         topic: &str,
+        kind: BufKind,
         pending: &mut String,
     ) {
         if pending.is_empty() {
             return;
         }
-        let ev = AgentEvent::Token {
-            text: std::mem::take(pending),
+        let text = std::mem::take(pending);
+        let ev = match kind {
+            BufKind::Token => AgentEvent::Token { text },
+            BufKind::Thinking => AgentEvent::Thinking { text },
         };
         let payload = serde_json::json!({
             "prompt_id": prompt.id,
@@ -577,11 +672,28 @@ async fn dispatch_via_provider(
     }
 
     loop {
-        let next = tokio::time::timeout(TOKEN_FLUSH_INTERVAL, rx.recv()).await;
+        let next = tokio::time::timeout(FLUSH_INTERVAL, rx.recv()).await;
         match next {
             // Timed out: flush whatever we've buffered.
             Err(_) => {
-                flush_pending(state, chat_id, prompt, topic, &mut pending_text).await;
+                flush_pending(
+                    state,
+                    chat_id,
+                    prompt,
+                    topic,
+                    BufKind::Token,
+                    &mut pending_token,
+                )
+                .await;
+                flush_pending(
+                    state,
+                    chat_id,
+                    prompt,
+                    topic,
+                    BufKind::Thinking,
+                    &mut pending_thinking,
+                )
+                .await;
                 continue;
             }
             // Channel closed: spawn finished.
@@ -589,16 +701,75 @@ async fn dispatch_via_provider(
             // Got an event.
             Ok(Some(ev)) => match ev {
                 AgentEvent::Token { text } => {
-                    pending_text.push_str(&text);
-                    if pending_text.len() >= TOKEN_FLUSH_BYTES {
-                        flush_pending(state, chat_id, prompt, topic, &mut pending_text).await;
+                    // Switching streams: flush the other buffer first.
+                    flush_pending(
+                        state,
+                        chat_id,
+                        prompt,
+                        topic,
+                        BufKind::Thinking,
+                        &mut pending_thinking,
+                    )
+                    .await;
+                    pending_token.push_str(&text);
+                    if pending_token.len() >= FLUSH_BYTES {
+                        flush_pending(
+                            state,
+                            chat_id,
+                            prompt,
+                            topic,
+                            BufKind::Token,
+                            &mut pending_token,
+                        )
+                        .await;
+                    }
+                }
+                AgentEvent::Thinking { text } => {
+                    flush_pending(
+                        state,
+                        chat_id,
+                        prompt,
+                        topic,
+                        BufKind::Token,
+                        &mut pending_token,
+                    )
+                    .await;
+                    pending_thinking.push_str(&text);
+                    if pending_thinking.len() >= FLUSH_BYTES {
+                        flush_pending(
+                            state,
+                            chat_id,
+                            prompt,
+                            topic,
+                            BufKind::Thinking,
+                            &mut pending_thinking,
+                        )
+                        .await;
                     }
                 }
                 other => {
-                    // Any non-token event forces a token flush so the
-                    // ordering stays intact (token deltas precede the
-                    // tool call / done / error they produced).
-                    flush_pending(state, chat_id, prompt, topic, &mut pending_text).await;
+                    // Any other event forces both stream buffers to
+                    // flush so the ordering stays intact (any text
+                    // deltas precede the tool call / done / error
+                    // they produced).
+                    flush_pending(
+                        state,
+                        chat_id,
+                        prompt,
+                        topic,
+                        BufKind::Token,
+                        &mut pending_token,
+                    )
+                    .await;
+                    flush_pending(
+                        state,
+                        chat_id,
+                        prompt,
+                        topic,
+                        BufKind::Thinking,
+                        &mut pending_thinking,
+                    )
+                    .await;
 
                     if let AgentEvent::SessionStart { session_id } = &other {
                         let mut reg = state.chats.write().await;
@@ -615,8 +786,25 @@ async fn dispatch_via_provider(
             },
         }
     }
-    // Final flush in case the stream ended with token text.
-    flush_pending(state, chat_id, prompt, topic, &mut pending_text).await;
+    // Final flush in case the stream ended with buffered text.
+    flush_pending(
+        state,
+        chat_id,
+        prompt,
+        topic,
+        BufKind::Token,
+        &mut pending_token,
+    )
+    .await;
+    flush_pending(
+        state,
+        chat_id,
+        prompt,
+        topic,
+        BufKind::Thinking,
+        &mut pending_thinking,
+    )
+    .await;
 
     // Surface spawn errors as a synthetic Error event so the FE can
     // render them inline instead of just observing a silent close.
@@ -719,6 +907,7 @@ mod tests {
             "t".into(),
             "fake".into(),
             "echo".into(),
+            None,
         );
         let p = reg.add_prompt(&c.id, "hi".into()).unwrap();
         (c.id, p.id)

@@ -13,5 +13,6 @@ mod project_chats_routes;
 mod projects_routes;
 mod providers_routes;
 mod route_inventory;
+mod uploads_routes;
 mod scratchpad_routes;
 mod worktrees_routes;

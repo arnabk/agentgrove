@@ -48,6 +48,14 @@ pub enum AgentEvent {
         /// The token text.
         text: String,
     },
+    /// A chunk of the assistant's *thinking* trace (extended thinking
+    /// / reasoning). Emitted alongside (and typically before) Token
+    /// events so the FE can render the AI's reasoning in a collapsible
+    /// panel separate from the final answer.
+    Thinking {
+        /// The thinking text chunk.
+        text: String,
+    },
     /// The assistant is invoking a tool.
     ToolCall {
         /// Tool name as reported by the provider.
@@ -133,6 +141,17 @@ pub struct ProviderDescriptor {
     pub supports_resume: bool,
 }
 
+/// A slash-command surfaced by a provider's CLI. The FE renders these
+/// inline in the chat input so users can pick from a typed `/` menu
+/// without memorising the provider's command set.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlashCommand {
+    /// Command literal **without** the leading slash (e.g. `clear`).
+    pub name: String,
+    /// One-line human description shown in the picker.
+    pub description: String,
+}
+
 /// Per-turn options passed to [`AgentProvider::spawn`].
 #[derive(Debug, Clone, Default)]
 pub struct SpawnOptions {
@@ -143,6 +162,10 @@ pub struct SpawnOptions {
     pub model: Option<String>,
     /// Session id to resume from a previous turn, if any.
     pub resume_session_id: Option<String>,
+    /// Provider-specific "thinking effort" hint, e.g. `Some("high")`
+    /// to unlock extended thinking on Claude. Providers map this to
+    /// their native flag (Claude: `--effort`).
+    pub effort: Option<String>,
 }
 
 /// Errors surfaced by the provider layer.
@@ -196,6 +219,15 @@ pub trait AgentProvider: Send + Sync {
         opts: SpawnOptions,
         events: mpsc::UnboundedSender<AgentEvent>,
     ) -> Result<(), ProviderError>;
+
+    /// Static list of slash commands supported by the provider's CLI.
+    /// Providers override this to expose their `/clear`, `/compact`,
+    /// `/review`, etc. so the FE picker can render them without
+    /// hard-coding any provider knowledge. Returns an empty list by
+    /// default (no slash-commands).
+    fn slash_commands(&self) -> Vec<SlashCommand> {
+        Vec::new()
+    }
 }
 
 #[cfg(test)]

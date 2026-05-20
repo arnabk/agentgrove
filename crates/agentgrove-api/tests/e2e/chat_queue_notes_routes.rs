@@ -401,3 +401,64 @@ async fn patch_chat_unknown_id_returns_404() {
         .unwrap();
     assert_eq!(res.status(), 404);
 }
+
+#[tokio::test]
+async fn patch_chat_updates_model_and_effort() {
+    let h = BeHarness::start().await;
+    let chat: Value = h
+        .post_auth("/api/worktrees/wt-pm/chats")
+        .json(&json!({"title":"m","provider":"fake","model":"echo"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = chat["id"].as_str().unwrap().to_owned();
+
+    // Update both fields in one call.
+    let res = h
+        .patch(&format!("/api/chats/{id}"))
+        .json(&json!({"model": "opus", "effort": "high"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200, "body={}", res.text().await.unwrap());
+    let v: Value = res.json().await.unwrap();
+    assert_eq!(v["model"], "opus");
+    assert_eq!(v["effort"], "high");
+
+    // Clearing effort via null.
+    let res = h
+        .patch(&format!("/api/chats/{id}"))
+        .json(&json!({"effort": null}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let v: Value = res.json().await.unwrap();
+    assert!(v["effort"].is_null());
+    assert_eq!(v["model"], "opus", "model untouched by effort patch");
+}
+
+#[tokio::test]
+async fn patch_chat_rejects_empty_model() {
+    let h = BeHarness::start().await;
+    let chat: Value = h
+        .post_auth("/api/worktrees/wt-em/chats")
+        .json(&json!({"title":"m","provider":"fake","model":"echo"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = chat["id"].as_str().unwrap().to_owned();
+    let res = h
+        .patch(&format!("/api/chats/{id}"))
+        .json(&json!({"model": "   "}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+}

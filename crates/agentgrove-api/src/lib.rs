@@ -20,6 +20,7 @@ pub mod settings;
 pub mod state;
 pub mod terminal;
 pub mod themes;
+pub mod uploads;
 pub mod worktrees;
 pub mod ws;
 

@@ -2,7 +2,8 @@
 
 use crate::{
     branches, chats, diag, editor, fs as fsapi, git as gitapi, health::health, notes, projects,
-    providers, queue, scratchpad, settings, state::AppState, terminal, themes, worktrees, ws,
+    providers, queue, scratchpad, settings, state::AppState, terminal, themes, uploads, worktrees,
+    ws,
 };
 use axum::{
     http::Method,
@@ -109,7 +110,19 @@ pub fn build_router(state: AppState) -> Router {
         // Agent providers (Claude / future Codex / OpenCode / ...).
         // GET returns the detection status of every provider this
         // build knows about (installed? path? version?).
-        .route("/api/providers", get(providers::list));
+        .route("/api/providers", get(providers::list))
+        .route(
+            "/api/providers/:id/commands",
+            get(providers::commands),
+        )
+        // Uploads (drag-drop + image paste in chat input). The body
+        // limit is lifted just for these routes via a per-route layer
+        // below.
+        .route(
+            "/api/uploads",
+            post(uploads::create).layer(uploads::body_limit_layer()),
+        )
+        .route("/api/uploads/:id/raw", get(uploads::raw));
 
     let cors = CorsLayer::new()
         .allow_methods([

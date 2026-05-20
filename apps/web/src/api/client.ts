@@ -60,6 +60,8 @@ export interface ChatView {
   title: string;
   provider: string;
   model: string;
+  /** Provider thinking-effort hint (low|medium|high|xhigh|max). */
+  effort: string | null;
   created_at: string;
   session_id: string | null;
   prompts: Prompt[];
@@ -81,6 +83,7 @@ export interface Prompt {
 export type AgentEvent =
   | { type: "session_start"; session_id: string }
   | { type: "token"; text: string }
+  | { type: "thinking"; text: string }
   | { type: "tool_call"; name: string; args: unknown; id?: string | null }
   | { type: "tool_result"; name: string; result: unknown; id?: string | null }
   | { type: "done"; result: string | null; cost_usd: number | null }
@@ -103,6 +106,23 @@ export interface ProviderDescriptor {
   default_model: string;
   supports_resume: boolean;
   install_hint: string;
+}
+
+/** A single slash-command surfaced by a provider's CLI. */
+export interface SlashCommand {
+  name: string;
+  description: string;
+}
+
+/** Upload metadata returned by `POST /api/uploads`. */
+export interface UploadDto {
+  id: string;
+  filename: string;
+  content_type: string;
+  size: number;
+  /** Absolute path on disk. Embedded in chat prompts so the agent's
+   *  Read tool can fetch the file. */
+  path: string;
 }
 
 export interface Note {
@@ -271,14 +291,54 @@ export const api = {
     ),
   /** List every agent provider this build knows about (Claude, …). */
   listProviders: () => req<ProviderDescriptor[]>("/api/providers"),
-  /** Update mutable chat fields (currently just title). Returns the
-   *  fresh windowed ChatView so the FE can refresh its store in one
-   *  step. */
+  /** Update mutable chat fields. Each field is optional; unset
+   *  fields leave the corresponding chat property unchanged.
+   *
+   *  `effort` accepts a string (set), `null` (clear), or omission
+   *  (leave alone) — matching the BE's Option<Option<String>>
+   *  semantics. */
+  updateChat: (
+    id: string,
+    patch: {
+      title?: string;
+      model?: string;
+      effort?: string | null;
+    },
+  ) =>
+    req<ChatView>(`/api/chats/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  /** Back-compat alias used by the inline rename UI. */
   renameChat: (id: string, title: string) =>
     req<ChatView>(`/api/chats/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify({ title }),
     }),
+  /** Slash commands surfaced by a provider's CLI. */
+  listProviderCommands: (providerId: string) =>
+    req<SlashCommand[]>(
+      `/api/providers/${encodeURIComponent(providerId)}/commands`,
+    ),
+  /** Upload one or more files. The FormData should carry parts under
+   *  the field name `file`. Returns metadata (including the absolute
+   *  path the agent can read) for each upload. */
+  uploadFiles: async (files: File[]): Promise<UploadDto[]> => {
+    if (files.length === 0) return [];
+    const fd = new FormData();
+    for (const f of files) fd.append("file", f, f.name);
+    const url = `${baseUrl()}/api/uploads`;
+    const res = await fetch(url, { method: "POST", body: fd });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new ApiError(res.status, `${res.status} ${res.statusText}: ${text}`);
+    }
+    return (await res.json()) as UploadDto[];
+  },
+  /** Build the URL that streams an upload's raw bytes (used for
+   *  thumbnails / previews in the chat input). */
+  uploadRawUrl: (id: string) =>
+    `${baseUrl()}/api/uploads/${encodeURIComponent(id)}/raw`,
   // Queue
   getQueue: (chatId: string) => req<QueueState>(`/api/chats/${encodeURIComponent(chatId)}/queue`),
   enqueue: (chatId: string, body: string) =>

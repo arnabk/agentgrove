@@ -21,6 +21,7 @@ import {
   type AgentEvent,
   type ChatView,
   type Prompt,
+  type UploadDto,
 } from "../api/client";
 import { confirm } from "../components/dialog";
 import Markdown from "../components/Markdown";
@@ -81,6 +82,12 @@ export default function ChatPane() {
   const [input, setInput] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [err, setErr] = createSignal<string | null>(null);
+  // Pending uploads attached to the next prompt. Chips render below
+  // the textarea; on send we tack their absolute paths onto the
+  // prompt body so the agent's Read tool can fetch them.
+  const [uploads, setUploads] = createSignal<UploadDto[]>([]);
+  const [uploading, setUploading] = createSignal(false);
+  const [dragActive, setDragActive] = createSignal(false);
   // Inline rename state. `renamingId` is the chat being edited (or null);
   // `renameDraft` holds the in-flight input value.
   const [renamingId, setRenamingId] = createSignal<string | null>(null);
@@ -260,23 +267,92 @@ export default function ChatPane() {
     closeChatTab(id);
   }
 
+  /** Hand a list of File objects to the BE. Successful uploads append
+   *  to the pending-uploads list (rendered as chips). Failures bubble
+   *  up to the error chip. */
+  async function uploadFileList(files: File[]) {
+    if (files.length === 0) return;
+    setErr(null);
+    setUploading(true);
+    try {
+      const dtos = await api.uploadFiles(files);
+      setUploads((cur) => [...cur, ...dtos]);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function removeUpload(id: string) {
+    setUploads((cur) => cur.filter((u) => u.id !== id));
+  }
+
+  function onPaste(e: ClipboardEvent) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    for (const it of items) {
+      if (it.kind === "file") {
+        const f = it.getAsFile();
+        if (f) files.push(f);
+      }
+    }
+    if (files.length > 0) {
+      e.preventDefault();
+      void uploadFileList(files);
+    }
+  }
+
+  function onDrop(e: DragEvent) {
+    e.preventDefault();
+    setDragActive(false);
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length > 0) void uploadFileList(files);
+  }
+
+  function onDragOver(e: DragEvent) {
+    if (e.dataTransfer?.types?.includes("Files")) {
+      e.preventDefault();
+      setDragActive(true);
+    }
+  }
+
+  function onDragLeave(e: DragEvent) {
+    // Only deactivate when we leave the form entirely, not when
+    // moving between its child elements.
+    const related = e.relatedTarget as Node | null;
+    if (!related || !(e.currentTarget as HTMLElement).contains(related)) {
+      setDragActive(false);
+    }
+  }
+
   async function send(ev: SubmitEvent) {
     ev.preventDefault();
     const id = activeId();
-    const body = input().trim();
-    if (!id || !body) return;
+    let body = input().trim();
+    const atts = uploads();
+    if (!id || (!body && atts.length === 0)) return;
     setBusy(true);
     try {
+      // Tack file paths onto the prompt body so the agent's Read tool
+      // can pull them in. Format chosen to be unambiguous when the
+      // model parses it.
+      if (atts.length > 0) {
+        const lines = atts
+          .map(
+            (u) =>
+              `- ${u.path}${u.content_type ? ` (${u.content_type})` : ""}`,
+          )
+          .join("\n");
+        body = `${body}${body ? "\n\n" : ""}Attached files (absolute paths, read with your Read tool):\n${lines}`;
+      }
       // Optimistically add a prompt placeholder; the BE returns the
       // canonical record we replace it with. Token + tool events
       // flow in via the WS subscription.
       const prompt = await api.addPrompt(id, body);
       setChatStore(
         produce((s) => {
-          // The BE may already have appended terminal events (Done,
-          // Truncated) by the time the response returns; ignore them
-          // for tokens and rely on liveTokens, but keep the events
-          // array authoritative for tool calls / done / errors.
           s.prompts.push(prompt);
           if (s.prompts.length > MAX_PROMPTS_IN_VIEW) {
             s.prompts.shift();
@@ -284,6 +360,16 @@ export default function ChatPane() {
         }),
       );
       setInput("");
+      setUploads([]);
+      // Snap the textarea back to its initial height now that the
+      // text is gone. queueMicrotask lets Solid finish patching the
+      // value first.
+      queueMicrotask(() => {
+        const el = document.querySelector<HTMLTextAreaElement>(
+          '[data-testid="chat-input"]',
+        );
+        autoResizeTextarea(el);
+      });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -421,36 +507,126 @@ export default function ChatPane() {
 
       <form
         onSubmit={send}
-        class="px-4 py-3 border-t border-border bg-bg-1 flex gap-2 items-end"
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        class="px-4 py-3 border-t border-border bg-bg-1 flex flex-col gap-2 relative"
+        classList={{ "ring-2 ring-accent ring-inset": dragActive() }}
         data-testid="chat-input-form"
       >
-        <textarea
-          rows="1"
-          class="ag-input resize-none max-h-40"
-          placeholder="Message the agent…  (⏎ to send, ⇧⏎ for newline)"
-          value={input()}
-          onInput={(e) => setInput(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              const form = (e.currentTarget as HTMLTextAreaElement).form;
-              form?.requestSubmit();
+        <Show when={dragActive()}>
+          <div
+            class="pointer-events-none absolute inset-0 flex items-center justify-center bg-bg-2/80 backdrop-blur-sm text-[13px] text-fg"
+            data-testid="chat-drop-overlay"
+          >
+            Drop files to attach
+          </div>
+        </Show>
+        <Show when={uploads().length > 0 || uploading()}>
+          <div class="flex flex-wrap gap-1.5" data-testid="chat-uploads">
+            <For each={uploads()}>
+              {(u) => (
+                <span
+                  class="ag-chip font-mono text-[11.5px] flex items-center gap-1"
+                  title={`${u.path} · ${fmtBytes(u.size)}`}
+                  data-testid={`chat-upload-${u.id}`}
+                >
+                  <Show
+                    when={u.content_type.startsWith("image/")}
+                    fallback={<span class="text-fg-subtle">📎</span>}
+                  >
+                    <img
+                      src={api.uploadRawUrl(u.id)}
+                      alt={u.filename}
+                      class="w-4 h-4 rounded-sm object-cover"
+                    />
+                  </Show>
+                  <span class="truncate max-w-[160px]">{u.filename}</span>
+                  <button
+                    type="button"
+                    class="text-fg-subtle hover:text-danger"
+                    onClick={() => removeUpload(u.id)}
+                    aria-label={`Remove ${u.filename}`}
+                  >
+                    ✕
+                  </button>
+                </span>
+              )}
+            </For>
+            <Show when={uploading()}>
+              <span class="ag-chip text-[11.5px] text-fg-subtle italic">
+                Uploading…
+              </span>
+            </Show>
+          </div>
+        </Show>
+        <div class="flex gap-2 items-end">
+          <button
+            type="button"
+            class="ag-btn ag-btn-ghost ag-btn-icon"
+            title="Attach files"
+            aria-label="Attach files"
+            data-testid="chat-attach"
+            onClick={(e) => {
+              const input = (e.currentTarget as HTMLButtonElement)
+                .nextElementSibling as HTMLInputElement | null;
+              input?.click();
+            }}
+          >
+            <PaperclipIcon />
+          </button>
+          <input
+            type="file"
+            multiple
+            class="hidden"
+            data-testid="chat-attach-input"
+            onChange={(e) => {
+              const files = Array.from(e.currentTarget.files ?? []);
+              e.currentTarget.value = "";
+              if (files.length > 0) void uploadFileList(files);
+            }}
+          />
+          <textarea
+            rows="3"
+            class="ag-input resize-none max-h-60 min-h-[3.2em] flex-1 leading-relaxed"
+            placeholder="Message the agent…  (⏎ to send, ⇧⏎ for newline, - for bullets, paste/drop files to attach)"
+            value={input()}
+            onInput={(e) => {
+              setInput(e.currentTarget.value);
+              autoResizeTextarea(e.currentTarget);
+            }}
+            onPaste={onPaste}
+            onKeyDown={(e) =>
+              onChatInputKeyDown(e, () => {
+                const form = (e.currentTarget as HTMLTextAreaElement).form;
+                form?.requestSubmit();
+              })
             }
-          }}
-          disabled={!activeId() || busy()}
-          data-testid="chat-input"
-        />
-        <button
-          type="submit"
-          class="ag-btn ag-btn-primary"
-          disabled={!activeId() || busy() || !input().trim()}
-          data-testid="chat-send"
-        >
-          Send
-          <span class="ag-kbd !bg-transparent !border-transparent text-[var(--ag-accent-fg)] opacity-80">
-            ⏎
-          </span>
-        </button>
+            ref={(el) => {
+              // Keep height in sync with content on the first render
+              // and after programmatic value changes (e.g. clearing
+              // after send).
+              queueMicrotask(() => autoResizeTextarea(el));
+            }}
+            disabled={!activeId() || busy()}
+            data-testid="chat-input"
+          />
+          <button
+            type="submit"
+            class="ag-btn ag-btn-primary"
+            disabled={
+              !activeId() ||
+              busy() ||
+              (!input().trim() && uploads().length === 0)
+            }
+            data-testid="chat-send"
+          >
+            Send
+            <span class="ag-kbd !bg-transparent !border-transparent text-[var(--ag-accent-fg)] opacity-80">
+              ⏎
+            </span>
+          </button>
+        </div>
       </form>
     </section>
   );
@@ -634,6 +810,134 @@ function PromptRow(props: {
 }
 
 /** Render a single tool-call / tool-result / error / truncated badge. */
+/**
+ * Resize a textarea to fit its content up to its `max-height`. Solid
+ * doesn't ship a directive for this, so we call it manually on input
+ * and once after mount.
+ *
+ * Implementation: reset to `auto` first (otherwise scrollHeight is
+ * clamped by the previous height), then snap to scrollHeight. The
+ * CSS `max-height` keeps the upper bound; once exceeded, the
+ * textarea scrolls.
+ */
+function autoResizeTextarea(el: HTMLTextAreaElement | null | undefined): void {
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+
+/**
+ * Keydown handler for the chat textarea. Adds two behaviours on top
+ * of the default browser handling:
+ *
+ *   - `⏎` submits the form (caller-supplied `submit`); `⇧⏎` falls
+ *     through so a newline gets inserted.
+ *   - Pressing `⏎` on a line that starts with `- ` continues the
+ *     bullet list. Pressing it again on an *empty* `- ` line clears
+ *     the bullet and submits — the standard markdown editor pattern.
+ *   - Typing `-` at the very start of a line auto-appends a space
+ *     so users don't have to think about the formatting.
+ */
+function onChatInputKeyDown(
+  e: KeyboardEvent,
+  submit: () => void,
+): void {
+  const ta = e.currentTarget as HTMLTextAreaElement;
+  if (e.key === "Enter" && !e.shiftKey) {
+    // Inspect the current line. If it starts with a `- ` prefix
+    // (markdown bullet), continue the list instead of submitting.
+    const { selectionStart } = ta;
+    const before = ta.value.slice(0, selectionStart);
+    const lineStart = before.lastIndexOf("\n") + 1;
+    const lineSoFar = before.slice(lineStart);
+    const bullet = lineSoFar.match(/^(\s*)([-*])\s+(.*)$/);
+    if (bullet) {
+      const [, indent, marker, rest] = bullet;
+      if (rest === "") {
+        // Empty bullet → strip it and submit (common "end the list"
+        // gesture).
+        e.preventDefault();
+        const newValue =
+          ta.value.slice(0, lineStart) + ta.value.slice(selectionStart);
+        ta.value = newValue;
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        autoResizeTextarea(ta);
+        submit();
+        return;
+      }
+      // Non-empty bullet line: insert newline + same indent + marker.
+      e.preventDefault();
+      const insertion = `\n${indent}${marker} `;
+      const after = ta.value.slice(selectionStart);
+      const newValue = before + insertion + after;
+      ta.value = newValue;
+      const caret = selectionStart + insertion.length;
+      ta.setSelectionRange(caret, caret);
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+      autoResizeTextarea(ta);
+      return;
+    }
+    // Plain Enter outside a bullet: submit.
+    e.preventDefault();
+    submit();
+    return;
+  }
+  // Auto-format: at line start, "-" alone becomes "- " so users
+  // don't have to type the space.
+  if (e.key === "-" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+    const { selectionStart, selectionEnd } = ta;
+    if (selectionStart === selectionEnd) {
+      const before = ta.value.slice(0, selectionStart);
+      const atLineStart =
+        selectionStart === 0 || before.endsWith("\n");
+      if (atLineStart) {
+        e.preventDefault();
+        const insertion = "- ";
+        const after = ta.value.slice(selectionEnd);
+        ta.value = before + insertion + after;
+        const caret = selectionStart + insertion.length;
+        ta.setSelectionRange(caret, caret);
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        autoResizeTextarea(ta);
+        return;
+      }
+    }
+  }
+}
+
+/** Lucide `paperclip` — used by the chat input's attach button. */
+function PaperclipIcon() {
+  return (
+    <svg
+      width="1em"
+      height="1em"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.93 8.8l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+    </svg>
+  );
+}
+
+/** Compact byte formatter for upload chips. */
+function fmtBytes(b: number): string {
+  if (!Number.isFinite(b) || b <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let v = b;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  const fixed = v >= 100 || i === 0 ? 0 : v >= 10 ? 1 : 2;
+  return `${v.toFixed(fixed)} ${units[i]}`;
+}
+
 function ToolBadge(props: { ev: AgentEvent }) {
   switch (props.ev.type) {
     case "tool_call":
