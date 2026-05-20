@@ -45,6 +45,7 @@ export default [
         performance: "readonly",
         URLSearchParams: "readonly",
         PointerEvent: "readonly",
+        self: "readonly",
         __dirname: "readonly",
         __filename: "readonly",
       },
