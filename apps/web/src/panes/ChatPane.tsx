@@ -24,6 +24,7 @@ import {
   type Prompt,
   type UploadDto,
 } from "../api/client";
+import ChatSettingsDialog from "../components/ChatSettingsDialog";
 import { confirm } from "../components/dialog";
 import Markdown from "../components/Markdown";
 import {
@@ -98,6 +99,8 @@ export default function ChatPane() {
   // `renameDraft` holds the in-flight input value.
   const [renamingId, setRenamingId] = createSignal<string | null>(null);
   const [renameDraft, setRenameDraft] = createSignal("");
+  // Per-chat settings dialog (model / effort / slash commands).
+  const [chatSettingsOpen, setChatSettingsOpen] = createSignal(false);
 
   const scope = () => currentScope();
   const tabs = () => scope()?.chats ?? [];
@@ -490,9 +493,18 @@ export default function ChatPane() {
           )}
         </For>
         <Show when={chat()}>
-          <span class="ml-2 ag-chip ag-chip-accent" data-testid="chat-provider">
+          <button
+            type="button"
+            class="ml-2 ag-chip ag-chip-accent hover:opacity-80"
+            title={`${chat()!.provider}/${chat()!.model}${chat()!.effort ? ` · effort ${chat()!.effort}` : ""} — click to configure`}
+            data-testid="chat-provider"
+            onClick={() => setChatSettingsOpen(true)}
+          >
             {chat()!.provider}/{chat()!.model}
-          </span>
+            <Show when={chat()!.effort}>
+              <span class="ml-1 text-fg-subtle">· {chat()!.effort}</span>
+            </Show>
+          </button>
         </Show>
         <Show when={err()}>
           <span
@@ -656,6 +668,42 @@ export default function ChatPane() {
           </button>
         </div>
       </form>
+
+      <Show when={chatSettingsOpen() && chat()}>
+        <ChatSettingsDialog
+          chat={chat()!}
+          onClose={() => setChatSettingsOpen(false)}
+          onUpdated={(updated) => {
+            // Refresh the chat-level view + tab title in case it
+            // changed indirectly.
+            setChatStore("view", (v) => (v ? { ...v, ...updated } : v));
+            setScopeChats(
+              tabs().map((t) =>
+                t.id === updated.id ? { ...t, title: updated.title } : t,
+              ),
+            );
+          }}
+          onInsertCommand={(cmd) => {
+            // Insert `/cmd` at cursor in the chat textarea.
+            const ta = document.querySelector<HTMLTextAreaElement>(
+              '[data-testid="chat-input"]',
+            );
+            if (!ta) return;
+            const insertion = `/${cmd}`;
+            const start = ta.selectionStart;
+            const end = ta.selectionEnd;
+            const newValue =
+              ta.value.slice(0, start) + insertion + ta.value.slice(end);
+            ta.value = newValue;
+            setInput(newValue);
+            const caret = start + insertion.length;
+            ta.focus();
+            ta.setSelectionRange(caret, caret);
+            autoResizeTextarea(ta);
+            setChatSettingsOpen(false);
+          }}
+        />
+      </Show>
     </section>
   );
 }
