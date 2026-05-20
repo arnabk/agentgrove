@@ -81,16 +81,6 @@ function DirNode(props: DirNodeProps) {
           loading…
         </li>
       </Show>
-      <Show
-        when={open() && !entries.loading && (entries()?.length ?? 0) === 0}
-      >
-        <li
-          class="px-2 py-1 text-[11.5px] text-fg-subtle"
-          style={{ "padding-left": `${8 + props.depth * 12}px` }}
-        >
-          (empty)
-        </li>
-      </Show>
     </ul>
   );
 }

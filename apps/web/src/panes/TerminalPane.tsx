@@ -230,14 +230,7 @@ export default function TerminalPane() {
   return (
     <section data-testid="terminal-pane" class="flex flex-col h-full">
       <header class="h-11 px-3 flex items-center gap-1.5 border-b border-border bg-bg-1 overflow-x-auto">
-        <For
-          each={tabs()}
-          fallback={
-            <span class="text-[12.5px] text-fg-subtle italic px-2">
-              No terminals open in this project.
-            </span>
-          }
-        >
+        <For each={tabs()}>
           {(t) => (
             <div
               class="group inline-flex items-center gap-1 rounded-md border border-border bg-bg-2 pl-2 pr-1 py-1 text-[12px] cursor-pointer"

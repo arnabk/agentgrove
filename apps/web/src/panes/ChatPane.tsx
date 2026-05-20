@@ -153,14 +153,7 @@ export default function ChatPane() {
         class="h-11 px-2 flex items-center gap-1.5 border-b border-border bg-bg-1 overflow-x-auto"
         data-testid="chat-tabs"
       >
-        <For
-          each={tabs()}
-          fallback={
-            <span class="text-[12.5px] text-fg-subtle italic px-2">
-              No chats in this scope.
-            </span>
-          }
-        >
+        <For each={tabs()}>
           {(t) => (
             <div
               class="group inline-flex items-center gap-1 rounded-md border border-border bg-bg-2 pl-2 pr-1 py-1 text-[12px] cursor-pointer"

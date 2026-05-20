@@ -282,14 +282,7 @@ export default function LeftRail() {
         </Show>
 
         <ul class="space-y-0.5" data-testid="project-list">
-          <For
-            each={state.projects}
-            fallback={
-              <li class="text-[0.83em] text-fg-subtle px-2 py-2">
-                No projects yet. Click + to add one.
-              </li>
-            }
-          >
+          <For each={state.projects}>
             {(p) => {
               const isWorktree = looksLikeManagedWorktree(p.root);
               const kindLabel = isWorktree
@@ -457,14 +450,7 @@ export default function LeftRail() {
                   <Show when={open() && p.has_remote}>
                     <div class="mt-1 pl-4">
                       <ul class="space-y-0.5">
-                        <For
-                          each={state.worktrees[p.id] ?? []}
-                          fallback={
-                            <li class="text-[0.77em] text-fg-subtle italic px-2 py-1">
-                              no worktrees yet
-                            </li>
-                          }
-                        >
+                        <For each={state.worktrees[p.id] ?? []}>
                           {(w) => {
                             const wtActive = () =>
                               state.selectedProjectId === p.id &&
@@ -717,76 +703,76 @@ function FolderIcon() {
 
 /** Branch / worktree glyph. Distinct from FolderIcon so users can tell at
  *  a glance which entries are worktrees. */
+/** Lucide `git-branch`: vertical trunk with a branch splitting off
+ *  to the right — the standard "this is a worktree / branch" glyph. */
 function WorktreeIcon() {
   return (
     <svg
       width="1em" height="1em"
       viewBox="0 0 24 24"
       fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
       class="text-accent shrink-0"
       aria-hidden="true"
     >
-      <circle cx="6" cy="6" r="2.2" stroke="currentColor" stroke-width="1.6" />
-      <circle cx="6" cy="18" r="2.2" stroke="currentColor" stroke-width="1.6" />
-      <circle cx="18" cy="12" r="2.2" stroke="currentColor" stroke-width="1.6" />
-      <path
-        d="M6 8v8M8 6h6a4 4 0 0 1 4 4v0M8 18h6a4 4 0 0 0 4-4v0"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-      />
+      <line x1="6" x2="6" y1="3" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
     </svg>
   );
 }
 
-/** Branch icon with a small `+` glyph in the corner — used as the
- *  inline "+ worktree" action on the project row. */
+/** Lucide `git-branch-plus`: classic vertical line with a fork
+ *  branching to the right and a `+` glyph at the branch tip. Used as
+ *  the inline "+ worktree" action on the project row. */
 function BranchPlusIcon() {
   return (
     <svg
       width="1em" height="1em"
       viewBox="0 0 24 24"
       fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
       class="shrink-0"
       aria-hidden="true"
     >
-      {/* branching glyph (left two nodes + line) */}
-      <circle cx="6" cy="6" r="2" stroke="currentColor" stroke-width="1.6" />
-      <circle cx="6" cy="18" r="2" stroke="currentColor" stroke-width="1.6" />
-      <path
-        d="M6 8v8M8 6h5a3 3 0 0 1 3 3v3"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-      />
-      {/* `+` */}
-      <path
-        d="M19 12v6M16 15h6"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-      />
+      <path d="M6 3v12" />
+      <path d="M18 9a3 3 0 1 0-3 3" />
+      <path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+      <path d="M15 6h6" />
+      <path d="M18 3v6" />
     </svg>
   );
 }
 
-/** Speech bubble with a small `+` glyph in the corner — used as the
- *  inline "+ chat" action on project + worktree rows. */
+/** Lucide `git-compare-arrows`: two arrows pointing in opposite
+ *  directions between two endpoints — clearly reads as "compare /
+ *  diff". Used as the inline "View changes" action. */
 function DiffIcon() {
-  // Two stacked rectangles with +/- markers — represents "compare".
   return (
     <svg
       width="1em" height="1em"
       viewBox="0 0 24 24"
       fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
       class="shrink-0"
       aria-hidden="true"
     >
-      <path d="M9 4H5a1 1 0 0 0-1 1v10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-      <path d="M15 20h4a1 1 0 0 0 1-1V9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-      <path d="M7 9V5M5 7h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-      <path d="M15 17h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-      <path d="M14 4l-4 4M14 14l-4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="2 2" />
+      <circle cx="5" cy="6" r="3" />
+      <path d="M12 6h5a2 2 0 0 1 2 2v7" />
+      <path d="m15 9-3-3 3-3" />
+      <circle cx="19" cy="18" r="3" />
+      <path d="M12 18H7a2 2 0 0 1-2-2V9" />
+      <path d="m9 15 3 3-3 3" />
     </svg>
   );
 }
@@ -894,14 +880,6 @@ function DirNode(props: DirNodeProps) {
           style={{ "padding-left": `${8 + props.depth * 12}px` }}
         >
           loading…
-        </li>
-      </Show>
-      <Show when={open() && !entries.loading && (entries()?.length ?? 0) === 0}>
-        <li
-          class="px-2 py-1 text-[0.77em] text-fg-subtle"
-          style={{ "padding-left": `${8 + props.depth * 12}px` }}
-        >
-          (empty)
         </li>
       </Show>
     </ul>
