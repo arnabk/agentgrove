@@ -18,44 +18,80 @@ import { api, type MemoryReport } from "../api/client";
  *      label changes from `Tab` to `Tab JS` so the discrepancy with
  *      Chrome's Task Manager is explicit.
  */
+/** How often we re-poll the BE memory endpoint + JS heap (cheap, sync). */
+const BE_POLL_MS = 2000;
+/** Minimum spacing between whole-tab measurements. Chrome itself caps
+ *  these at ~10 s; we add headroom so we don't fire and immediately
+ *  reject for the next call. */
+const FULL_TAB_INTERVAL_MS = 12_000;
+
 export default function MemoryIndicator() {
   const [report, setReport] = createSignal<MemoryReport | null>(null);
   const [tabHeap, setTabHeap] = createSignal<JsHeap | null>(null);
   const [tabFull, setTabFull] = createSignal<TabFullMeasurement | null>(null);
+  const [tabFullAt, setTabFullAt] = createSignal<number | null>(null);
   const [open, setOpen] = createSignal(false);
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let beTimer: ReturnType<typeof setInterval> | null = null;
+  let fullTabTimer: ReturnType<typeof setTimeout> | null = null;
+  let fullTabInFlight = false;
   let rootEl: HTMLDivElement | undefined;
 
   const canMeasureFullTab = isolatedAndSupported();
 
-  async function refresh() {
+  /** Cheap, synchronous: BE RSS + JS heap. */
+  async function refreshBe() {
     try {
       setReport(await api.getMemory());
     } catch {
       // ignore — BE may be momentarily down
     }
     setTabHeap(readPerformanceMemory());
-    if (canMeasureFullTab) {
-      try {
-        const r = await measureFullTab();
-        if (r) setTabFull(r);
-      } catch {
-        // measurement throttled (10s minimum interval) or denied;
-        // keep last value
+  }
+
+  /** Expensive, throttled: whole-tab measurement.
+   *
+   *  Chrome throttles `measureUserAgentSpecificMemory` so aggressively
+   *  that piggybacking it on the 2 s BE poll causes most calls to
+   *  reject. We run it on its own ≥12 s schedule and guard against
+   *  overlapping calls with `fullTabInFlight`. */
+  async function refreshFullTab() {
+    if (!canMeasureFullTab || fullTabInFlight) {
+      // Re-arm and bail.
+      scheduleFullTab();
+      return;
+    }
+    fullTabInFlight = true;
+    try {
+      const r = await measureFullTab();
+      if (r) {
+        setTabFull(r);
+        setTabFullAt(Date.now());
       }
+    } catch {
+      // Throttled or denied. Keep the last good value.
+    } finally {
+      fullTabInFlight = false;
+      scheduleFullTab();
     }
   }
 
+  function scheduleFullTab() {
+    if (fullTabTimer !== null) {
+      clearTimeout(fullTabTimer);
+      fullTabTimer = null;
+    }
+    fullTabTimer = setTimeout(() => void refreshFullTab(), FULL_TAB_INTERVAL_MS);
+  }
+
   onMount(() => {
-    void refresh();
-    // measureUserAgentSpecificMemory is throttled at ~10s server-side;
-    // poll at that cadence to match. BE poll stays at 2s via a
-    // separate interval.
-    timer = setInterval(() => void refresh(), 2000);
+    void refreshBe();
+    void refreshFullTab();
+    beTimer = setInterval(() => void refreshBe(), BE_POLL_MS);
     document.addEventListener("mousedown", onDocDown);
   });
   onCleanup(() => {
-    if (timer) clearInterval(timer);
+    if (beTimer) clearInterval(beTimer);
+    if (fullTabTimer) clearTimeout(fullTabTimer);
     document.removeEventListener("mousedown", onDocDown);
   });
 
@@ -69,6 +105,16 @@ export default function MemoryIndicator() {
   /** Prefer the whole-tab measurement; fall back to JS heap. */
   const tabBytes = () => tabFull()?.bytes ?? tabHeap()?.usedJSHeapSize ?? 0;
   const tabLabel = () => (tabFull() ? "Tab" : "Tab JS");
+  /** Localized "5s ago" style for the popover. */
+  function staleLabel(): string {
+    const t = tabFullAt();
+    if (!t) return "—";
+    const dt = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    if (dt < 5) return "just now";
+    if (dt < 60) return `${dt}s ago`;
+    const m = Math.floor(dt / 60);
+    return `${m}m ago`;
+  }
 
   return (
     <div
@@ -155,8 +201,9 @@ export default function MemoryIndicator() {
                 </For>
               </div>
               <p class="mt-1 text-[0.73em] text-fg-subtle">
-                via performance.measureUserAgentSpecificMemory().
-                Refreshes every ~10s.
+                via performance.measureUserAgentSpecificMemory() ·
+                last sampled {staleLabel()}. Chrome throttles this
+                call so it refreshes about every 12 s.
               </p>
             </Section>
           </Show>
