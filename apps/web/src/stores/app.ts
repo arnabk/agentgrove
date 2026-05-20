@@ -407,6 +407,10 @@ export function applySettings(s: UserSettings) {
   const fontSize = s.font_size ?? DEFAULT_FONT_SIZE;
   root.style.setProperty("--ag-font-ui", uiFont);
   root.style.setProperty("--ag-font-mono", monoFont);
+  // Expose the base UI size as both an explicit var (consumed by panels
+  // that opt-in via em-relative sizing) and as the root font-size so
+  // any rem-based styles also pick it up.
+  root.style.setProperty("--ag-font-size", `${fontSize}px`);
   root.style.fontSize = `${fontSize}px`;
   if (s.theme) {
     if (state.themes.length > 0) setTheme(s.theme);

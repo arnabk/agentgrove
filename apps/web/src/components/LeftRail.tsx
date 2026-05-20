@@ -238,17 +238,20 @@ export default function LeftRail() {
   return (
     <aside
       class="shrink-0 border-r border-border bg-transparent flex flex-col relative"
-      style={{ width: `${width()}px` }}
+      style={{
+        width: `${width()}px`,
+        "font-size": "var(--ag-font-size, 15px)",
+      }}
       data-testid="left-rail"
     >
       <div class="px-5 h-12 flex items-center gap-2.5 border-b border-border">
         <Logo />
-        <span class="text-[13.5px] font-semibold tracking-tight">AgentGrove</span>
+        <span class="text-[0.9em] font-semibold tracking-tight">AgentGrove</span>
       </div>
 
       <div class="flex-1 overflow-y-auto px-3 py-4">
         <div class="flex items-center justify-between px-2 mb-2">
-          <h3 class="text-[11px] font-semibold uppercase tracking-wider text-fg-subtle">
+          <h3 class="text-[0.8em] font-semibold uppercase tracking-wider text-fg-subtle">
             Projects
           </h3>
           <button
@@ -264,7 +267,7 @@ export default function LeftRail() {
 
         <Show when={err()}>
           <p
-            class="text-[11.5px] text-danger px-2 mb-2"
+            class="text-[0.77em] text-danger px-2 mb-2"
             data-testid="new-project-error"
           >
             {err()}
@@ -282,7 +285,7 @@ export default function LeftRail() {
           <For
             each={state.projects}
             fallback={
-              <li class="text-[12.5px] text-fg-subtle px-2 py-2">
+              <li class="text-[0.83em] text-fg-subtle px-2 py-2">
                 No projects yet. Click + to add one.
               </li>
             }
@@ -341,7 +344,7 @@ export default function LeftRail() {
                     </button>
 
                     {isWorktree ? <WorktreeIcon /> : <FolderIcon />}
-                    <span class="truncate text-[13.5px] min-w-0 flex-1">{p.name}</span>
+                    <span class="truncate text-[0.97em] min-w-0 flex-1">{p.name}</span>
 
                     {/* Right-edge cluster: chips + action icons.
                         flex-nowrap + shrink-0 keep these on the same line; the
@@ -350,7 +353,7 @@ export default function LeftRail() {
                       {/* Worktree branch */}
                       <Show when={isWorktree && p.current_branch}>
                         <span
-                          class="ag-chip ag-chip-accent font-mono !text-[10.5px] !py-[1px] whitespace-nowrap"
+                          class="ag-chip ag-chip-accent font-mono !text-[0.77em] !py-[2px] whitespace-nowrap"
                           title={`Branch ${p.current_branch}`}
                         >
                           ⎇ {p.current_branch}
@@ -362,7 +365,7 @@ export default function LeftRail() {
                           right (only shown when has_remote is true). */}
                       <Show when={!isWorktree && p.is_git && p.current_branch}>
                         <span
-                          class="ag-chip font-mono !text-[10.5px] !py-[1px] whitespace-nowrap"
+                          class="ag-chip font-mono !text-[0.7em] !py-[1px] whitespace-nowrap"
                           title={
                             p.has_remote
                               ? `Branch ${p.current_branch} · remotes: ${(p.remotes ?? []).join(", ") || "yes"}`
@@ -457,7 +460,7 @@ export default function LeftRail() {
                         <For
                           each={state.worktrees[p.id] ?? []}
                           fallback={
-                            <li class="text-[11.5px] text-fg-subtle italic px-2 py-1">
+                            <li class="text-[0.77em] text-fg-subtle italic px-2 py-1">
                               no worktrees yet
                             </li>
                           }
@@ -508,7 +511,7 @@ export default function LeftRail() {
                                     <Chevron open={wtOpen()} />
                                   </button>
                                   <WorktreeIcon />
-                                  <span class="truncate text-[12.5px] font-mono min-w-0 flex-1">
+                                  <span class="truncate text-[0.83em] font-mono min-w-0 flex-1">
                                     {w.branch}
                                   </span>
                                   {/* Status chip only when not in the steady
@@ -517,7 +520,7 @@ export default function LeftRail() {
                                       transitions. */}
                                   <Show when={w.status !== "ready"}>
                                     <span
-                                      class="ml-auto ag-chip !text-[10px] !py-[1px] whitespace-nowrap"
+                                      class="ml-auto ag-chip !text-[0.67em] !py-[1px] whitespace-nowrap"
                                       classList={{
                                         "ag-chip-warn":
                                           w.status === "creating" ||
@@ -584,7 +587,7 @@ export default function LeftRail() {
 
                   {/* Helper hint when project is a git repo without a remote. */}
                   <Show when={open() && p.is_git && !p.has_remote && !isWorktree}>
-                    <p class="px-2 mt-2 text-[11px] text-fg-subtle italic">
+                    <p class="px-2 mt-2 text-[0.73em] text-fg-subtle italic">
                       Add a git remote to enable worktrees.
                     </p>
                   </Show>
@@ -655,7 +658,7 @@ export default function LeftRail() {
 
 function Logo() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
         d="M12 2 4 7v10l8 5 8-5V7l-8-5Z"
         stroke="var(--ag-accent)"
@@ -674,7 +677,7 @@ function Logo() {
 
 function PlusIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
     </svg>
   );
@@ -682,7 +685,7 @@ function PlusIcon() {
 
 function XIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg width="0.85em" height="0.85em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
         d="M6 6l12 12M18 6L6 18"
         stroke="currentColor"
@@ -696,8 +699,7 @@ function XIcon() {
 function FolderIcon() {
   return (
     <svg
-      width="14"
-      height="14"
+      width="1em" height="1em"
       viewBox="0 0 24 24"
       fill="none"
       class="text-fg-subtle shrink-0"
@@ -718,8 +720,7 @@ function FolderIcon() {
 function WorktreeIcon() {
   return (
     <svg
-      width="14"
-      height="14"
+      width="1em" height="1em"
       viewBox="0 0 24 24"
       fill="none"
       class="text-accent shrink-0"
@@ -743,8 +744,7 @@ function WorktreeIcon() {
 function BranchPlusIcon() {
   return (
     <svg
-      width="14"
-      height="14"
+      width="1em" height="1em"
       viewBox="0 0 24 24"
       fill="none"
       class="shrink-0"
@@ -776,8 +776,7 @@ function DiffIcon() {
   // Two stacked rectangles with +/- markers — represents "compare".
   return (
     <svg
-      width="14"
-      height="14"
+      width="1em" height="1em"
       viewBox="0 0 24 24"
       fill="none"
       class="shrink-0"
@@ -796,8 +795,7 @@ function HistoryIcon() {
   // Clock with arrow — represents "history / restore".
   return (
     <svg
-      width="14"
-      height="14"
+      width="1em" height="1em"
       viewBox="0 0 24 24"
       fill="none"
       class="shrink-0"
@@ -824,8 +822,7 @@ function HistoryIcon() {
 function ChatPlusIcon() {
   return (
     <svg
-      width="14"
-      height="14"
+      width="1em" height="1em"
       viewBox="0 0 24 24"
       fill="none"
       class="shrink-0"
@@ -893,7 +890,7 @@ function DirNode(props: DirNodeProps) {
       </For>
       <Show when={open() && entries.loading}>
         <li
-          class="px-2 py-1 text-[11.5px] text-fg-subtle"
+          class="px-2 py-1 text-[0.77em] text-fg-subtle"
           style={{ "padding-left": `${8 + props.depth * 12}px` }}
         >
           loading…
@@ -901,7 +898,7 @@ function DirNode(props: DirNodeProps) {
       </Show>
       <Show when={open() && !entries.loading && (entries()?.length ?? 0) === 0}>
         <li
-          class="px-2 py-1 text-[11.5px] text-fg-subtle"
+          class="px-2 py-1 text-[0.77em] text-fg-subtle"
           style={{ "padding-left": `${8 + props.depth * 12}px` }}
         >
           (empty)
@@ -925,7 +922,7 @@ function FolderRow(props: { path: string; name: string; depth: number }) {
       >
         <Chevron open={open()} />
         <TreeFolderIcon />
-        <span class="truncate text-[12.5px]">{props.name}</span>
+        <span class="truncate text-[0.83em]">{props.name}</span>
       </button>
       <Show when={open()}>
         <DirNode path={props.path} depth={props.depth + 1} />
@@ -951,7 +948,7 @@ function FileRow(props: { path: string; name: string; depth: number }) {
         data-testid={`tree-file-${props.path}`}
       >
         <TreeFileIcon />
-        <span class="truncate text-[12.5px]">{props.name}</span>
+        <span class="truncate text-[0.83em]">{props.name}</span>
       </button>
     </li>
   );
@@ -960,8 +957,7 @@ function FileRow(props: { path: string; name: string; depth: number }) {
 function Chevron(props: { open: boolean }) {
   return (
     <svg
-      width="10"
-      height="10"
+      width="0.72em" height="0.72em"
       viewBox="0 0 24 24"
       fill="none"
       aria-hidden="true"
@@ -985,8 +981,7 @@ function Chevron(props: { open: boolean }) {
 function TreeFolderIcon() {
   return (
     <svg
-      width="13"
-      height="13"
+      width="0.92em" height="0.92em"
       viewBox="0 0 24 24"
       fill="none"
       aria-hidden="true"
@@ -1005,8 +1000,7 @@ function TreeFolderIcon() {
 function TreeFileIcon() {
   return (
     <svg
-      width="13"
-      height="13"
+      width="0.92em" height="0.92em"
       viewBox="0 0 24 24"
       fill="none"
       aria-hidden="true"

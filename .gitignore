@@ -14,6 +14,10 @@ coverage
 playwright-report
 test-results
 .playwright
+.playwright-mcp/
+# Ad-hoc screenshots from live UI verification
+/rail-*.png
+/screenshot-*.png
 
 # Editors / OS
 .idea
