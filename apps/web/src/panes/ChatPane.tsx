@@ -27,6 +27,7 @@ import {
 import ChatSettingsDialog from "../components/ChatSettingsDialog";
 import { confirm } from "../components/dialog";
 import Markdown from "../components/Markdown";
+import QueuePanel from "../components/QueuePanel";
 import {
   closeChatTab,
   currentScope,
@@ -101,6 +102,14 @@ export default function ChatPane() {
   const [renameDraft, setRenameDraft] = createSignal("");
   // Per-chat settings dialog (model / effort / slash commands).
   const [chatSettingsOpen, setChatSettingsOpen] = createSignal(false);
+  // Queue panel visibility. Persisted across reloads so users who
+  // rely on it don't have to re-open after every refresh.
+  const [queueOpen, setQueueOpen] = createSignal(
+    localStorage.getItem("ag-chat-queue-open") === "1",
+  );
+  createEffect(() => {
+    localStorage.setItem("ag-chat-queue-open", queueOpen() ? "1" : "0");
+  });
 
   const scope = () => currentScope();
   const tabs = () => scope()?.chats ?? [];
@@ -526,6 +535,14 @@ export default function ChatPane() {
         onLoadOlder={() => void loadOlder()}
         onRevert={(p) => void revert(p)}
       />
+
+      <Show when={activeId()}>
+        <QueuePanel
+          chatId={activeId()!}
+          open={queueOpen()}
+          onToggle={(v) => setQueueOpen(v)}
+        />
+      </Show>
 
       <form
         onSubmit={send}
