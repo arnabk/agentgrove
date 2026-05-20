@@ -1048,6 +1048,20 @@ function VirtualizedTimeline(props: {
     getItemKey: (i) => props.prompts[i]?.id ?? i,
   });
 
+  /** Height of the un-rendered prefix in pixels. The first virtual
+   *  item's `start` happens to be exactly that height since
+   *  measurements are cumulative from index 0. */
+  const topSpacer = () => virtualizer.getVirtualItems()[0]?.start ?? 0;
+  /** Height of the un-rendered suffix in pixels: total - (last
+   *  rendered item's end). */
+  const bottomSpacer = () => {
+    const items = virtualizer.getVirtualItems();
+    const total = virtualizer.getTotalSize();
+    const last = items[items.length - 1];
+    if (!last) return 0;
+    return Math.max(0, total - (last.start + last.size));
+  };
+
   // Auto-scroll to bottom when a new prompt is appended at the tail
   // (the user just hit send). Don't auto-scroll on backfill of older
   // prompts — that would yank the viewport away from what the user
@@ -1094,39 +1108,55 @@ function VirtualizedTimeline(props: {
           </button>
         </div>
       </Show>
-      <div
-        style={{
-          height: `${virtualizer.getTotalSize()}px`,
-          width: "100%",
-          position: "relative",
-        }}
-      >
+      {/* Flow-layout windowed render.
+         *
+         * We previously used the virtualizer's transform-positioned
+         * absolute layout, but variable-height bubbles (assistant
+         * replies grow as tokens stream in) consistently failed to
+         * re-measure correctly in our usage — items overlapped at
+         * the estimated stride.
+         *
+         * For the chat use case (modest counts; growing bubbles) the
+         * windowed-but-naturally-stacked approach is much more
+         * robust: we still mount only the visible-plus-overscan
+         * window via virtualizer.getVirtualItems(), but each row is
+         * `position: static`, so the browser handles the layout
+         * arithmetic that the virtualizer's estimateSize struggles
+         * with.
+         *
+         * Top/bottom padding spacers fake the height of the
+         * un-rendered prefix / suffix so the scrollbar stays
+         * proportional. */}
+      <div style={{ width: "100%" }}>
+        <div
+          style={{ height: `${topSpacer()}px` }}
+          aria-hidden="true"
+        />
         <For each={virtualizer.getVirtualItems()}>
           {(vi) => {
-            const prompt = props.prompts[vi.index];
-            if (!prompt) return null;
+            const prompt = () => props.prompts[vi.index];
             return (
-              <div
-                ref={(el) => virtualizer.measureElement(el)}
-                data-index={vi.index}
-                style={{
-                  position: "absolute",
-                  top: "0px",
-                  left: "0px",
-                  width: "100%",
-                  transform: `translateY(${vi.start}px)`,
-                }}
-              >
-                <PromptRow
-                  prompt={prompt}
-                  liveToken={props.liveTokens[prompt.id]}
-                  liveThinking={props.liveThinking[prompt.id]}
-                  onRevert={() => props.onRevert(prompt)}
-                />
-              </div>
+              <Show when={prompt()}>
+                <div
+                  ref={virtualizer.measureElement}
+                  data-index={vi.index}
+                  style={{ width: "100%" }}
+                >
+                  <PromptRow
+                    prompt={prompt()!}
+                    liveToken={props.liveTokens[prompt()!.id]}
+                    liveThinking={props.liveThinking[prompt()!.id]}
+                    onRevert={() => props.onRevert(prompt()!)}
+                  />
+                </div>
+              </Show>
             );
           }}
         </For>
+        <div
+          style={{ height: `${bottomSpacer()}px` }}
+          aria-hidden="true"
+        />
       </div>
     </div>
   );
