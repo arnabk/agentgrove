@@ -102,6 +102,17 @@ export default function ChatPane() {
   const [renameDraft, setRenameDraft] = createSignal("");
   // Per-chat settings dialog (model / effort / slash commands).
   const [chatSettingsOpen, setChatSettingsOpen] = createSignal(false);
+  // Slash-command menu. We open it as soon as the user types `/` at
+  // the very start of the input (or the start of any line) and close
+  // on space / Esc / send. The query is whatever follows the slash
+  // up to the next whitespace.
+  const [slashQuery, setSlashQuery] = createSignal<string | null>(null);
+  const [slashIdx, setSlashIdx] = createSignal(0);
+  // Cached slash commands for the active chat's provider. Refreshed
+  // on chat change (effect declared further down after chat() exists).
+  const [providerCommands, setProviderCommands] = createSignal<
+    { name: string; description: string }[]
+  >([]);
   // Queue drawer visibility. Persisted across reloads so users who
   // rely on it don't have to re-open after every refresh.
   const [queueOpen, setQueueOpen] = createSignal(
@@ -502,6 +513,121 @@ export default function ChatPane() {
 
   const chat = createMemo(() => chatStore.view);
 
+  // Load slash commands for the active chat's provider. Refreshes
+  // whenever the chat (and therefore the provider) changes.
+  createEffect(() => {
+    const c = chat();
+    if (!c) {
+      setProviderCommands([]);
+      return;
+    }
+    void api
+      .listProviderCommands(c.provider)
+      .then(setProviderCommands)
+      .catch(() => setProviderCommands([]));
+  });
+
+  /** Combined suggestion list filtered by `slashQuery()`. Provider
+   *  slash commands first, then saved prompt templates. Each entry
+   *  knows how to apply itself to the textarea. */
+  interface SlashSuggestion {
+    key: string;
+    label: string;
+    hint: string;
+    /** Text to insert (replaces the `/<query>` token). */
+    insert: string;
+    /** Description for tooltip / second line. */
+    detail: string;
+  }
+  function suggestions(): SlashSuggestion[] {
+    const q = slashQuery();
+    if (q === null) return [];
+    const needle = q.toLowerCase();
+    const cmds: SlashSuggestion[] = providerCommands().map((c) => ({
+      key: `cmd:${c.name}`,
+      label: `/${c.name}`,
+      hint: "command",
+      insert: `/${c.name}`,
+      detail: c.description,
+    }));
+    const prompts: SlashSuggestion[] = (state.settings.prompts ?? []).map(
+      (p) => ({
+        key: `prompt:${p.id}`,
+        label: p.name,
+        hint: "prompt",
+        insert: p.body,
+        detail: p.body.split("\n")[0] ?? "",
+      }),
+    );
+    const all = [...cmds, ...prompts];
+    if (!needle) return all.slice(0, 12);
+    return all
+      .filter(
+        (s) =>
+          s.label.toLowerCase().includes(needle) ||
+          s.detail.toLowerCase().includes(needle),
+      )
+      .slice(0, 12);
+  }
+
+  /** Apply a suggestion: locate the `/<query>` token in the input
+   *  value, swap it for the insertion, and move the caret to the
+   *  end of the inserted text. */
+  function applySlash(suggestion: SlashSuggestion) {
+    const ta = document.querySelector<HTMLTextAreaElement>(
+      '[data-testid="chat-input"]',
+    );
+    if (!ta) return;
+    const value = ta.value;
+    const cursor = ta.selectionStart;
+    // The slash query is everything from the most recent slash before
+    // `cursor` (that sits at line start) up to the cursor.
+    const before = value.slice(0, cursor);
+    const slashAt = before.lastIndexOf("/");
+    if (slashAt < 0) return;
+    const atLineStart =
+      slashAt === 0 || value[slashAt - 1] === "\n" || value[slashAt - 1] === " ";
+    if (!atLineStart) return;
+    const newValue =
+      value.slice(0, slashAt) + suggestion.insert + value.slice(cursor);
+    ta.value = newValue;
+    setInput(newValue);
+    const caret = slashAt + suggestion.insert.length;
+    ta.focus();
+    ta.setSelectionRange(caret, caret);
+    autoResizeTextarea(ta);
+    setSlashQuery(null);
+    setSlashIdx(0);
+  }
+
+  /** Inspect the textarea's current value + cursor and update the
+   *  slash menu state. Called from onInput and after Enter to track
+   *  what `/<token>` the user has typed. */
+  function updateSlashState(ta: HTMLTextAreaElement) {
+    const cursor = ta.selectionStart;
+    const before = ta.value.slice(0, cursor);
+    const slashAt = before.lastIndexOf("/");
+    if (slashAt < 0) {
+      setSlashQuery(null);
+      return;
+    }
+    const atLineStart =
+      slashAt === 0 || before[slashAt - 1] === "\n" || before[slashAt - 1] === " ";
+    if (!atLineStart) {
+      setSlashQuery(null);
+      return;
+    }
+    const token = before.slice(slashAt + 1);
+    // Token ends at the next whitespace; if it contains one, abort
+    // the menu (the user moved on).
+    if (/\s/.test(token)) {
+      setSlashQuery(null);
+      return;
+    }
+    setSlashQuery(token);
+    setSlashIdx(0);
+  }
+
   return (
     <section data-testid="chat-pane" class="flex flex-col h-full">
       {/* Tab strip */}
@@ -751,35 +877,82 @@ export default function ChatPane() {
               autoResizeTextarea(ta);
             }}
           />
-          <textarea
-            rows="3"
-            class="ag-input resize-none max-h-60 min-h-[3.2em] flex-1 leading-relaxed"
-            placeholder={
-              busy()
-                ? "Agent is working… ⏎ to enqueue, ⇧⏎ for newline"
-                : "Message the agent…  (⏎ to send, ⇧⏎ for newline, - for bullets, paste/drop files to attach)"
-            }
-            value={input()}
-            onInput={(e) => {
-              setInput(e.currentTarget.value);
-              autoResizeTextarea(e.currentTarget);
-            }}
-            onPaste={onPaste}
-            onKeyDown={(e) =>
-              onChatInputKeyDown(e, () => {
-                const form = (e.currentTarget as HTMLTextAreaElement).form;
-                form?.requestSubmit();
-              })
-            }
-            ref={(el) => {
-              // Keep height in sync with content on the first render
-              // and after programmatic value changes (e.g. clearing
-              // after send).
-              queueMicrotask(() => autoResizeTextarea(el));
-            }}
-            disabled={!activeId()}
-            data-testid="chat-input"
-          />
+          <div class="flex-1 relative">
+            <SlashMenu
+              query={slashQuery()}
+              suggestions={suggestions()}
+              activeIdx={slashIdx()}
+              onPick={applySlash}
+              onHoverIdx={setSlashIdx}
+            />
+            <textarea
+              rows="3"
+              class="ag-input resize-none max-h-60 min-h-[3.2em] w-full leading-relaxed"
+              placeholder={
+                busy()
+                  ? "Agent is working… ⏎ to enqueue, ⇧⏎ for newline"
+                  : "Message the agent…  (⏎ to send, ⇧⏎ for newline, / for commands, - for bullets, paste/drop files to attach)"
+              }
+              value={input()}
+              onInput={(e) => {
+                setInput(e.currentTarget.value);
+                autoResizeTextarea(e.currentTarget);
+                updateSlashState(e.currentTarget);
+              }}
+              onPaste={onPaste}
+              onKeyDown={(e) => {
+                // While the slash menu is open, arrow keys + Enter +
+                // Tab + Escape drive the menu instead of the
+                // textarea defaults.
+                if (slashQuery() !== null) {
+                  const list = suggestions();
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    if (list.length > 0) {
+                      setSlashIdx((i) => (i + 1) % list.length);
+                    }
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    if (list.length > 0) {
+                      setSlashIdx((i) => (i - 1 + list.length) % list.length);
+                    }
+                    return;
+                  }
+                  if (e.key === "Enter" || e.key === "Tab") {
+                    if (list.length > 0) {
+                      e.preventDefault();
+                      applySlash(list[slashIdx()] ?? list[0]!);
+                      return;
+                    }
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setSlashQuery(null);
+                    return;
+                  }
+                }
+                onChatInputKeyDown(e, () => {
+                  const form = (e.currentTarget as HTMLTextAreaElement).form;
+                  form?.requestSubmit();
+                });
+              }}
+              onSelect={(e) =>
+                updateSlashState(e.currentTarget as HTMLTextAreaElement)
+              }
+              onBlur={() => {
+                // Defer close so a mouse click on the menu still
+                // fires before the menu disappears.
+                setTimeout(() => setSlashQuery(null), 150);
+              }}
+              ref={(el) => {
+                queueMicrotask(() => autoResizeTextarea(el));
+              }}
+              disabled={!activeId()}
+              data-testid="chat-input"
+            />
+          </div>
           <button
             type="submit"
             class="ag-btn ag-btn-primary"
@@ -1162,6 +1335,68 @@ function onChatInputKeyDown(
  *  existing `state.settings.prompts` (managed in Settings → Prompts).
  *  No prompts -> the button is still rendered but disabled with a
  *  hint pointing the user at the settings tab. */
+/** Popover floating above the chat textarea that surfaces provider
+ *  slash-commands and saved prompts matching the user's `/<query>`.
+ *  Mounted only when `query` is non-null; an empty string means the
+ *  user just typed `/` and we show the full list. */
+function SlashMenu(props: {
+  query: string | null;
+  suggestions: {
+    key: string;
+    label: string;
+    hint: string;
+    insert: string;
+    detail: string;
+  }[];
+  activeIdx: number;
+  onPick: (s: {
+    key: string;
+    label: string;
+    hint: string;
+    insert: string;
+    detail: string;
+  }) => void;
+  onHoverIdx: (i: number) => void;
+}) {
+  return (
+    <Show when={props.query !== null && props.suggestions.length > 0}>
+      <div
+        class="absolute bottom-full left-0 right-0 mb-2 max-h-64 overflow-y-auto rounded-lg border border-border bg-bg-1 shadow-2xl z-30"
+        data-testid="chat-slash-menu"
+      >
+        <For each={props.suggestions}>
+          {(s, i) => (
+            <button
+              type="button"
+              class="w-full text-left px-3 py-1.5 flex items-baseline gap-2"
+              classList={{
+                "bg-bg-3": i() === props.activeIdx,
+                "hover:bg-bg-2": i() !== props.activeIdx,
+              }}
+              onMouseEnter={() => props.onHoverIdx(i())}
+              onMouseDown={(e) => {
+                // Prevent textarea blur so the click lands on the
+                // pick handler before our onBlur dismiss timer.
+                e.preventDefault();
+                props.onPick(s);
+              }}
+              data-testid={`chat-slash-${s.key}`}
+            >
+              <span class="text-[12.5px] font-mono text-fg">{s.label}</span>
+              <span class="text-[10.5px] uppercase tracking-wide text-fg-subtle">
+                {s.hint}
+              </span>
+              <span class="text-[11.5px] text-fg-subtle truncate flex-1 text-right">
+                {s.detail}
+              </span>
+            </button>
+          )}
+        </For>
+      </div>
+    </Show>
+  );
+}
+
 function PromptsPicker(props: { onInsert: (body: string) => void }) {
   const [open, setOpen] = createSignal(false);
   let rootEl: HTMLDivElement | undefined;
