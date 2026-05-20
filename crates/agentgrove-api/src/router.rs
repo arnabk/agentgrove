@@ -2,7 +2,7 @@
 
 use crate::{
     branches, chats, diag, editor, fs as fsapi, git as gitapi, health::health, notes, projects,
-    queue, scratchpad, settings, state::AppState, terminal, themes, worktrees, ws,
+    providers, queue, scratchpad, settings, state::AppState, terminal, themes, worktrees, ws,
 };
 use axum::{
     http::Method,
@@ -48,7 +48,10 @@ pub fn build_router(state: AppState) -> Router {
                 .post(chats::create_for_project_handler),
         )
         .route("/api/chats/:id", get(chats::get_one))
-        .route("/api/chats/:id/prompts", post(chats::add_prompt))
+        .route(
+            "/api/chats/:id/prompts",
+            get(chats::list_prompts).post(chats::add_prompt),
+        )
         .route(
             "/api/chats/:chat_id/prompts/:prompt_id/revert",
             post(chats::revert_prompt),
@@ -102,7 +105,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/editor/diff", get(editor::diff))
         .route("/api/editor/tree", get(editor::tree))
         // Themes
-        .route("/api/themes", get(themes::list).post(themes::import_theme));
+        .route("/api/themes", get(themes::list).post(themes::import_theme))
+        // Agent providers (Claude / future Codex / OpenCode / ...).
+        // GET returns the detection status of every provider this
+        // build knows about (installed? path? version?).
+        .route("/api/providers", get(providers::list));
 
     let cors = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])

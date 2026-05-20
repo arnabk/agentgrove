@@ -29,6 +29,8 @@ pub struct AppState {
     pub editor: Arc<RwLock<crate::editor::EditorState>>,
     /// PTY session manager.
     pub terminals: Arc<crate::terminal::TerminalManager>,
+    /// Registry of agent providers (Claude, future Codex/OpenCode/…).
+    pub providers: crate::providers::ProviderRegistry,
 }
 
 impl AppState {
@@ -49,6 +51,7 @@ impl AppState {
             queues: Arc::new(RwLock::new(crate::queue::QueueRegistry::default())),
             editor: Arc::new(RwLock::new(crate::editor::EditorState::default())),
             terminals: Arc::new(crate::terminal::TerminalManager::default()),
+            providers: crate::providers::ProviderRegistry::default(),
         }
     }
 }

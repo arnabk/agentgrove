@@ -12,6 +12,7 @@ pub mod health;
 pub mod logbus;
 pub mod notes;
 pub mod projects;
+pub mod providers;
 pub mod queue;
 pub mod router;
 pub mod scratchpad;

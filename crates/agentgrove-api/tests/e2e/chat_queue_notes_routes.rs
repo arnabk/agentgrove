@@ -147,3 +147,176 @@ async fn themes_list_contains_builtins() {
     assert!(names.contains(&"solarized-dark".into()));
     assert!(names.contains(&"tokyo-night".into()));
 }
+
+// ---------------------------------------------------------------------
+// Performance / pagination behaviors (ADR-0006).
+// ---------------------------------------------------------------------
+
+#[tokio::test]
+async fn chat_get_one_windows_to_last_50_prompts_and_exposes_total() {
+    let h = BeHarness::start().await;
+    let chat: Value = h
+        .post_auth("/api/worktrees/wt-window/chats")
+        .json(&json!({"title":"win","provider":"fake","model":"echo"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let chat_id = chat["id"].as_str().unwrap().to_owned();
+
+    // Add 75 prompts. The fake/echo dispatcher synthesizes 2 events
+    // per prompt (Token + Done); none of those should leak above the
+    // 200-events window cap.
+    for i in 0..75u32 {
+        let res = h
+            .post_auth(&format!("/api/chats/{chat_id}/prompts"))
+            .json(&json!({"content": format!("p{i}")}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+    }
+
+    let view: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let prompts = view["prompts"].as_array().unwrap();
+    assert_eq!(prompts.len(), 50, "windowed to last 50 prompts");
+    assert_eq!(view["prompts_total"], 75);
+    assert_eq!(view["prompts_window"], 50);
+    assert_eq!(view["events_per_prompt"], 200);
+    // Window holds the *newest* prompts.
+    assert_eq!(prompts.first().unwrap()["seq"], 26);
+    assert_eq!(prompts.last().unwrap()["seq"], 75);
+}
+
+#[tokio::test]
+async fn list_prompts_backfills_earlier_pages_in_order() {
+    let h = BeHarness::start().await;
+    let chat: Value = h
+        .post_auth("/api/worktrees/wt-backfill/chats")
+        .json(&json!({"title":"bf","provider":"fake","model":"echo"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let chat_id = chat["id"].as_str().unwrap().to_owned();
+    for i in 0..120u32 {
+        h.post_auth(&format!("/api/chats/{chat_id}/prompts"))
+            .json(&json!({"content": format!("p{i}")}))
+            .send()
+            .await
+            .unwrap();
+    }
+
+    let view: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let oldest_seq = view["prompts"].as_array().unwrap().first().unwrap()["seq"]
+        .as_u64()
+        .unwrap() as u32;
+    assert_eq!(oldest_seq, 71);
+
+    // Backfill 50 prompts older than seq=71 -> seq 21..70 inclusive.
+    let page: Value = h
+        .get_auth(&format!(
+            "/api/chats/{chat_id}/prompts?before={oldest_seq}&limit=50"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let arr = page["prompts"].as_array().unwrap();
+    assert_eq!(arr.len(), 50);
+    assert_eq!(arr.first().unwrap()["seq"], 21);
+    assert_eq!(arr.last().unwrap()["seq"], 70);
+    assert_eq!(page["at_start"], false);
+
+    // Next page reaches the start.
+    let page2: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}/prompts?before=21&limit=50"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let arr2 = page2["prompts"].as_array().unwrap();
+    assert_eq!(arr2.len(), 20);
+    assert_eq!(arr2.first().unwrap()["seq"], 1);
+    assert_eq!(arr2.last().unwrap()["seq"], 20);
+    assert_eq!(page2["at_start"], true);
+}
+
+#[tokio::test]
+async fn list_prompts_clamps_limit_and_returns_empty_for_seq_one() {
+    let h = BeHarness::start().await;
+    let chat: Value = h
+        .post_auth("/api/worktrees/wt-clamp/chats")
+        .json(&json!({"title":"c","provider":"fake","model":"echo"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let chat_id = chat["id"].as_str().unwrap().to_owned();
+    for _ in 0..3u32 {
+        h.post_auth(&format!("/api/chats/{chat_id}/prompts"))
+            .json(&json!({"content":"x"}))
+            .send()
+            .await
+            .unwrap();
+    }
+    // Limit=99999 is clamped to 200 server-side; we get all 2 prompts
+    // older than seq=3 in one shot.
+    let page: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}/prompts?before=3&limit=99999"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(page["prompts"].as_array().unwrap().len(), 2);
+    assert_eq!(page["at_start"], true);
+
+    // Requesting before=1 returns empty + at_start=true.
+    let empty: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}/prompts?before=1"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(empty["prompts"].as_array().unwrap().len(), 0);
+    assert_eq!(empty["at_start"], true);
+}
+
+#[tokio::test]
+async fn list_prompts_unknown_chat_returns_404() {
+    let h = BeHarness::start().await;
+    let res = h
+        .get_auth("/api/chats/no-such-chat/prompts?before=10")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}

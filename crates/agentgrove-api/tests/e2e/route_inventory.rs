@@ -22,6 +22,7 @@ fn expected_routes() -> BTreeSet<&'static str> {
         "GET /api/projects/{id}/branches",
         "POST /api/projects/{id}/branch",
         "GET /api/chats/{id}",
+        "GET /api/chats/{id}/prompts",
         "POST /api/chats/{id}/prompts",
         "POST /api/chats/{chat_id}/prompts/{prompt_id}/revert",
         "GET /api/chats/{id}/queue",
@@ -56,6 +57,7 @@ fn expected_routes() -> BTreeSet<&'static str> {
         "GET /api/diag/memory",
         "GET /api/themes",
         "POST /api/themes",
+        "GET /api/providers",
     ]
     .into_iter()
     .collect()
