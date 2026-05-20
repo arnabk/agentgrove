@@ -3,21 +3,30 @@ import { api, type MemoryReport } from "../api/client";
 import { memorySnapshot } from "../lib/memory";
 
 /**
- * Top-right memory pill + popover. Shows the BE backend RSS + the
- * current browser tab's memory. Click to expand a breakdown including
- * each live PTY child.
+ * Top-right memory pill + popover. Shows three complementary numbers
+ * that together approximate what AgentGrove is costing the user:
  *
- * Tab memory uses two complementary sources:
+ *   - **AG**: bytes AgentGrove explicitly accounts for via its
+ *     in-FE subsystem registry (chat events, terminal scrollback,
+ *     editor doc, project state). Driven by [`memorySnapshot`]; the
+ *     canonical "us" number.
+ *   - **BE**: backend process RSS reported by `/api/diag/memory`.
+ *   - **Tab\*** / **Tab JS**: a sample of the browser tab's memory.
+ *     - `Tab*` uses `performance.measureUserAgentSpecificMemory()`,
+ *       which counts the V8 isolate (JS heap + Shared) + DOM +
+ *       workers. It does NOT include the GPU process, image decode
+ *       cache, fetch buffers, audio/video element buffers, or the
+ *       compositor's textures. Chrome's per-tab Task Manager (and
+ *       the new hover tooltip on the tab strip) report the
+ *       renderer process's OS-reported RSS, which is typically
+ *       2-3× this number. The asterisk in the label points users at
+ *       the popover footnote that spells this out.
+ *     - `Tab JS` is the fallback when the page isn't
+ *       `crossOriginIsolated` and only `performance.memory.usedJSHeapSize`
+ *       is available. Even smaller.
  *
- *   1. `performance.measureUserAgentSpecificMemory()` — when the page
- *      is `crossOriginIsolated` (we set COOP/COEP on the dev + preview
- *      servers), this returns the **whole-tab** memory across JS heap,
- *      DOM, canvas, workers, embedded frames. Closest match to what
- *      Chrome's Task Manager reports.
- *   2. `performance.memory.usedJSHeapSize` — a coarse, bucketed
- *      JS-heap-only number. Fallback when #1 is unavailable. The pill
- *      label changes from `Tab` to `Tab JS` so the discrepancy with
- *      Chrome's Task Manager is explicit.
+ * There is no JS API that returns Task Manager's number; it lives in
+ * Chrome's renderer internals.
  */
 /** How often we re-poll the BE memory endpoint + JS heap (cheap, sync). */
 const BE_POLL_MS = 2000;
@@ -105,7 +114,17 @@ export default function MemoryIndicator() {
   const totalBytes = () => report()?.total_rss_bytes ?? 0;
   /** Prefer the whole-tab measurement; fall back to JS heap. */
   const tabBytes = () => tabFull()?.bytes ?? tabHeap()?.usedJSHeapSize ?? 0;
-  const tabLabel = () => (tabFull() ? "Tab" : "Tab JS");
+  /**
+   * Label for the tab metric:
+   *
+   *   `Tab*` — `measureUserAgentSpecificMemory()` whole-tab figure
+   *     (JS heap + DOM + workers + shared V8 isolate). The asterisk
+   *     hints that this is NOT identical to Chrome's Task Manager
+   *     number — see the popover footnote.
+   *   `Tab JS` — fallback when isolation is unavailable; only
+   *     `performance.memory.usedJSHeapSize` (the JS heap).
+   */
+  const tabLabel = () => (tabFull() ? "Tab*" : "Tab JS");
   // Subscribe to the FE attribution registry. The snapshot is
   // computed inside `createMemo` so component-level re-renders only
   // fire when an entry actually changes.
@@ -229,10 +248,20 @@ export default function MemoryIndicator() {
                   )}
                 </For>
               </div>
-              <p class="mt-1 text-[0.73em] text-fg-subtle">
+              <p class="mt-1 text-[0.73em] text-fg-subtle leading-snug">
                 via performance.measureUserAgentSpecificMemory() ·
                 last sampled {staleLabel()}. Chrome throttles this
                 call so it refreshes about every 12 s.
+                <br />
+                <span class="block mt-1">
+                  This counts JS heap + DOM + workers + V8 shared
+                  isolate. It does <strong>not</strong> include the
+                  GPU process, image decode cache, fetch/network
+                  buffers, audio/video element buffers, or renderer
+                  process overhead that Chrome's Task Manager (or
+                  the per-tab hover tooltip) reports. Expect Task
+                  Manager to show 2-3× this number.
+                </span>
               </p>
             </Section>
           </Show>
