@@ -92,3 +92,63 @@ async fn terminal_spawn_write_history() {
         .unwrap();
     assert_eq!(del.status(), 204);
 }
+
+#[tokio::test]
+async fn terminal_status_reports_exited_after_shell_exit() {
+    let h = BeHarness::start().await;
+    let res = h
+        .post_auth("/api/terminals")
+        .json(&json!({"cols": 80, "rows": 24}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let term: Value = res.json().await.unwrap();
+    let id = term["id"].as_str().unwrap().to_owned();
+
+    // Initially not exited.
+    let s0 = h
+        .get_auth(&format!("/api/terminals/{id}/status"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(s0.status(), 200);
+    let s0_body: Value = s0.json().await.unwrap();
+    assert_eq!(s0_body["exited"], false);
+
+    // Send EOF / exit to shell; either causes the PTY to close.
+    let w = h
+        .post_auth(&format!("/api/terminals/{id}/write"))
+        .json(&json!({"data": "exit\n"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(w.status(), 204);
+
+    // Poll status briefly.
+    let mut exited = false;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let s = h
+            .get_auth(&format!("/api/terminals/{id}/status"))
+            .send()
+            .await
+            .unwrap();
+        if s.status() == 200 {
+            let body: Value = s.json().await.unwrap();
+            if body["exited"] == true {
+                exited = true;
+                break;
+            }
+        }
+    }
+    assert!(exited, "expected terminal to report exited=true after shell exit");
+
+    // Status for unknown id is 404.
+    let nf = h
+        .get_auth("/api/terminals/does-not-exist/status")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(nf.status(), 404);
+}
