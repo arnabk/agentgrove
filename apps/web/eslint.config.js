@@ -46,6 +46,7 @@ export default [
         URLSearchParams: "readonly",
         PointerEvent: "readonly",
         self: "readonly",
+        queueMicrotask: "readonly",
         __dirname: "readonly",
         __filename: "readonly",
       },

@@ -320,3 +320,84 @@ async fn list_prompts_unknown_chat_returns_404() {
         .unwrap();
     assert_eq!(res.status(), 404);
 }
+
+#[tokio::test]
+async fn patch_chat_renames_title() {
+    let h = BeHarness::start().await;
+    let chat: Value = h
+        .post_auth("/api/worktrees/wt-rename/chats")
+        .json(&json!({"title":"orig","provider":"fake","model":"echo"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let chat_id = chat["id"].as_str().unwrap().to_owned();
+
+    // Rename via PATCH.
+    let res = h
+        .patch(&format!("/api/chats/{chat_id}"))
+        .json(&json!({"title": "renamed!"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200, "body={}", res.text().await.unwrap());
+    let view: Value = res.json().await.unwrap();
+    assert_eq!(view["title"], "renamed!");
+
+    // GET reflects the new title.
+    let view2: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(view2["title"], "renamed!");
+}
+
+#[tokio::test]
+async fn patch_chat_rejects_empty_title() {
+    let h = BeHarness::start().await;
+    let chat: Value = h
+        .post_auth("/api/worktrees/wt-empty/chats")
+        .json(&json!({"title":"keep","provider":"fake","model":"echo"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let chat_id = chat["id"].as_str().unwrap().to_owned();
+    let res = h
+        .patch(&format!("/api/chats/{chat_id}"))
+        .json(&json!({"title": "   "}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+    // Title unchanged.
+    let view: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(view["title"], "keep");
+}
+
+#[tokio::test]
+async fn patch_chat_unknown_id_returns_404() {
+    let h = BeHarness::start().await;
+    let res = h
+        .patch("/api/chats/does-not-exist")
+        .json(&json!({"title":"x"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}

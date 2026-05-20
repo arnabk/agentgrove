@@ -1,4 +1,4 @@
-import { For, Show, createEffect, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, onCleanup, onMount, type JSX } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import ChangesPanel from "./components/ChangesPanel";
 import { DialogHost } from "./components/dialog";
@@ -29,11 +29,11 @@ const PANES = {
 
 type PaneId = keyof typeof PANES;
 
-const PANE_META: Record<PaneId, { label: string; icon: string }> = {
-  chat: { label: "Chat", icon: "💬" },
-  editor: { label: "Editor", icon: "📝" },
-  terminal: { label: "Terminal", icon: "❯_" },
-  notes: { label: "Notes", icon: "✦" },
+const PANE_META: Record<PaneId, { label: string; Icon: () => JSX.Element }> = {
+  chat: { label: "Chat", Icon: ChatIcon },
+  editor: { label: "Editor", Icon: EditorIcon },
+  terminal: { label: "Terminal", Icon: TerminalIcon },
+  notes: { label: "Notes", Icon: NotesIcon },
 };
 
 export default function App() {
@@ -105,8 +105,8 @@ export default function App() {
                       onClick={() => setActivePane(k)}
                       data-testid={`tab-${k}`}
                     >
-                      <span aria-hidden="true" class="text-fg-subtle">
-                        {PANE_META[k].icon}
+                      <span aria-hidden="true" class="text-fg-subtle inline-flex items-center">
+                        {PANE_META[k].Icon()}
                       </span>
                       <span>{PANE_META[k].label}</span>
                     </button>
@@ -182,6 +182,92 @@ function SettingsButton() {
     >
       <GearIcon />
     </button>
+  );
+}
+
+/** Lucide `message-square` — used for the Chat pane tab. */
+function ChatIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+/** Lucide `file-code-2` — used for the Editor pane tab. */
+function EditorIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4" />
+      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+      <path d="m5 12-3 3 3 3" />
+      <path d="m9 18 3-3-3-3" />
+    </svg>
+  );
+}
+
+/** Lucide `terminal-square` — used for the Terminal pane tab. */
+function TerminalIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m7 11 2-2-2-2" />
+      <path d="M11 13h4" />
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+    </svg>
+  );
+}
+
+/** Lucide `notebook-pen` — used for the Notes pane tab. */
+function NotesIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.6" />
+      <path d="M2 6h4" />
+      <path d="M2 10h4" />
+      <path d="M2 14h4" />
+      <path d="M2 18h4" />
+      <path d="M21.4 4.6a2.1 2.1 0 1 1 3 3L16 16l-4 1 1-4z" />
+    </svg>
   );
 }
 

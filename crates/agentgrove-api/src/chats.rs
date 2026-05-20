@@ -181,6 +181,17 @@ impl ChatRegistry {
             chat.session_id = Some(session_id);
         }
     }
+
+    /// Rename a chat. Returns true if the chat was found. Caller is
+    /// responsible for trimming + validating the title.
+    pub fn rename(&mut self, chat_id: &str, title: String) -> bool {
+        if let Some(chat) = self.by_id.get_mut(chat_id) {
+            chat.title = title;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -341,6 +352,39 @@ pub async fn get_one(
         .map(window_chat)
         .map(Json)
         .ok_or(StatusCode::NOT_FOUND)
+}
+
+/// Body for `PATCH /api/chats/:id`. Today only `title` is mutable;
+/// further fields land later behind the same envelope.
+#[derive(Debug, Deserialize)]
+pub struct UpdateChatBody {
+    pub title: Option<String>,
+}
+
+/// `PATCH /api/chats/:id` — rename the chat (and, later, edit other
+/// metadata). Empty/whitespace titles return 400.
+pub async fn patch(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<UpdateChatBody>,
+) -> Result<Json<ChatView>, (StatusCode, String)> {
+    let mut reg = state.chats.write().await;
+    if let Some(raw) = body.title {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "title cannot be empty".into(),
+            ));
+        }
+        if !reg.rename(&id, trimmed.to_string()) {
+            return Err((StatusCode::NOT_FOUND, format!("chat {id} not found")));
+        }
+    }
+    let rec = reg
+        .get(&id)
+        .ok_or((StatusCode::NOT_FOUND, format!("chat {id} not found")))?;
+    Ok(Json(window_chat(rec)))
 }
 
 /// Query for `GET /api/chats/:id/prompts`.

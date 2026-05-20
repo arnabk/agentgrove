@@ -32,6 +32,7 @@ export interface Worktree {
   removed_at?: string | null;
 }
 
+/** Chat metadata as returned by list endpoints (no prompts). */
 export interface Chat {
   id: string;
   worktree_id: string | null;
@@ -39,7 +40,32 @@ export interface Chat {
   provider: string;
   model: string;
   created_at: string;
+  /** Provider session id captured from the first SessionStart event. */
+  session_id: string | null;
+  /** Inline prompts when this object came from a list endpoint that
+   *  embeds them (legacy). New code should use ChatView. */
+  prompts?: Prompt[];
+}
+
+/**
+ * Windowed view returned by `GET /api/chats/:id` (ADR-0006). Holds at
+ * most `prompts_window` prompts (last N, oldest-first in the array)
+ * and each prompt's events are capped at `events_per_prompt`. Use
+ * `prompts_total > prompts.length` to decide whether to offer backfill.
+ */
+export interface ChatView {
+  id: string;
+  project_id: string;
+  worktree_id: string | null;
+  title: string;
+  provider: string;
+  model: string;
+  created_at: string;
+  session_id: string | null;
   prompts: Prompt[];
+  prompts_total: number;
+  prompts_window: number;
+  events_per_prompt: number;
 }
 
 export interface Prompt {
@@ -51,12 +77,33 @@ export interface Prompt {
   created_at: string;
 }
 
+/** Wire shape matching the BE's `AgentEvent` enum. */
 export type AgentEvent =
+  | { type: "session_start"; session_id: string }
   | { type: "token"; text: string }
-  | { type: "tool_call"; name: string; args: unknown }
-  | { type: "tool_result"; name: string; result: unknown }
-  | { type: "done" }
-  | { type: "error"; message: string };
+  | { type: "tool_call"; name: string; args: unknown; id?: string | null }
+  | { type: "tool_result"; name: string; result: unknown; id?: string | null }
+  | { type: "done"; result: string | null; cost_usd: number | null }
+  | { type: "error"; message: string }
+  | { type: "truncated"; dropped: number };
+
+/** Backfill page returned by `GET /api/chats/:id/prompts?before=`. */
+export interface PromptsBackfill {
+  prompts: Prompt[];
+  at_start: boolean;
+}
+
+/** Provider descriptor from `GET /api/providers`. */
+export interface ProviderDescriptor {
+  id: string;
+  label: string;
+  available: boolean;
+  path: string | null;
+  version: string | null;
+  default_model: string;
+  supports_resume: boolean;
+  install_hint: string;
+}
 
 export interface Note {
   id: string;
@@ -205,7 +252,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  getChat: (id: string) => req<Chat>(`/api/chats/${encodeURIComponent(id)}`),
+  /** Windowed chat view (last N prompts; older fetched via listPrompts). */
+  getChat: (id: string) => req<ChatView>(`/api/chats/${encodeURIComponent(id)}`),
+  /** Backfill older prompts. Returns at most 200 (server-clamped). */
+  listPrompts: (chatId: string, before: number, limit = 50) =>
+    req<PromptsBackfill>(
+      `/api/chats/${encodeURIComponent(chatId)}/prompts?before=${before}&limit=${limit}`,
+    ),
   addPrompt: (chatId: string, content: string) =>
     req<Prompt>(`/api/chats/${encodeURIComponent(chatId)}/prompts`, {
       method: "POST",
@@ -216,6 +269,16 @@ export const api = {
       `/api/chats/${encodeURIComponent(chatId)}/prompts/${encodeURIComponent(promptId)}/revert`,
       { method: "POST" },
     ),
+  /** List every agent provider this build knows about (Claude, …). */
+  listProviders: () => req<ProviderDescriptor[]>("/api/providers"),
+  /** Update mutable chat fields (currently just title). Returns the
+   *  fresh windowed ChatView so the FE can refresh its store in one
+   *  step. */
+  renameChat: (id: string, title: string) =>
+    req<ChatView>(`/api/chats/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
   // Queue
   getQueue: (chatId: string) => req<QueueState>(`/api/chats/${encodeURIComponent(chatId)}/queue`),
   enqueue: (chatId: string, body: string) =>

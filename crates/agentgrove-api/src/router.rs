@@ -47,7 +47,7 @@ pub fn build_router(state: AppState) -> Router {
             get(chats::list_for_project_handler)
                 .post(chats::create_for_project_handler),
         )
-        .route("/api/chats/:id", get(chats::get_one))
+        .route("/api/chats/:id", get(chats::get_one).patch(chats::patch))
         .route(
             "/api/chats/:id/prompts",
             get(chats::list_prompts).post(chats::add_prompt),
@@ -112,7 +112,14 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/providers", get(providers::list));
 
     let cors = CorsLayer::new()
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers(Any)
         .allow_origin(Any);
 

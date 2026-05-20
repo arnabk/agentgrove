@@ -123,6 +123,10 @@ export default function LeftRail() {
     try {
       // Focus the scope first so addChatTab writes into the right scope.
       selectWorktree(projectId, worktreeId);
+      // Default new chats to Claude. The provider picker (BE-driven
+      // via /api/providers) will replace this with a user-selectable
+      // dropdown later; for now Claude is the only real provider in
+      // the registry, with `fake/echo` reserved for tests.
       const body: {
         title: string;
         provider: string;
@@ -130,8 +134,8 @@ export default function LeftRail() {
         worktree_id?: string;
       } = {
         title: `chat in ${parentName}`,
-        provider: "fake",
-        model: "echo",
+        provider: "claude",
+        model: "sonnet",
       };
       if (worktreeId) body.worktree_id = worktreeId;
       const chat = await api.createProjectChat(projectId, body);

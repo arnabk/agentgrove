@@ -70,6 +70,10 @@ impl BeHarness {
         self.client.delete(format!("{}{}", self.base_url, path))
     }
 
+    pub fn patch(&self, path: &str) -> reqwest::RequestBuilder {
+        self.client.patch(format!("{}{}", self.base_url, path))
+    }
+
     // Backward-compat aliases so existing tests don't need to change.
     pub fn get_auth(&self, path: &str) -> reqwest::RequestBuilder {
         self.get(path)
