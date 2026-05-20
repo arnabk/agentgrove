@@ -11,22 +11,23 @@ import { memorySnapshot } from "../lib/memory";
  *     editor doc, project state). Driven by [`memorySnapshot`]; the
  *     canonical "us" number.
  *   - **BE**: backend process RSS reported by `/api/diag/memory`.
- *   - **Tab\*** / **Tab JS**: a sample of the browser tab's memory.
- *     - `Tab*` uses `performance.measureUserAgentSpecificMemory()`,
- *       which counts the V8 isolate (JS heap + Shared) + DOM +
- *       workers. It does NOT include the GPU process, image decode
- *       cache, fetch buffers, audio/video element buffers, or the
- *       compositor's textures. Chrome's per-tab Task Manager (and
- *       the new hover tooltip on the tab strip) report the
- *       renderer process's OS-reported RSS, which is typically
- *       2-3× this number. The asterisk in the label points users at
- *       the popover footnote that spells this out.
- *     - `Tab JS` is the fallback when the page isn't
- *       `crossOriginIsolated` and only `performance.memory.usedJSHeapSize`
- *       is available. Even smaller.
+ *   - **JS+DOM** / **JS heap**: renderer-side measurement.
+ *     - `JS+DOM` uses `performance.measureUserAgentSpecificMemory()`
+ *       (V8 isolate + DOM + workers + Shared). This is the closest
+ *       any JS API gets to Chrome's Task Manager number, but it is
+ *       still only a *subset* — Task Manager additionally counts
+ *       the GPU process, image decode cache, fetch buffers,
+ *       audio/video element buffers, and renderer-process
+ *       overhead. Expect Task Manager to show 2-3× our `JS+DOM`
+ *       value; the gap is not measurable from a web page.
+ *     - `JS heap` is the fallback when the page isn't
+ *       `crossOriginIsolated` and only
+ *       `performance.memory.usedJSHeapSize` is available.
  *
- * There is no JS API that returns Task Manager's number; it lives in
- * Chrome's renderer internals.
+ * We deliberately do not label these "Tab" to avoid users comparing
+ * them to Chrome's per-tab Task Manager / hover tooltip and
+ * concluding the numbers are wrong. They aren't wrong, they're just
+ * measuring different (smaller) things.
  */
 /** How often we re-poll the BE memory endpoint + JS heap (cheap, sync). */
 const BE_POLL_MS = 2000;
@@ -115,16 +116,17 @@ export default function MemoryIndicator() {
   /** Prefer the whole-tab measurement; fall back to JS heap. */
   const tabBytes = () => tabFull()?.bytes ?? tabHeap()?.usedJSHeapSize ?? 0;
   /**
-   * Label for the tab metric:
+   * Label for the renderer-side metric. We deliberately avoid the word
+   * "Tab" — it conflicts with Chrome's own per-tab Task Manager
+   * tooltip, which reports a much larger number (renderer process
+   * RSS). Both available APIs are subsets of that:
    *
-   *   `Tab*` — `measureUserAgentSpecificMemory()` whole-tab figure
-   *     (JS heap + DOM + workers + shared V8 isolate). The asterisk
-   *     hints that this is NOT identical to Chrome's Task Manager
-   *     number — see the popover footnote.
-   *   `Tab JS` — fallback when isolation is unavailable; only
-   *     `performance.memory.usedJSHeapSize` (the JS heap).
+   *   `JS+DOM` — `measureUserAgentSpecificMemory()` (V8 isolate + DOM
+   *     + workers). The closest the platform exposes.
+   *   `JS heap` — fallback when isolation is unavailable; just
+   *     `performance.memory.usedJSHeapSize`.
    */
-  const tabLabel = () => (tabFull() ? "Tab*" : "Tab JS");
+  const tabLabel = () => (tabFull() ? "JS+DOM" : "JS heap");
   // Subscribe to the FE attribution registry. The snapshot is
   // computed inside `createMemo` so component-level re-renders only
   // fire when an entry actually changes.
@@ -150,7 +152,7 @@ export default function MemoryIndicator() {
         type="button"
         class="ag-chip flex items-center gap-1.5 font-mono cursor-pointer hover:bg-bg-3"
         onClick={() => setOpen(!open())}
-        title="AG = bytes AgentGrove itself accounts for (chat events, terminal scrollback, editor doc, project state). BE = backend process RSS. Tab = whole-tab process from measureUserAgentSpecificMemory(). Click for breakdown."
+        title="AG = bytes AgentGrove itself accounts for (chat events, terminal scrollback, editor doc, project state). BE = backend process RSS. JS+DOM = V8 isolate + DOM + workers from measureUserAgentSpecificMemory() — a subset of Chrome's per-tab Task Manager number. Click for breakdown."
         data-testid="mem-indicator-toggle"
       >
         <span class="text-fg-subtle">AG</span>
@@ -233,7 +235,7 @@ export default function MemoryIndicator() {
           </Show>
 
           <Show when={tabFull()}>
-            <Section title="Browser tab (whole process)">
+            <Section title="Renderer (JS + DOM)">
               <div class="grid grid-cols-2 gap-x-2 gap-y-0.5 font-mono text-fg-muted">
                 <span>used</span>
                 <span class="text-fg text-right">{fmtBytes(tabFull()!.bytes)}</span>
@@ -254,19 +256,20 @@ export default function MemoryIndicator() {
                 call so it refreshes about every 12 s.
                 <br />
                 <span class="block mt-1">
-                  This counts JS heap + DOM + workers + V8 shared
-                  isolate. It does <strong>not</strong> include the
-                  GPU process, image decode cache, fetch/network
-                  buffers, audio/video element buffers, or renderer
-                  process overhead that Chrome's Task Manager (or
-                  the per-tab hover tooltip) reports. Expect Task
-                  Manager to show 2-3× this number.
+                  This is a <strong>subset</strong> of what Chrome's
+                  per-tab Task Manager / hover tooltip reports.
+                  Included: JS heap + DOM + workers + V8 shared
+                  isolate. Excluded: GPU process, image decode cache,
+                  fetch/network buffers, audio/video element buffers,
+                  and renderer-process overhead. The Task Manager
+                  number is typically 2-3× this value; that gap is
+                  not measurable from a web page.
                 </span>
               </p>
             </Section>
           </Show>
           <Show when={!tabFull() && tabHeap()}>
-            <Section title="Browser tab (JS heap only)">
+            <Section title="Renderer (JS heap only)">
               <div class="grid grid-cols-2 gap-x-2 gap-y-0.5 font-mono text-fg-muted">
                 <span>used</span>
                 <span class="text-fg text-right">
@@ -282,15 +285,16 @@ export default function MemoryIndicator() {
                 </span>
               </div>
               <p class="mt-1 text-[0.73em] text-fg-subtle">
-                JS heap only. Chrome Task Manager shows the full
-                process RSS (DOM, image cache, GPU, workers).
-                Whole-tab memory requires crossOriginIsolated.
+                JS heap only — even smaller than the JS+DOM figure
+                we'd show with cross-origin isolation enabled.
+                Chrome's Task Manager will show several times this
+                number.
               </p>
             </Section>
           </Show>
           <Show when={!tabHeap() && !tabFull()}>
             <p class="mt-2 text-[11px] text-fg-subtle">
-              Browser tab memory is only reported by Chromium/Edge.
+              Renderer memory is only reported by Chromium/Edge.
             </p>
           </Show>
         </div>
