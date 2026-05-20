@@ -8,6 +8,7 @@ import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
 import { rust } from "@codemirror/lang-rust";
 import { api } from "../api/client";
+import { selectedFilePath } from "../stores/app";
 
 function langFor(path: string): Extension {
   if (path.endsWith(".rs")) return rust();
@@ -20,10 +21,11 @@ function langFor(path: string): Extension {
 export default function EditorPane() {
   let host!: HTMLDivElement;
   const langComp = new Compartment();
-  const [path, setPath] = createSignal("");
+  const editableComp = new Compartment();
   const [openPath, setOpenPath] = createSignal<string | null>(null);
   const [saved, setSaved] = createSignal<string | null>(null);
   const [busy, setBusy] = createSignal(false);
+  const [loadErr, setLoadErr] = createSignal<string | null>(null);
   let view: EditorView | null = null;
 
   onMount(() => {
@@ -37,6 +39,7 @@ export default function EditorPane() {
           keymap.of([...defaultKeymap, ...historyKeymap]),
           oneDark,
           langComp.of([]),
+          editableComp.of([EditorView.editable.of(false)]),
           EditorView.theme({
             "&": { height: "100%", fontSize: "13px" },
           }),
@@ -47,22 +50,44 @@ export default function EditorPane() {
 
   onCleanup(() => view?.destroy());
 
-  async function open(ev: SubmitEvent) {
-    ev.preventDefault();
-    const p = path().trim();
-    if (!p) return;
+  async function loadPath(p: string) {
     setBusy(true);
+    setLoadErr(null);
     try {
       const f = await api.readFile(p);
       setOpenPath(f.path);
       view?.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: f.content },
-        effects: langComp.reconfigure(langFor(f.path)),
+        effects: [
+          langComp.reconfigure(langFor(f.path)),
+          editableComp.reconfigure([EditorView.editable.of(true)]),
+        ],
       });
+    } catch (e) {
+      setLoadErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   }
+
+  // Auto-open whenever the file explorer selection changes.
+  createEffect(() => {
+    const p = selectedFilePath();
+    if (p && p !== openPath()) {
+      void loadPath(p);
+    } else if (!p && openPath() !== null) {
+      // Selection cleared (e.g. project switch). Empty the buffer and
+      // make the editor non-editable again.
+      setOpenPath(null);
+      view?.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: "" },
+        effects: [
+          langComp.reconfigure([]),
+          editableComp.reconfigure([EditorView.editable.of(false)]),
+        ],
+      });
+    }
+  });
 
   async function save() {
     const p = openPath();
@@ -84,23 +109,17 @@ export default function EditorPane() {
   return (
     <section data-testid="editor-pane" class="flex flex-col h-full">
       <header class="h-11 px-3 flex items-center gap-2 border-b border-border bg-bg-1">
-        <form onSubmit={open} class="flex-1 flex gap-2" data-testid="editor-open-form">
-          <input
-            class="ag-input font-mono"
-            placeholder="/absolute/path/to/file"
-            value={path()}
-            onInput={(e) => setPath(e.currentTarget.value)}
-            data-testid="editor-path"
-          />
-          <button
-            type="submit"
-            class="ag-btn ag-btn-secondary"
-            disabled={busy()}
-            data-testid="editor-open"
-          >
-            Open
-          </button>
-        </form>
+        <div
+          class="flex-1 min-w-0 text-[12.5px] font-mono truncate"
+          classList={{
+            "text-fg-muted": !!openPath(),
+            "text-fg-subtle italic": !openPath(),
+          }}
+          title={openPath() ?? ""}
+          data-testid="editor-path"
+        >
+          {openPath() ?? "No file selected"}
+        </div>
         <button
           class="ag-btn ag-btn-primary"
           onClick={save}
@@ -118,7 +137,36 @@ export default function EditorPane() {
           </span>
         </Show>
       </header>
-      <div ref={(el) => (host = el)} class="flex-1" data-testid="editor-host" />
+      <Show when={loadErr()}>
+        <div
+          class="px-3 py-1.5 text-[12px] text-danger border-b border-border bg-bg-1"
+          data-testid="editor-error"
+        >
+          {loadErr()}
+        </div>
+      </Show>
+      <div class="relative flex-1">
+        <div
+          ref={(el) => (host = el)}
+          class="absolute inset-0"
+          classList={{ "opacity-40 pointer-events-none": !openPath() }}
+          aria-disabled={!openPath()}
+          data-testid="editor-host"
+        />
+        <Show when={!openPath()}>
+          <div
+            class="absolute inset-0 flex items-center justify-center pointer-events-none"
+            data-testid="editor-empty-state"
+          >
+            <div class="text-center text-fg-subtle text-[13px] max-w-sm px-6">
+              <p class="font-medium text-fg-muted mb-1">No file open</p>
+              <p>
+                Pick a file in the project tree on the left to start editing.
+              </p>
+            </div>
+          </div>
+        </Show>
+      </div>
     </section>
   );
 }

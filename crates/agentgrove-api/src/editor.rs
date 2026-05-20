@@ -22,6 +22,22 @@ pub struct ReadQuery {
     pub path: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct TreeQuery {
+    pub path: String,
+    /// When true, include entries starting with `.` (e.g. `.git`).
+    /// Defaults to false.
+    #[serde(default)]
+    pub show_hidden: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TreeEntryDto {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+}
+
 #[derive(Debug, Serialize)]
 pub struct FileContent {
     pub path: String,
@@ -117,26 +133,27 @@ pub async fn diff(Query(q): Query<ReadQuery>) -> Result<Json<DiffResponse>, (Sta
 }
 
 pub async fn tree(
-    Query(q): Query<ReadQuery>,
-) -> Result<Json<Vec<TreeEntry>>, (StatusCode, String)> {
+    Query(q): Query<TreeQuery>,
+) -> Result<Json<Vec<TreeEntryDto>>, (StatusCode, String)> {
     let path = PathBuf::from(&q.path);
     if !path.is_absolute() {
         return Err((StatusCode::BAD_REQUEST, "path must be absolute".into()));
     }
-    let mut entries = vec![];
+    let mut entries = Vec::<TreeEntryDto>::new();
     let mut rd = fs::read_dir(&path)
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
     while let Ok(Some(e)) = rd.next_entry().await {
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') {
+        if !q.show_hidden && name.starts_with('.') {
             continue;
         }
         let md = match e.metadata().await {
             Ok(m) => m,
             Err(_) => continue,
         };
-        entries.push(TreeEntry {
+        entries.push(TreeEntryDto {
+            name,
             path: e.path().to_string_lossy().into_owned(),
             is_dir: md.is_dir(),
         });
@@ -144,7 +161,7 @@ pub async fn tree(
     entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
         (true, false) => std::cmp::Ordering::Less,
         (false, true) => std::cmp::Ordering::Greater,
-        _ => a.path.cmp(&b.path),
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
     });
     Ok(Json(entries))
 }

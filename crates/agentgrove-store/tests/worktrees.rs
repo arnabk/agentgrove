@@ -164,11 +164,11 @@ async fn create_rejects_duplicate_path() {
 }
 
 #[tokio::test]
-async fn delete_removes_existing_row() {
+async fn soft_delete_drops_from_live_list_but_keeps_record_for_history() {
     let (_d, _p, wr, project_id) = seed_project().await;
     let w = wr
         .create(NewWorktree {
-            project_id,
+            project_id: project_id.clone(),
             branch: "del".into(),
             base_ref: "main".into(),
             path: abs("wt-del"),
@@ -178,6 +178,58 @@ async fn delete_removes_existing_row() {
         .await
         .unwrap();
     assert!(wr.delete(&w.id).await.unwrap());
+
+    // Live list no longer contains it.
+    let live = wr.list_for_project(&project_id).await.unwrap();
+    assert!(live.iter().all(|x| x.id != w.id));
+
+    // get() still finds it; removed_at is set.
+    let got = wr.get(&w.id).await.unwrap();
+    assert!(got.removed_at.is_some());
+
+    // History list (across projects) includes it.
+    let removed = wr.list_removed_all().await.unwrap();
+    assert!(removed.iter().any(|x| x.id == w.id));
+}
+
+#[tokio::test]
+async fn restore_brings_a_soft_deleted_worktree_back_to_live() {
+    let (_d, _p, wr, project_id) = seed_project().await;
+    let w = wr
+        .create(NewWorktree {
+            project_id: project_id.clone(),
+            branch: "back".into(),
+            base_ref: "main".into(),
+            path: abs("wt-restore"),
+            pre_script: None,
+            post_script: None,
+        })
+        .await
+        .unwrap();
+    assert!(wr.delete(&w.id).await.unwrap());
+    assert!(wr.restore(&w.id).await.unwrap());
+
+    let live = wr.list_for_project(&project_id).await.unwrap();
+    assert!(live.iter().any(|x| x.id == w.id));
+    let got = wr.get(&w.id).await.unwrap();
+    assert!(got.removed_at.is_none());
+}
+
+#[tokio::test]
+async fn purge_hard_deletes_a_row() {
+    let (_d, _p, wr, project_id) = seed_project().await;
+    let w = wr
+        .create(NewWorktree {
+            project_id,
+            branch: "gone".into(),
+            base_ref: "main".into(),
+            path: abs("wt-purge"),
+            pre_script: None,
+            post_script: None,
+        })
+        .await
+        .unwrap();
+    assert!(wr.purge(&w.id).await.unwrap());
     let err = wr.get(&w.id).await.unwrap_err();
     assert!(matches!(err, WorktreeError::NotFound(_)));
 }

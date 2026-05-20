@@ -2,10 +2,15 @@
 
 mod support;
 
+mod branches_routes;
 mod chat_queue_notes_routes;
+mod diag_routes;
 mod editor_terminal_routes;
+mod fs_routes;
+mod git_status_routes;
 mod health_route;
+mod project_chats_routes;
 mod projects_routes;
 mod route_inventory;
-mod whoami_route;
+mod scratchpad_routes;
 mod worktrees_routes;

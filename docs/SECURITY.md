@@ -24,9 +24,11 @@ Out of scope:
 ## Defaults
 
 - Bind: `127.0.0.1` only.
-- Bearer token required for every endpoint.
-- Remote mode requires explicit `--bind` and `--token` flags and prints a
-  warning at startup and a banner in the UI.
+- No built-in authentication. The server trusts whoever can reach the
+  loopback socket. Do **not** expose the port to other hosts without an
+  external auth proxy.
+- Remote bind (`AGENTGROVE_BIND=0.0.0.0`) is allowed but the server logs
+  a warning. Front it with a reverse proxy that adds auth/TLS.
 - Provider API keys are stored in the OS keyring
   ([`keyring`](https://crates.io/crates/keyring) crate), never in the
   database.

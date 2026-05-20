@@ -41,6 +41,9 @@ pub struct WorktreeDto {
     pub post_script: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// ISO timestamp when the worktree was soft-deleted, or `None` if
+    /// still live. Present so the history view can show "removed at".
+    pub removed_at: Option<String>,
 }
 
 impl From<WorktreeRecord> for WorktreeDto {
@@ -64,6 +67,7 @@ impl From<WorktreeRecord> for WorktreeDto {
             post_script: r.post_script,
             created_at: r.created_at.to_rfc3339(),
             updated_at: r.updated_at.to_rfc3339(),
+            removed_at: r.removed_at.map(|t| t.to_rfc3339()),
         }
     }
 }
@@ -256,6 +260,84 @@ pub async fn delete(
         .await
         .map_err(map_wt_err)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Query params for `GET /api/worktrees/history`.
+#[derive(Debug, Deserialize)]
+pub struct HistoryQuery {
+    /// Optional substring filter against branch name (case-insensitive).
+    pub q: Option<String>,
+    /// Optional project filter — when set, only history for this
+    /// project is returned.
+    pub project_id: Option<String>,
+}
+
+/// List soft-deleted worktrees across all projects (newest-removed
+/// first). Supports a case-insensitive substring filter on branch via
+/// `?q=` and a `?project_id=` filter.
+pub async fn history(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<HistoryQuery>,
+) -> Result<Json<Vec<WorktreeDto>>, (StatusCode, String)> {
+    let mut all = state
+        .worktrees
+        .list_removed_all()
+        .await
+        .map_err(map_wt_err)?;
+    if let Some(pid) = q.project_id.as_deref() {
+        all.retain(|w| w.project_id == pid);
+    }
+    if let Some(needle) = q.q.as_deref() {
+        let needle = needle.to_lowercase();
+        if !needle.is_empty() {
+            all.retain(|w| w.branch.to_lowercase().contains(&needle));
+        }
+    }
+    Ok(Json(all.into_iter().map(Into::into).collect()))
+}
+
+/// Restore a soft-deleted worktree row by clearing `removed_at`. This
+/// only restores the database record; the git worktree on disk is **not
+/// re-created** — restoring a row whose path was physically removed via
+/// `git worktree remove` is informational only. Callers who need a
+/// functioning worktree should create a new one based on the restored
+/// row's branch.
+///
+/// Returns 404 if the id is unknown, and 409 if the row is already
+/// live.
+pub async fn restore(
+    State(state): State<AppState>,
+    Path(worktree_id): Path<String>,
+) -> Result<Json<WorktreeDto>, (StatusCode, String)> {
+    // Pre-flight: fetch the record so we can distinguish 404 vs 409.
+    let existing = state
+        .worktrees
+        .get(&worktree_id)
+        .await
+        .map_err(map_wt_err)?;
+    if existing.removed_at.is_none() {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("worktree {worktree_id} is already live"),
+        ));
+    }
+    let changed = state
+        .worktrees
+        .restore(&worktree_id)
+        .await
+        .map_err(map_wt_err)?;
+    if !changed {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("worktree {worktree_id} could not be restored"),
+        ));
+    }
+    let fresh = state
+        .worktrees
+        .get(&worktree_id)
+        .await
+        .map_err(map_wt_err)?;
+    Ok(Json(fresh.into()))
 }
 
 fn sanitize_branch(branch: &str) -> String {

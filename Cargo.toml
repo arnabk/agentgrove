@@ -64,6 +64,9 @@ portable-pty = "0.8"
 directories-next = "2"
 which = "6"
 
+# Process / memory inspection
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+
 # Hashing
 sha2 = "0.10"
 hex = "0.4"

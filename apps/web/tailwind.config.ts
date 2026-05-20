@@ -22,24 +22,12 @@ const config: Config = {
         warning: "var(--ag-warning)",
         danger: "var(--ag-danger)",
       },
+      // font-sans / font-mono utilities consume the CSS variables set by
+      // applySettings(), so changing the chosen UI / code font in Settings
+      // propagates everywhere without rebuilding Tailwind classes.
       fontFamily: {
-        sans: [
-          "Inter",
-          "ui-sans-serif",
-          "system-ui",
-          "-apple-system",
-          "Segoe UI",
-          "Roboto",
-          "sans-serif",
-        ],
-        mono: [
-          "JetBrains Mono",
-          "ui-monospace",
-          "SFMono-Regular",
-          "Menlo",
-          "Consolas",
-          "monospace",
-        ],
+        sans: ["var(--ag-font-ui)"],
+        mono: ["var(--ag-font-mono)"],
       },
       borderRadius: {
         DEFAULT: "8px",

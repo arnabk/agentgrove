@@ -83,12 +83,62 @@ html {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* ---------- Maze background (theme-aware) ---------------------------------
+   The pattern is rendered as a monochrome SVG mask. We paint a solid color
+   layer (--ag-maze-color) and mask it with the pattern. Because the color
+   comes from a CSS variable, every theme — built-in or user-imported —
+   tints the maze automatically by setting --ag-maze-color (defaulting to a
+   tint of the current accent).
+--------------------------------------------------------------------------- */
+
+:root {
+  /* Default maze tint derives from the accent. Themes can override.
+     The tint is what shows behind the translucent app shell. We aim
+     for a value that reads as texture, not noise. */
+  --ag-maze-color: color-mix(in srgb, var(--ag-accent) 22%, transparent);
+  --ag-maze-opacity: 1;
+}
+
+[data-theme="light"] {
+  --ag-maze-color: color-mix(in srgb, var(--ag-accent) 18%, transparent);
+}
+
 body {
   background-color: var(--ag-bg);
   color: var(--ag-fg);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 15px;
+  line-height: 1.55;
+  position: relative;
 }
+
+/* Maze layer sits behind everything in <body>. Using a ::before pseudo-
+   element keeps body's background-color clean and lets us tint via a
+   single CSS var without re-encoding the SVG per theme. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-color: var(--ag-maze-color);
+  --maze-svg: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'><g fill='none' stroke='black' stroke-width='1'><path d='M0 0H20V20'/><path d='M40 0H20V20H40'/><path d='M0 40H10V30H30V40'/><path d='M0 20H10V10'/><path d='M30 20V30H40'/><path d='M10 30V20'/></g></svg>");
+  -webkit-mask-image: var(--maze-svg);
+  mask-image: var(--maze-svg);
+  -webkit-mask-repeat: repeat;
+  mask-repeat: repeat;
+  -webkit-mask-size: 40px 40px;
+  mask-size: 40px 40px;
+  opacity: var(--ag-maze-opacity);
+}
+
+/* Make sure the actual app content paints on top of the maze. */
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* Panels keep a flat surface so the maze shows through where bg is
+   exposed (login backdrop, gaps between panels, etc.). */
 
 code,
 pre,
@@ -152,14 +202,26 @@ textarea::placeholder {
   border-radius: var(--ag-radius);
 }
 
+/* Outer app shell + inner pane: translucent so the maze backdrop reads
+   through. NO backdrop-filter blur — the maze is meant to stay sharp.
+   The shell carries the border + shadow; the maze shows through the
+   alpha gap. */
+.ag-shell {
+  background-color: color-mix(in srgb, var(--ag-bg-1) 55%, transparent);
+}
+
+.ag-pane {
+  background-color: color-mix(in srgb, var(--ag-bg) 60%, transparent);
+}
+
 .ag-input {
   width: 100%;
   background-color: var(--ag-bg-2);
   color: var(--ag-fg);
   border: 1px solid var(--ag-border);
   border-radius: var(--ag-radius-sm);
-  padding: 7px 10px;
-  font-size: 13px;
+  padding: 9px 12px;
+  font-size: 14px;
   transition:
     border-color 120ms ease,
     background-color 120ms ease,
@@ -177,54 +239,214 @@ textarea::placeholder {
 .ag-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 6px 12px;
-  font-size: 13px;
+  padding: 8px 14px;
+  font-size: 13.5px;
   font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.005em;
   border-radius: var(--ag-radius-sm);
   border: 1px solid transparent;
   cursor: pointer;
   user-select: none;
+  position: relative;
+  isolation: isolate;
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    opacity 120ms ease;
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease,
+    transform 80ms ease,
+    opacity 140ms ease;
 }
 .ag-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
+.ag-btn:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+.ag-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ag-accent-soft);
+}
+
+/* Primary: accent color + subtle inner highlight + soft shadow */
 .ag-btn-primary {
-  background-color: var(--ag-accent);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--ag-accent) 100%, white 6%),
+    var(--ag-accent));
   color: var(--ag-accent-fg);
+  border-color: color-mix(in srgb, var(--ag-accent) 80%, black 8%);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.12) inset,
+    0 1px 2px rgba(0, 0, 0, 0.25),
+    0 0 0 0 var(--ag-accent-soft);
 }
 .ag-btn-primary:hover:not(:disabled) {
-  background-color: var(--ag-accent-hover);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--ag-accent-hover) 100%, white 6%),
+    var(--ag-accent-hover));
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.16) inset,
+    0 2px 6px rgba(0, 0, 0, 0.3),
+    0 0 0 4px var(--ag-accent-soft);
 }
+
+/* Secondary: surface, border, no fill gradient */
 .ag-btn-secondary {
   background-color: var(--ag-bg-2);
   color: var(--ag-fg);
   border-color: var(--ag-border);
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset;
 }
 .ag-btn-secondary:hover:not(:disabled) {
   background-color: var(--ag-bg-3);
   border-color: var(--ag-border-strong);
 }
+
+/* Ghost: no background until hover */
 .ag-btn-ghost {
   background-color: transparent;
   color: var(--ag-fg-muted);
+  border-color: transparent;
 }
 .ag-btn-ghost:hover:not(:disabled) {
   background-color: var(--ag-bg-2);
   color: var(--ag-fg);
 }
+
+/* Danger: red text, soft red hover */
 .ag-btn-danger {
   color: var(--ag-danger);
   background-color: transparent;
+  border-color: transparent;
 }
 .ag-btn-danger:hover:not(:disabled) {
-  background-color: rgba(248, 113, 113, 0.12);
+  background-color: color-mix(in srgb, var(--ag-danger) 12%, transparent);
+  color: var(--ag-danger);
+}
+
+/* Size modifiers */
+.ag-btn-sm {
+  padding: 5px 10px;
+  font-size: 12.5px;
+}
+.ag-btn-xs {
+  padding: 3px 8px;
+  font-size: 11.5px;
+}
+.ag-btn-icon {
+  padding: 6px;
+  border-radius: var(--ag-radius-sm);
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+}
+.ag-btn-icon.ag-btn-sm {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  padding: 4px;
+}
+
+/* ---------- Select / Dropdown ---------------------------------------- */
+
+.ag-select {
+  position: relative;
+  display: inline-flex;
+  width: 100%;
+}
+.ag-select-trigger {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 8px 12px;
+  font-size: 13.5px;
+  background-color: var(--ag-bg-2);
+  color: var(--ag-fg);
+  border: 1px solid var(--ag-border);
+  border-radius: var(--ag-radius-sm);
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.ag-select-trigger:hover {
+  border-color: var(--ag-border-strong);
+  background-color: var(--ag-bg-3);
+}
+.ag-select-trigger:focus-visible,
+.ag-select-trigger[data-open="true"] {
+  outline: none;
+  border-color: var(--ag-accent);
+  box-shadow: 0 0 0 3px var(--ag-accent-soft);
+}
+.ag-select-caret {
+  color: var(--ag-fg-subtle);
+  transition: transform 140ms ease;
+}
+.ag-select-trigger[data-open="true"] .ag-select-caret {
+  transform: rotate(180deg);
+}
+.ag-select-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  max-height: 280px;
+  overflow-y: auto;
+  background-color: var(--ag-bg-1);
+  border: 1px solid var(--ag-border-strong);
+  border-radius: var(--ag-radius);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.2);
+  padding: 4px;
+  animation: ag-pop 120ms ease-out;
+  transform-origin: top center;
+}
+@keyframes ag-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.ag-select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 13.5px;
+  color: var(--ag-fg);
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+.ag-select-option:hover,
+.ag-select-option[data-active="true"] {
+  background-color: var(--ag-bg-3);
+}
+.ag-select-option[data-selected="true"] {
+  background-color: var(--ag-accent-soft);
+  color: var(--ag-fg);
+}
+.ag-select-option-check {
+  margin-left: auto;
+  color: var(--ag-accent);
+  opacity: 0;
+}
+.ag-select-option[data-selected="true"] .ag-select-option-check {
+  opacity: 1;
 }
 
 .ag-chip {
@@ -258,11 +480,16 @@ textarea::placeholder {
 .ag-list-item {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 8px;
   padding: 6px 10px;
   border-radius: 6px;
   cursor: pointer;
   color: var(--ag-fg-muted);
+  /* Min-width baseline so truncated children (project name) shrink before
+     icons / chips wrap. The aside itself enforces RAIL_MIN_PX so the row
+     never gets narrower than the icon cluster needs. */
+  min-width: 0;
   transition:
     background-color 100ms ease,
     color 100ms ease;
@@ -324,4 +551,176 @@ textarea::placeholder {
 .xterm-viewport,
 .xterm-screen {
   background-color: var(--ag-bg-1) !important;
+}
+
+/* ---------- Notes: rich-text editor styling ------------------------------ */
+
+.ag-prose {
+  color: var(--ag-fg);
+  font-size: 15px;
+  line-height: 1.6;
+}
+.ag-prose:focus {
+  outline: none;
+}
+.ag-prose h1 {
+  font-size: 1.7em;
+  font-weight: 700;
+  margin: 0.8em 0 0.4em;
+  line-height: 1.2;
+}
+.ag-prose h2 {
+  font-size: 1.35em;
+  font-weight: 600;
+  margin: 0.8em 0 0.35em;
+  line-height: 1.25;
+}
+.ag-prose h3 {
+  font-size: 1.12em;
+  font-weight: 600;
+  margin: 0.7em 0 0.3em;
+}
+.ag-prose p {
+  margin: 0.4em 0;
+}
+.ag-prose strong {
+  color: var(--ag-fg);
+  font-weight: 600;
+}
+.ag-prose em {
+  font-style: italic;
+}
+.ag-prose s {
+  text-decoration: line-through;
+  color: var(--ag-fg-muted);
+}
+.ag-prose code {
+  font-family: var(--ag-font-mono);
+  font-size: 0.92em;
+  padding: 0 4px;
+  border-radius: 4px;
+  background-color: var(--ag-bg-2);
+  border: 1px solid var(--ag-border);
+}
+.ag-prose pre {
+  font-family: var(--ag-font-mono);
+  font-size: 0.92em;
+  background-color: var(--ag-bg-2);
+  border: 1px solid var(--ag-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0.6em 0;
+  overflow-x: auto;
+}
+.ag-prose pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.ag-prose blockquote {
+  border-left: 3px solid var(--ag-accent);
+  padding: 0.1em 0 0.1em 0.9em;
+  color: var(--ag-fg-muted);
+  margin: 0.5em 0;
+}
+.ag-prose a {
+  color: var(--ag-accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(124, 92, 255, 0.4);
+}
+.ag-prose ul,
+.ag-prose ol {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+.ag-prose ul {
+  list-style: disc;
+}
+.ag-prose ol {
+  list-style: decimal;
+}
+.ag-prose li {
+  margin: 0.15em 0;
+}
+.ag-prose ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4em 0;
+}
+.ag-prose ul[data-type="taskList"] li {
+  display: grid;
+  grid-template-columns: 1.4em 1fr;
+  align-items: start;
+  gap: 6px;
+  margin: 0.15em 0;
+}
+.ag-prose ul[data-type="taskList"] li > label {
+  display: inline-flex;
+  align-items: center;
+  height: 1.55em; /* match line-height so checkbox sits on first text line */
+  user-select: none;
+}
+
+/* Hide the native checkbox and draw a custom rounded one. The wrapping
+   <label> keeps the click target intact. */
+.ag-prose ul[data-type="taskList"] li > label input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent; /* transparent fill, even when checked */
+  border: 1.5px solid var(--ag-fg-subtle);
+  border-radius: 999px; /* fully round */
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+  position: relative;
+}
+.ag-prose ul[data-type="taskList"] li > label input[type="checkbox"]:hover {
+  border-color: var(--ag-accent);
+}
+.ag-prose ul[data-type="taskList"] li > label input[type="checkbox"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--ag-accent-soft);
+  border-color: var(--ag-accent);
+}
+.ag-prose ul[data-type="taskList"] li > label input[type="checkbox"]:checked {
+  border-color: var(--ag-accent);
+}
+/* Custom checkmark: a small filled accent dot that reads as "done". */
+.ag-prose ul[data-type="taskList"] li > label input[type="checkbox"]:checked::after {
+  content: "";
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--ag-accent);
+}
+
+.ag-prose ul[data-type="taskList"] li > div {
+  min-width: 0;
+}
+/* Tiptap wraps task-item content in <p>; remove its block margins so it
+   baselines with the checkbox. */
+.ag-prose ul[data-type="taskList"] li > div > p {
+  margin: 0;
+}
+.ag-prose ul[data-type="taskList"] li[data-checked="true"] > div {
+  color: var(--ag-fg-muted);
+  text-decoration: line-through;
+}
+/* Nested task lists indent under their parent. */
+.ag-prose ul[data-type="taskList"] ul[data-type="taskList"] {
+  margin-left: 0.4em;
+}
+.ag-prose p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--ag-fg-subtle);
+  float: left;
+  height: 0;
+  pointer-events: none;
 }

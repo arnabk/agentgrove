@@ -2,15 +2,20 @@
 
 #![forbid(unsafe_code)]
 
-pub mod auth;
+pub mod branches;
 pub mod chats;
+pub mod diag;
 pub mod editor;
+pub mod fs;
+pub mod git;
 pub mod health;
 pub mod logbus;
 pub mod notes;
 pub mod projects;
 pub mod queue;
 pub mod router;
+pub mod scratchpad;
+pub mod settings;
 pub mod state;
 pub mod terminal;
 pub mod themes;

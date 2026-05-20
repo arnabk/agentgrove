@@ -55,11 +55,9 @@ try {
     Start-Sleep -Seconds 1
   }
 
-  $token = ((Select-String -Path $beLog -Pattern '^token: ').Line | Select-Object -First 1) -replace '^token: ', ''
   Write-Host "[start] backend ready"
-  Write-Host "[start]   url:   http://127.0.0.1:$bePort"
-  Write-Host "[start]   token: $token"
-  Write-Host "[start]   log:   $beLog"
+  Write-Host "[start]   url: http://127.0.0.1:$bePort"
+  Write-Host "[start]   log: $beLog"
 
   Write-Host "[start] launching frontend..."
   $global:feProc = Start-Process -PassThru -NoNewWindow `

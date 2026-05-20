@@ -1,7 +1,14 @@
 # AgentGrove
 
-High-performance, low-footprint, open-source agentic developer workspace.
-Rust backend + SolidJS frontend. Cross-platform (Linux, macOS, Windows).
+High-performance, low-footprint, open-source local developer workspace.
+A project-centric environment that brings folders, editor, terminals,
+git diff, notes, prompt queues, and AI assistance together under one
+roof. Rust backend + SolidJS frontend. Cross-platform (Linux, macOS,
+Windows).
+
+AI is one capability among many — terminals, editors, diff, scratchpads,
+and queues all stand on their own. You can use AgentGrove with the AI
+features completely turned off and still get a solid local IDE.
 
 All documentation lives under [`docs/`](./docs/README.md).
 

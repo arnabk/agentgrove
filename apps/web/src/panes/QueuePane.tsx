@@ -1,13 +1,13 @@
 import { For, Show, createEffect, createSignal } from "solid-js";
 import { api, type QueueState } from "../api/client";
-import { state } from "../stores/app";
+import { selectedChatId } from "../stores/app";
 
 export default function QueuePane() {
   const [q, setQ] = createSignal<QueueState | null>(null);
   const [body, setBody] = createSignal("");
 
   async function reload() {
-    const id = state.selectedChatId;
+    const id = selectedChatId();
     if (!id) {
       setQ(null);
       return;
@@ -16,13 +16,13 @@ export default function QueuePane() {
   }
 
   createEffect(() => {
-    void state.selectedChatId;
+    void selectedChatId();
     void reload();
   });
 
   async function enqueue(ev: SubmitEvent) {
     ev.preventDefault();
-    const id = state.selectedChatId;
+    const id = selectedChatId();
     if (!id || !body().trim()) return;
     await api.enqueue(id, body());
     setBody("");
@@ -30,7 +30,7 @@ export default function QueuePane() {
   }
 
   async function toggleMode() {
-    const id = state.selectedChatId;
+    const id = selectedChatId();
     const cur = q()?.mode;
     if (!id || !cur) return;
     await api.setQueueMode(id, cur === "auto" ? "manual" : "auto");
@@ -38,14 +38,14 @@ export default function QueuePane() {
   }
 
   async function runNext() {
-    const id = state.selectedChatId;
+    const id = selectedChatId();
     if (!id) return;
     await api.runNextQueue(id);
     await reload();
   }
 
   async function cancel(itemId: string) {
-    const id = state.selectedChatId;
+    const id = selectedChatId();
     if (!id) return;
     await api.cancelQueueItem(id, itemId);
     await reload();
@@ -98,13 +98,13 @@ export default function QueuePane() {
           placeholder="Queue a thought… it'll run after the current prompt."
           value={body()}
           onInput={(e) => setBody(e.currentTarget.value)}
-          disabled={!state.selectedChatId}
+          disabled={!selectedChatId()}
           data-testid="queue-input"
         />
         <button
           type="submit"
           class="ag-btn ag-btn-primary"
-          disabled={!state.selectedChatId || !body().trim()}
+          disabled={!selectedChatId() || !body().trim()}
           data-testid="queue-add"
         >
           Add

@@ -2,8 +2,9 @@
 
 AgentGrove is a local-first server with a browser UI. A single Rust binary
 serves both an HTTP API and a static SolidJS frontend. Default bind is
-`127.0.0.1` with a bearer token; an opt-in remote mode allows binding to
-other interfaces.
+`127.0.0.1` with no authentication — the server trusts the loopback
+caller. Remote bind is possible via `AGENTGROVE_BIND` but should be
+fronted by an auth proxy.
 
 ## High-level diagram
 

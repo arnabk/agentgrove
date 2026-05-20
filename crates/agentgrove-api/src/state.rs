@@ -9,9 +9,6 @@ use tokio::sync::RwLock;
 /// Application state injected into Axum handlers.
 #[derive(Clone)]
 pub struct AppState {
-    /// Bearer token required by protected routes. `None` disables auth
-    /// entirely (the default for local dev).
-    pub token: Option<Arc<String>>,
     /// Filesystem state directory (default: `<repo>/.data`).
     pub state_dir: Arc<PathBuf>,
     /// SQLite pool.
@@ -35,18 +32,13 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Construct fresh state with an optional bearer token. Pass `None`
-    /// (or an empty string) to disable auth — the default for local dev.
+    /// Construct fresh state. Auth is not part of the model — the server
+    /// binds to loopback by default and trusts the host.
     #[must_use]
-    pub fn new(token: Option<String>, state_dir: PathBuf, db: DbPool) -> Self {
+    pub fn new(state_dir: PathBuf, db: DbPool) -> Self {
         let projects = ProjectRepo::new(db.clone());
         let worktrees = WorktreeRepo::new(db.clone());
-        let token = token
-            .map(|s| s.trim().to_owned())
-            .filter(|s| !s.is_empty())
-            .map(Arc::new);
         Self {
-            token,
             state_dir: Arc::new(state_dir),
             db,
             projects,

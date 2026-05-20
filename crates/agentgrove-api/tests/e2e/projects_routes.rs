@@ -72,7 +72,29 @@ async fn create_rejects_missing_path() {
 }
 
 #[tokio::test]
-async fn create_rejects_empty_name() {
+async fn create_without_name_uses_basename() {
+    let h = BeHarness::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let body = json!({ "root": dir.path().to_string_lossy() });
+    let res = h
+        .post_auth("/api/projects")
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let p: Value = res.json().await.unwrap();
+    let expected = dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(p["name"], expected);
+}
+
+#[tokio::test]
+async fn create_with_blank_name_falls_back_to_basename() {
     let h = BeHarness::start().await;
     let dir = tempfile::tempdir().unwrap();
     let body = json!({ "name": "  ", "root": dir.path().to_string_lossy() });
@@ -82,7 +104,15 @@ async fn create_rejects_empty_name() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 400);
+    assert_eq!(res.status(), 200);
+    let p: Value = res.json().await.unwrap();
+    let expected = dir
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert_eq!(p["name"], expected);
 }
 
 #[tokio::test]

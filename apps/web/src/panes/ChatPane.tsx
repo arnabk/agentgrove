@@ -1,29 +1,118 @@
 import { For, Show, createEffect, createSignal } from "solid-js";
 import { api, type Chat, type Prompt } from "../api/client";
-import { state } from "../stores/app";
+import { confirm } from "../components/dialog";
+import {
+  addChatTab,
+  closeChatTab,
+  currentScope,
+  currentWorktreeId,
+  selectedChatId,
+  setActiveChat,
+  setScopeChats,
+  state,
+} from "../stores/app";
 
 export default function ChatPane() {
   const [chat, setChat] = createSignal<Chat | null>(null);
   const [input, setInput] = createSignal("");
   const [busy, setBusy] = createSignal(false);
+  const [creating, setCreating] = createSignal(false);
+  const [err, setErr] = createSignal<string | null>(null);
+
+  const scope = () => currentScope();
+  const tabs = () => scope()?.chats ?? [];
+  const activeId = () => selectedChatId();
+
+  /** Refresh the chat list for the active scope from the BE. Called on
+   *  every scope (project / worktree) change so the tab strip mirrors
+   *  server state and is filtered to the active worktree (or project
+   *  root when no worktree is selected). */
+  async function refreshScopeChats() {
+    const pid = state.selectedProjectId;
+    if (!pid) {
+      setScopeChats([]);
+      return;
+    }
+    try {
+      const all = await api.listProjectChats(pid);
+      const wt = currentWorktreeId();
+      // BE returns the union; filter client-side so each scope shows its
+      // own chats (worktree chats stay under their worktree, project-
+      // root chats stay under the project root).
+      const filtered = all.filter((c) => (c.worktree_id ?? null) === wt);
+      setScopeChats(filtered.map((c) => ({ id: c.id, title: c.title })));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   async function reload() {
-    const id = state.selectedChatId;
+    const id = activeId();
     if (!id) {
       setChat(null);
       return;
     }
-    setChat(await api.getChat(id));
+    try {
+      setChat(await api.getChat(id));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
   }
 
+  // Refresh tab list whenever the active scope changes.
   createEffect(() => {
-    void state.selectedChatId;
+    void state.selectedProjectId;
+    void currentWorktreeId();
+    void refreshScopeChats();
+  });
+
+  // Reload the open chat whenever the active chat id changes.
+  createEffect(() => {
+    void activeId();
     void reload();
   });
 
+  async function newChat() {
+    const pid = state.selectedProjectId;
+    if (!pid) return;
+    setErr(null);
+    setCreating(true);
+    try {
+      const wt = currentWorktreeId();
+      const body: {
+        title: string;
+        provider: string;
+        model: string;
+        worktree_id?: string;
+      } = {
+        title: `chat ${tabs().length + 1}`,
+        provider: "fake",
+        model: "echo",
+      };
+      if (wt) body.worktree_id = wt;
+      const created = await api.createProjectChat(pid, body);
+      addChatTab({ id: created.id, title: created.title });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function closeTab(id: string, title: string) {
+    const ok = await confirm({
+      title: `Close chat "${title}"?`,
+      body: "The chat tab will be removed from this view. The conversation history stays on the server and can be reopened from the project rail.",
+      confirmLabel: "Close",
+      testId: "confirm-close-chat",
+    });
+    if (!ok) return;
+    closeChatTab(id);
+  }
+
   async function send(ev: SubmitEvent) {
     ev.preventDefault();
-    const id = state.selectedChatId;
+    const id = activeId();
     const body = input().trim();
     if (!id || !body) return;
     setBusy(true);
@@ -37,9 +126,15 @@ export default function ChatPane() {
   }
 
   async function revert(p: Prompt) {
-    const id = state.selectedChatId;
+    const id = activeId();
     if (!id) return;
-    if (!confirm(`Revert prompt #${p.seq}?`)) return;
+    const ok = await confirm({
+      title: `Revert prompt #${p.seq}?`,
+      body: "AgentGrove will ask the assistant to undo the file changes this prompt produced. You can keep editing if it goes wrong.",
+      confirmLabel: "Revert",
+      testId: "confirm-revert-prompt",
+    });
+    if (!ok) return;
     await api.revertPrompt(id, p.id);
     await reload();
   }
@@ -53,13 +148,64 @@ export default function ChatPane() {
 
   return (
     <section data-testid="chat-pane" class="flex flex-col h-full">
-      <header class="h-11 px-4 flex items-center border-b border-border bg-bg-1">
-        <h2 class="text-[13px] font-semibold tracking-tight" data-testid="chat-title">
-          {chat()?.title ?? "No chat selected"}
-        </h2>
+      {/* Tab strip */}
+      <header
+        class="h-11 px-2 flex items-center gap-1.5 border-b border-border bg-bg-1 overflow-x-auto"
+        data-testid="chat-tabs"
+      >
+        <For
+          each={tabs()}
+          fallback={
+            <span class="text-[12.5px] text-fg-subtle italic px-2">
+              No chats in this scope.
+            </span>
+          }
+        >
+          {(t) => (
+            <div
+              class="group inline-flex items-center gap-1 rounded-md border border-border bg-bg-2 pl-2 pr-1 py-1 text-[12px] cursor-pointer"
+              classList={{
+                "!border-accent !bg-accent-soft": t.id === activeId(),
+                "hover:bg-bg-3": t.id !== activeId(),
+              }}
+              onClick={() => setActiveChat(t.id)}
+              title={t.title}
+              data-testid={`chat-tab-${t.id}`}
+            >
+              <span class="truncate max-w-[180px]">{t.title}</span>
+              <button
+                type="button"
+                class="ml-1 px-1 text-fg-subtle hover:text-danger"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void closeTab(t.id, t.title);
+                }}
+                aria-label={`Close ${t.title}`}
+                data-testid={`chat-close-${t.id}`}
+                title="Close chat tab"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+        </For>
+        <button
+          class="ag-btn ag-btn-ghost ag-btn-sm ml-1"
+          onClick={() => void newChat()}
+          disabled={creating() || !state.selectedProjectId}
+          title="New chat in this scope"
+          data-testid="chat-new"
+        >
+          + New
+        </button>
         <Show when={chat()}>
-          <span class="ml-2 ag-chip ag-chip-accent">
+          <span class="ml-2 ag-chip ag-chip-accent" data-testid="chat-provider">
             {chat()!.provider}/{chat()!.model}
+          </span>
+        </Show>
+        <Show when={err()}>
+          <span class="ml-auto text-[11.5px] text-danger" data-testid="chat-error" title={err() ?? ""}>
+            {err()}
           </span>
         </Show>
       </header>
@@ -133,13 +279,13 @@ export default function ChatPane() {
               form?.requestSubmit();
             }
           }}
-          disabled={!state.selectedChatId || busy()}
+          disabled={!activeId() || busy()}
           data-testid="chat-input"
         />
         <button
           type="submit"
           class="ag-btn ag-btn-primary"
-          disabled={!state.selectedChatId || busy() || !input().trim()}
+          disabled={!activeId() || busy() || !input().trim()}
           data-testid="chat-send"
         >
           Send

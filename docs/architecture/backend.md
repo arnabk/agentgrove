@@ -29,7 +29,8 @@ during a running prompt for snapshot.
 HTTP endpoints. Streams `AgentEvent`s to API layer.
 
 ### agentgrove-api
-`axum` routes, WS hub, bearer-token auth, OpenAPI via `utoipa`.
+`axum` routes, WS hub, OpenAPI via `utoipa`. The server binds to
+`127.0.0.1` by default; there is no built-in authentication.
 
 ### agentgrove-server
 Binary. CLI flags, config, tracing, startup. Embeds static frontend assets

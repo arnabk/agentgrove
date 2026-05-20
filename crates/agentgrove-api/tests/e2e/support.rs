@@ -1,5 +1,5 @@
 //! Test harness: boot the real Axum router on an ephemeral port with a
-//! tempdir SQLite DB.
+//! tempdir SQLite DB. No auth — all helpers issue plain requests.
 
 use agentgrove_api::{build_router, AppState};
 use agentgrove_store::{open_pool, run_migrations};
@@ -8,7 +8,6 @@ use tokio::net::TcpListener;
 
 pub struct BeHarness {
     pub base_url: String,
-    pub token: String,
     pub client: reqwest::Client,
     #[allow(dead_code)]
     pub state_dir: std::path::PathBuf,
@@ -18,20 +17,11 @@ pub struct BeHarness {
 
 impl BeHarness {
     pub async fn start() -> Self {
-        Self::start_with_token(Some("test-token-abc123".to_string())).await
-    }
-
-    pub async fn start_no_auth() -> Self {
-        Self::start_with_token(None).await
-    }
-
-    async fn start_with_token(token_opt: Option<String>) -> Self {
         let tmp = tempfile::tempdir().expect("tempdir");
         let pool = open_pool(tmp.path()).await.expect("pool");
         run_migrations(&pool).await.expect("migrate");
 
-        let token = token_opt.clone().unwrap_or_default();
-        let state = AppState::new(token_opt, tmp.path().to_path_buf(), pool);
+        let state = AppState::new(tmp.path().to_path_buf(), pool);
         let app = build_router(state);
 
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -57,7 +47,6 @@ impl BeHarness {
             {
                 return Self {
                     base_url,
-                    token,
                     client,
                     state_dir: tmp.path().to_path_buf(),
                     _tmp: tmp,
@@ -69,22 +58,29 @@ impl BeHarness {
         panic!("server did not become ready");
     }
 
-    pub fn get_auth(&self, path: &str) -> reqwest::RequestBuilder {
-        self.client
-            .get(format!("{}{}", self.base_url, path))
-            .bearer_auth(&self.token)
-    }
-    pub fn get_anon(&self, path: &str) -> reqwest::RequestBuilder {
+    pub fn get(&self, path: &str) -> reqwest::RequestBuilder {
         self.client.get(format!("{}{}", self.base_url, path))
     }
+
+    pub fn post(&self, path: &str) -> reqwest::RequestBuilder {
+        self.client.post(format!("{}{}", self.base_url, path))
+    }
+
+    pub fn delete(&self, path: &str) -> reqwest::RequestBuilder {
+        self.client.delete(format!("{}{}", self.base_url, path))
+    }
+
+    // Backward-compat aliases so existing tests don't need to change.
+    pub fn get_auth(&self, path: &str) -> reqwest::RequestBuilder {
+        self.get(path)
+    }
+    pub fn get_anon(&self, path: &str) -> reqwest::RequestBuilder {
+        self.get(path)
+    }
     pub fn post_auth(&self, path: &str) -> reqwest::RequestBuilder {
-        self.client
-            .post(format!("{}{}", self.base_url, path))
-            .bearer_auth(&self.token)
+        self.post(path)
     }
     pub fn delete_auth(&self, path: &str) -> reqwest::RequestBuilder {
-        self.client
-            .delete(format!("{}{}", self.base_url, path))
-            .bearer_auth(&self.token)
+        self.delete(path)
     }
 }

@@ -5,7 +5,7 @@
 #   - Backend bound to 127.0.0.1:${AGENTGROVE_PORT:-4317}
 #   - Frontend dev server on http://localhost:5173
 #   - State dir: <repo>/.data
-#   - Token: auto-generated, printed below
+#   - No auth (loopback-only by default)
 #
 # Stop with Ctrl+C — both processes are terminated together.
 #
@@ -84,11 +84,9 @@ for i in $(seq 1 30); do
   sleep 1
 done
 
-TOKEN="$(grep -oE 'token: .*' "$BE_LOG" | head -1 | awk '{print $2}')"
 echo "[start] backend ready"
-echo "[start]   url:   http://127.0.0.1:$BE_PORT"
-echo "[start]   token: $TOKEN"
-echo "[start]   log:   $BE_LOG"
+echo "[start]   url: http://127.0.0.1:$BE_PORT"
+echo "[start]   log: $BE_LOG"
 
 echo "[start] launching frontend..."
 pnpm -C apps/web dev >"$FE_LOG" 2>&1 &

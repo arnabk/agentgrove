@@ -7,6 +7,14 @@ export interface Project {
   root: string;
   created_at: string;
   updated_at: string;
+  /** Folder is a git repository. */
+  is_git?: boolean;
+  /** Git repo has at least one remote configured. */
+  has_remote?: boolean;
+  /** Current branch name (when discoverable). */
+  current_branch?: string | null;
+  /** Configured git remote names. */
+  remotes?: string[];
 }
 
 export interface Worktree {
@@ -20,11 +28,13 @@ export interface Worktree {
   post_script: string | null;
   created_at: string;
   updated_at: string;
+  /** ISO timestamp; non-null only for soft-deleted (history) entries. */
+  removed_at?: string | null;
 }
 
 export interface Chat {
   id: string;
-  worktree_id: string;
+  worktree_id: string | null;
   title: string;
   provider: string;
   model: string;
@@ -76,6 +86,11 @@ export interface Terminal {
   rows: number;
 }
 
+export interface TerminalStatus {
+  id: string;
+  exited: boolean;
+}
+
 export interface Theme {
   id: string;
   name: string;
@@ -105,16 +120,9 @@ function baseUrl(): string {
   return "";
 }
 
-function token(): string {
-  return localStorage.getItem("ag-token") ?? "";
-}
-
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const url = `${baseUrl()}${path}`;
   const headers = new Headers(opts.headers);
-  if (!headers.has("Authorization") && token()) {
-    headers.set("Authorization", `Bearer ${token()}`);
-  }
   if (opts.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
@@ -130,20 +138,13 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  setToken(t: string) {
-    localStorage.setItem("ag-token", t);
-  },
-  getToken: token,
   baseUrl,
   async health() {
     return req<{ status: string; version: string }>("/health");
   },
-  async whoami() {
-    return req<string>("/whoami");
-  },
   // Projects
   listProjects: () => req<Project[]>("/api/projects"),
-  createProject: (body: { name: string; root: string }) =>
+  createProject: (body: { name?: string; root: string }) =>
     req<Project>("/api/projects", { method: "POST", body: JSON.stringify(body) }),
   deleteProject: (id: string) =>
     req<void>(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
@@ -169,11 +170,38 @@ export const api = {
       `/api/projects/${encodeURIComponent(projectId)}/worktrees/${encodeURIComponent(worktreeId)}`,
       { method: "DELETE" },
     ),
-  // Chats
+  // Worktree history (soft-deleted) + restore
+  listWorktreeHistory: (params?: { q?: string; projectId?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.q) qs.set("q", params.q);
+    if (params?.projectId) qs.set("project_id", params.projectId);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return req<Worktree[]>(`/api/worktrees/history${suffix}`);
+  },
+  restoreWorktree: (worktreeId: string) =>
+    req<Worktree>(`/api/worktrees/${encodeURIComponent(worktreeId)}/restore`, {
+      method: "POST",
+    }),
+  // Chats — worktree-scoped (legacy) + project-scoped (current).
   listChats: (worktreeId: string) =>
     req<Chat[]>(`/api/worktrees/${encodeURIComponent(worktreeId)}/chats`),
   createChat: (worktreeId: string, body: { title: string; provider: string; model: string }) =>
     req<Chat>(`/api/worktrees/${encodeURIComponent(worktreeId)}/chats`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  listProjectChats: (projectId: string) =>
+    req<Chat[]>(`/api/projects/${encodeURIComponent(projectId)}/chats`),
+  createProjectChat: (
+    projectId: string,
+    body: {
+      title: string;
+      provider: string;
+      model: string;
+      worktree_id?: string;
+    },
+  ) =>
+    req<Chat>(`/api/projects/${encodeURIComponent(projectId)}/chats`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
@@ -221,7 +249,13 @@ export const api = {
     }),
   // Terminal
   listTerminals: () => req<Terminal[]>("/api/terminals"),
-  createTerminal: (body?: { cwd?: string; cols?: number; rows?: number }) =>
+  createTerminal: (body?: {
+    cwd?: string;
+    cols?: number;
+    rows?: number;
+    project_id?: string;
+    worktree_id?: string;
+  }) =>
     req<Terminal>("/api/terminals", {
       method: "POST",
       body: JSON.stringify(body ?? {}),
@@ -239,6 +273,8 @@ export const api = {
   killTerminal: (id: string) =>
     req<void>(`/api/terminals/${encodeURIComponent(id)}`, { method: "DELETE" }),
   terminalHistory: (id: string) => req<string>(`/api/terminals/${encodeURIComponent(id)}/history`),
+  terminalStatus: (id: string) =>
+    req<TerminalStatus>(`/api/terminals/${encodeURIComponent(id)}/status`),
   // Editor
   readFile: (path: string) =>
     req<{ path: string; content: string }>(`/api/editor/file?path=${encodeURIComponent(path)}`),
@@ -251,17 +287,121 @@ export const api = {
     req<{ path: string; head: string; working: string }>(
       `/api/editor/diff?path=${encodeURIComponent(path)}`,
     ),
-  listTree: (path: string) =>
-    req<{ path: string; is_dir: boolean }[]>(`/api/editor/tree?path=${encodeURIComponent(path)}`),
+  listTree: (path: string, showHidden = true) =>
+    req<TreeEntry[]>(
+      `/api/editor/tree?path=${encodeURIComponent(path)}&show_hidden=${showHidden}`,
+    ),
+  // Git status (changes view)
+  gitStatus: (path: string) =>
+    req<GitStatusResponse>(`/api/git/status?path=${encodeURIComponent(path)}`),
+  // Filesystem browser (folder picker)
+  fsHome: () => req<FsHome>("/api/fs/home"),
+  fsBrowse: (path: string) =>
+    req<FsBrowse>(`/api/fs/browse?path=${encodeURIComponent(path)}`),
   // Themes
   listThemes: () => req<Theme[]>("/api/themes"),
+  // Settings
+  getSettings: () => req<UserSettings>("/api/settings"),
+  saveSettings: (s: UserSettings) =>
+    req<UserSettings>("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify(s),
+    }),
+  // Per-project rich-text scratchpad
+  getScratchpad: (projectId: string) =>
+    req<Scratchpad>(`/api/projects/${encodeURIComponent(projectId)}/scratchpad`),
+  saveScratchpad: (projectId: string, body: string) =>
+    req<Scratchpad>(`/api/projects/${encodeURIComponent(projectId)}/scratchpad`, {
+      method: "PUT",
+      body: JSON.stringify({ body }),
+    }),
+  // Diagnostics
+  getMemory: () => req<MemoryReport>("/api/diag/memory"),
 };
+
+/** Memory readout: backend RSS + each live PTY child's RSS. */
+export interface ProcessMemory {
+  kind: string;
+  pid: number;
+  name: string;
+  rss_bytes: number;
+  virt_bytes: number;
+}
+
+export interface MemoryReport {
+  backend: ProcessMemory;
+  children: ProcessMemory[];
+  total_rss_bytes: number;
+}
+
+/** Per-project rich-text scratchpad. The body is opaque HTML. */
+export interface Scratchpad {
+  project_id: string;
+  body: string;
+  updated_at: string;
+}
+
+/** User preferences persisted at <state_dir>/settings.json on the BE. */
+export interface UserSettings {
+  theme?: string;
+  ui_font?: string;
+  mono_font?: string;
+  font_size?: number;
+}
+
+export interface TreeEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+}
+
+/** Status entry as returned by `GET /api/git/status`. */
+export interface GitStatusEntry {
+  path: string;
+  orig_path: string | null;
+  /** Index (staged) marker, ' ' when clean. */
+  x: string;
+  /** Working-tree marker, ' ' when clean. */
+  y: string;
+  modified: boolean;
+  added: boolean;
+  deleted: boolean;
+  renamed: boolean;
+  untracked: boolean;
+  ignored: boolean;
+}
+
+export interface GitStatusResponse {
+  path: string;
+  entries: GitStatusEntry[];
+}
+
+export interface FsHome {
+  home: string;
+  roots: string[];
+}
+
+export interface FsEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  readable: boolean;
+}
+
+export interface FsBrowse {
+  path: string;
+  name: string;
+  parent: string | null;
+  entries: FsEntry[];
+}
+
+/** Also overload createProject to accept just { root }. */
+export type CreateProjectInput = { root: string; name?: string };
 
 export function openWs(topic: string): WebSocket {
   const url = new URL(baseUrl() || window.location.origin);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = "/ws";
   url.searchParams.set("topic", topic);
-  url.searchParams.set("token", token());
   return new WebSocket(url.toString());
 }

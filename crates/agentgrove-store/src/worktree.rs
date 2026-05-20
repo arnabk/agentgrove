@@ -1,4 +1,9 @@
 //! Worktree repository.
+//!
+//! Rows are **soft-deleted**: `delete()` sets the `removed_at` column
+//! instead of dropping the row, so a project's worktree history is
+//! preserved and visible in the Worktree History view. `restore()` flips
+//! the column back to NULL.
 
 use crate::db::DbPool;
 use chrono::{DateTime, TimeZone, Utc};
@@ -88,6 +93,9 @@ pub struct WorktreeRecord {
     pub created_at: DateTime<Utc>,
     /// Last-update timestamp.
     pub updated_at: DateTime<Utc>,
+    /// When the user removed this worktree from the AgentGrove view.
+    /// `None` for live entries; `Some(...)` for historical entries.
+    pub removed_at: Option<DateTime<Utc>>,
 }
 
 /// Errors raised by the worktree repository.
@@ -127,10 +135,6 @@ impl WorktreeRepo {
     }
 
     /// Insert a new worktree row. Initial status is `Creating`.
-    ///
-    /// # Errors
-    ///
-    /// See [`WorktreeError`].
     pub async fn create(&self, input: NewWorktree) -> Result<WorktreeRecord, WorktreeError> {
         if input.branch.trim().is_empty() {
             return Err(WorktreeError::EmptyBranch);
@@ -180,6 +184,7 @@ impl WorktreeRepo {
                 post_script: input.post_script,
                 created_at: now,
                 updated_at: now,
+                removed_at: None,
             }),
             Err(sqlx::Error::Database(db_err))
                 if crate::project::is_unique_violation_pub(db_err.as_ref()) =>
@@ -191,10 +196,6 @@ impl WorktreeRepo {
     }
 
     /// Update lifecycle status.
-    ///
-    /// # Errors
-    ///
-    /// Returns the underlying sqlx error.
     pub async fn set_status(&self, id: &str, status: WorktreeStatus) -> Result<(), WorktreeError> {
         let now_ms = Utc::now().timestamp_millis();
         sqlx::query("UPDATE worktrees SET status = ?1, updated_at = ?2 WHERE id = ?3")
@@ -206,15 +207,11 @@ impl WorktreeRepo {
         Ok(())
     }
 
-    /// Fetch one worktree by id.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`WorktreeError::NotFound`] when no row matches.
+    /// Fetch one worktree by id (live or removed).
     pub async fn get(&self, id: &str) -> Result<WorktreeRecord, WorktreeError> {
         let row: Option<Row> = sqlx::query_as(
             "SELECT id, project_id, branch, base_ref, path, status, pre_script, post_script, \
-             created_at, updated_at FROM worktrees WHERE id = ?1",
+             created_at, updated_at, removed_at FROM worktrees WHERE id = ?1",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -223,18 +220,15 @@ impl WorktreeRepo {
             .ok_or_else(|| WorktreeError::NotFound(id.to_owned()))
     }
 
-    /// List all worktrees belonging to a project.
-    ///
-    /// # Errors
-    ///
-    /// Returns the underlying sqlx error.
+    /// List live (not soft-deleted) worktrees for a project.
     pub async fn list_for_project(
         &self,
         project_id: &str,
     ) -> Result<Vec<WorktreeRecord>, WorktreeError> {
         let rows: Vec<Row> = sqlx::query_as(
             "SELECT id, project_id, branch, base_ref, path, status, pre_script, post_script, \
-             created_at, updated_at FROM worktrees WHERE project_id = ?1 \
+             created_at, updated_at, removed_at FROM worktrees \
+             WHERE project_id = ?1 AND removed_at IS NULL \
              ORDER BY created_at ASC, id ASC",
         )
         .bind(project_id)
@@ -243,12 +237,54 @@ impl WorktreeRepo {
         Ok(rows.into_iter().map(row_to_record).collect())
     }
 
-    /// Delete a worktree row. Returns whether a row was removed.
-    ///
-    /// # Errors
-    ///
-    /// Returns the underlying sqlx error.
+    /// List every removed worktree across all projects, newest-removed first.
+    pub async fn list_removed_all(&self) -> Result<Vec<WorktreeRecord>, WorktreeError> {
+        let rows: Vec<Row> = sqlx::query_as(
+            "SELECT id, project_id, branch, base_ref, path, status, pre_script, post_script, \
+             created_at, updated_at, removed_at FROM worktrees \
+             WHERE removed_at IS NOT NULL \
+             ORDER BY removed_at DESC, id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(row_to_record).collect())
+    }
+
+    /// Soft-delete: mark `removed_at = now` so the row drops out of live
+    /// views but stays available in history. Returns whether a row was
+    /// affected.
     pub async fn delete(&self, id: &str) -> Result<bool, WorktreeError> {
+        let now_ms = Utc::now().timestamp_millis();
+        let res = sqlx::query(
+            "UPDATE worktrees SET removed_at = ?1, updated_at = ?1 \
+             WHERE id = ?2 AND removed_at IS NULL",
+        )
+        .bind(now_ms)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected() == 1)
+    }
+
+    /// Restore a soft-deleted row by clearing `removed_at`. Returns
+    /// whether a row was affected.
+    pub async fn restore(&self, id: &str) -> Result<bool, WorktreeError> {
+        let now_ms = Utc::now().timestamp_millis();
+        let res = sqlx::query(
+            "UPDATE worktrees SET removed_at = NULL, updated_at = ?1 \
+             WHERE id = ?2 AND removed_at IS NOT NULL",
+        )
+        .bind(now_ms)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected() == 1)
+    }
+
+    /// Hard-delete: physically remove the row. Used by tests and
+    /// potentially a future "purge history" action; not called by the
+    /// HTTP delete handler.
+    pub async fn purge(&self, id: &str) -> Result<bool, WorktreeError> {
         let res = sqlx::query("DELETE FROM worktrees WHERE id = ?1")
             .bind(id)
             .execute(&self.pool)
@@ -269,6 +305,7 @@ type Row = (
     Option<String>,
     i64,
     i64,
+    Option<i64>,
 );
 
 fn row_to_record(r: Row) -> WorktreeRecord {
@@ -283,6 +320,7 @@ fn row_to_record(r: Row) -> WorktreeRecord {
         post_script,
         created_ms,
         updated_ms,
+        removed_ms,
     ) = r;
     WorktreeRecord {
         id,
@@ -301,6 +339,7 @@ fn row_to_record(r: Row) -> WorktreeRecord {
             .timestamp_millis_opt(updated_ms)
             .single()
             .unwrap_or_else(Utc::now),
+        removed_at: removed_ms.and_then(|ms| Utc.timestamp_millis_opt(ms).single()),
     }
 }
 

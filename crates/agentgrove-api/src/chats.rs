@@ -1,9 +1,10 @@
-//! In-memory chat aggregate (M4 scope). Stored in `AppState`.
+//! In-memory chat aggregate.
 //!
-//! Each chat lives under a worktree and tracks a list of prompts. Prompts
-//! capture the user's input plus the events streamed by the agent
-//! provider. For M0+M1 we don't persist these to SQLite; that lands when
-//! we ship the AI-revert flow.
+//! Chats are owned by a **project**. They may optionally be scoped to a
+//! specific **worktree** within that project. There is **no per-project
+//! cap**; the UI lets users create chats freely and lists them as tabs.
+//!
+//! Persistence: in-memory for now; SQLite once the AI-revert timeline lands.
 
 use crate::state::AppState;
 use agentgrove_agents::AgentEvent;
@@ -20,7 +21,9 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatRecord {
     pub id: String,
-    pub worktree_id: String,
+    pub project_id: String,
+    /// `None` ⇒ chat lives under the project root scope.
+    pub worktree_id: Option<String>,
     pub title: String,
     pub provider: String,
     pub model: String,
@@ -41,43 +44,70 @@ pub struct PromptRecord {
 #[derive(Default, Debug)]
 pub struct ChatRegistry {
     by_id: HashMap<String, ChatRecord>,
-    by_worktree: HashMap<String, Vec<String>>,
+    by_project: HashMap<String, Vec<String>>,
 }
 
 impl ChatRegistry {
+    /// Insert a new chat owned by `project_id`, optionally scoped to a
+    /// `worktree_id`.
     pub fn create(
         &mut self,
-        worktree_id: String,
+        project_id: String,
+        worktree_id: Option<String>,
         title: String,
         provider: String,
         model: String,
     ) -> ChatRecord {
         let rec = ChatRecord {
             id: Uuid::now_v7().to_string(),
-            worktree_id: worktree_id.clone(),
+            project_id: project_id.clone(),
+            worktree_id,
             title,
             provider,
             model,
             created_at: Utc::now(),
             prompts: vec![],
         };
-        self.by_worktree
-            .entry(worktree_id)
+        self.by_project
+            .entry(project_id)
             .or_default()
             .push(rec.id.clone());
         self.by_id.insert(rec.id.clone(), rec.clone());
         rec
     }
 
-    pub fn list_for_worktree(&self, wt: &str) -> Vec<ChatRecord> {
-        self.by_worktree
-            .get(wt)
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(|i| self.by_id.get(i).cloned())
-                    .collect()
+    pub fn count_for_project(&self, project_id: &str) -> usize {
+        self.by_project.get(project_id).map(|v| v.len()).unwrap_or(0)
+    }
+
+    /// List all chats for a project. If `worktree_id` is `Some(_)`,
+    /// returns only chats scoped to that worktree (plus chats that match
+    /// the supplied id). If `None`, returns all chats in the project.
+    pub fn list_for_project(
+        &self,
+        project_id: &str,
+        worktree_id: Option<&str>,
+    ) -> Vec<ChatRecord> {
+        let ids = match self.by_project.get(project_id) {
+            Some(v) => v,
+            None => return vec![],
+        };
+        ids.iter()
+            .filter_map(|i| self.by_id.get(i).cloned())
+            .filter(|c| match worktree_id {
+                Some(w) => c.worktree_id.as_deref() == Some(w),
+                None => true,
             })
-            .unwrap_or_default()
+            .collect()
+    }
+
+    /// Legacy: list every chat whose worktree_id matches.
+    pub fn list_for_worktree(&self, wt: &str) -> Vec<ChatRecord> {
+        self.by_id
+            .values()
+            .filter(|c| c.worktree_id.as_deref() == Some(wt))
+            .cloned()
+            .collect()
     }
 
     pub fn get(&self, id: &str) -> Option<&ChatRecord> {
@@ -113,12 +143,57 @@ pub struct CreateChatBody {
     pub title: String,
     pub provider: String,
     pub model: String,
+    /// Optional worktree scope. Ignored by the worktree-specific route
+    /// (which derives this from the URL).
+    #[serde(default)]
+    pub worktree_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct AddPromptBody {
     pub content: String,
 }
+
+// ---- project-scoped routes ---------------------------------------------
+
+pub async fn list_for_project_handler(
+    State(state): State<AppState>,
+    Path(project_id): Path<String>,
+) -> Json<Vec<ChatRecord>> {
+    let reg = state.chats.read().await;
+    Json(reg.list_for_project(&project_id, None))
+}
+
+pub async fn create_for_project_handler(
+    State(state): State<AppState>,
+    Path(project_id): Path<String>,
+    Json(body): Json<CreateChatBody>,
+) -> Result<Json<ChatRecord>, (StatusCode, String)> {
+    // Validate project exists.
+    if state.projects.get(&project_id).await.is_err() {
+        return Err((StatusCode::NOT_FOUND, "project not found".into()));
+    }
+
+    // Validate optional worktree belongs to the project.
+    if let Some(wid) = body.worktree_id.as_deref() {
+        match state.worktrees.get(wid).await {
+            Ok(w) if w.project_id == project_id => {}
+            Ok(_) => return Err((StatusCode::BAD_REQUEST, "worktree not in project".into())),
+            Err(_) => return Err((StatusCode::NOT_FOUND, "worktree not found".into())),
+        }
+    }
+
+    let mut reg = state.chats.write().await;
+    Ok(Json(reg.create(
+        project_id,
+        body.worktree_id,
+        body.title,
+        body.provider,
+        body.model,
+    )))
+}
+
+// ---- worktree-scoped routes (legacy, retained) -------------------------
 
 pub async fn list(State(state): State<AppState>, Path(wt): Path<String>) -> Json<Vec<ChatRecord>> {
     let reg = state.chats.read().await;
@@ -129,10 +204,25 @@ pub async fn create(
     State(state): State<AppState>,
     Path(wt): Path<String>,
     Json(body): Json<CreateChatBody>,
-) -> Json<ChatRecord> {
+) -> Result<Json<ChatRecord>, (StatusCode, String)> {
+    // Derive the owning project. Worktrees not backed by a record (used by
+    // some tests) fall back to "wt-as-project" so we don't panic.
+    let project_id = match state.worktrees.get(&wt).await {
+        Ok(rec) => rec.project_id,
+        Err(_) => wt.clone(),
+    };
+
     let mut reg = state.chats.write().await;
-    Json(reg.create(wt, body.title, body.provider, body.model))
+    Ok(Json(reg.create(
+        project_id,
+        Some(wt),
+        body.title,
+        body.provider,
+        body.model,
+    )))
 }
+
+// ---- prompt-level ------------------------------------------------------
 
 pub async fn get_one(
     State(state): State<AppState>,
@@ -151,7 +241,7 @@ pub async fn add_prompt(
     let prompt = reg
         .add_prompt(&id, body.content.clone())
         .ok_or(StatusCode::NOT_FOUND)?;
-    // For M4: dispatch FakeProvider which echoes the prompt as tokens.
+    // For now: dispatch FakeProvider which echoes the prompt as tokens.
     let topic = format!("chat:{id}");
     let evs = vec![
         AgentEvent::Token {

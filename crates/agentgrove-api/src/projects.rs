@@ -1,6 +1,7 @@
 //! `/api/projects` routes.
 
 use crate::state::AppState;
+use agentgrove_git::inspect_repo;
 use agentgrove_store::{NewProject, ProjectError, ProjectRecord};
 use axum::{
     extract::{Path, State},
@@ -11,7 +12,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateProjectBody {
-    pub name: String,
+    /// Optional. When omitted, the basename of `root` is used.
+    #[serde(default)]
+    pub name: Option<String>,
     pub root: String,
 }
 
@@ -22,17 +25,28 @@ pub struct ProjectDto {
     pub root: String,
     pub created_at: String,
     pub updated_at: String,
+    /// Folder is a git repository.
+    pub is_git: bool,
+    /// Folder is git AND has at least one remote configured.
+    pub has_remote: bool,
+    /// Current branch name (when discoverable).
+    pub current_branch: Option<String>,
+    /// Configured git remote names.
+    pub remotes: Vec<String>,
 }
 
-impl From<ProjectRecord> for ProjectDto {
-    fn from(r: ProjectRecord) -> Self {
-        Self {
-            id: r.id,
-            name: r.name,
-            root: r.root.to_string_lossy().into_owned(),
-            created_at: r.created_at.to_rfc3339(),
-            updated_at: r.updated_at.to_rfc3339(),
-        }
+async fn record_to_dto(r: ProjectRecord) -> ProjectDto {
+    let info = inspect_repo(&r.root).await;
+    ProjectDto {
+        id: r.id,
+        name: r.name,
+        root: r.root.to_string_lossy().into_owned(),
+        created_at: r.created_at.to_rfc3339(),
+        updated_at: r.updated_at.to_rfc3339(),
+        is_git: info.is_git,
+        has_remote: info.has_remote,
+        current_branch: info.current_branch,
+        remotes: info.remotes,
     }
 }
 
@@ -64,22 +78,33 @@ pub async fn create(
             format!("path does not exist: {}", root.display()),
         ));
     }
+    let name = body
+        .name
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            root.file_name()
+                .map(|os| os.to_string_lossy().into_owned())
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or_else(|| root.to_string_lossy().into_owned());
     let rec = state
         .projects
-        .create(NewProject {
-            name: body.name,
-            root,
-        })
+        .create(NewProject { name, root })
         .await
         .map_err(map_err)?;
-    Ok(Json(rec.into()))
+    Ok(Json(record_to_dto(rec).await))
 }
 
 pub async fn list(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ProjectDto>>, (StatusCode, String)> {
     let all = state.projects.list().await.map_err(map_err)?;
-    Ok(Json(all.into_iter().map(Into::into).collect()))
+    let mut out = Vec::with_capacity(all.len());
+    for r in all {
+        out.push(record_to_dto(r).await);
+    }
+    Ok(Json(out))
 }
 
 pub async fn get_one(
@@ -87,7 +112,7 @@ pub async fn get_one(
     Path(id): Path<String>,
 ) -> Result<Json<ProjectDto>, (StatusCode, String)> {
     let rec = state.projects.get(&id).await.map_err(map_err)?;
-    Ok(Json(rec.into()))
+    Ok(Json(record_to_dto(rec).await))
 }
 
 pub async fn delete(
