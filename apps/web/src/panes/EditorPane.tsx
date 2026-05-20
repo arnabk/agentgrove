@@ -8,7 +8,10 @@ import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
 import { rust } from "@codemirror/lang-rust";
 import { api } from "../api/client";
+import { declareMemorySource, recordMemoryUsage } from "../lib/memory";
 import { selectedFilePath } from "../stores/app";
+
+declareMemorySource("editor.document", "Editor document");
 
 function langFor(path: string): Extension {
   if (path.endsWith(".rs")) return rust();
@@ -63,6 +66,7 @@ export default function EditorPane() {
           editableComp.reconfigure([EditorView.editable.of(true)]),
         ],
       });
+      recordMemoryUsage("editor.document", f.content.length * 2);
     } catch (e) {
       setLoadErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -86,6 +90,7 @@ export default function EditorPane() {
           editableComp.reconfigure([EditorView.editable.of(false)]),
         ],
       });
+      recordMemoryUsage("editor.document", 0);
     }
   });
 

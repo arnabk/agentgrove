@@ -1,5 +1,6 @@
-import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { api, type MemoryReport } from "../api/client";
+import { memorySnapshot } from "../lib/memory";
 
 /**
  * Top-right memory pill + popover. Shows the BE backend RSS + the
@@ -105,6 +106,10 @@ export default function MemoryIndicator() {
   /** Prefer the whole-tab measurement; fall back to JS heap. */
   const tabBytes = () => tabFull()?.bytes ?? tabHeap()?.usedJSHeapSize ?? 0;
   const tabLabel = () => (tabFull() ? "Tab" : "Tab JS");
+  // Subscribe to the FE attribution registry. The snapshot is
+  // computed inside `createMemo` so component-level re-renders only
+  // fire when an entry actually changes.
+  const ag = createMemo(() => memorySnapshot());
   /** Localized "5s ago" style for the popover. */
   function staleLabel(): string {
     const t = tabFullAt();
@@ -126,13 +131,12 @@ export default function MemoryIndicator() {
         type="button"
         class="ag-chip flex items-center gap-1.5 font-mono cursor-pointer hover:bg-bg-3"
         onClick={() => setOpen(!open())}
-        title={
-          tabFull()
-            ? "Backend RSS + whole-tab memory (DOM, JS heap, workers, GPU). Click for breakdown."
-            : "Backend RSS + JS heap (Tab JS). Whole-tab memory needs crossOriginIsolated. Click for breakdown."
-        }
+        title="AG = bytes AgentGrove itself accounts for (chat events, terminal scrollback, editor doc, project state). BE = backend process RSS. Tab = whole-tab process from measureUserAgentSpecificMemory(). Click for breakdown."
         data-testid="mem-indicator-toggle"
       >
+        <span class="text-fg-subtle">AG</span>
+        <span class="text-fg">{fmtBytes(ag().total)}</span>
+        <span class="text-fg-subtle">·</span>
         <span class="text-fg-subtle">BE</span>
         <span class="text-fg">{fmtBytes(beBytes())}</span>
         <Show when={tabHeap() || tabFull()}>
@@ -158,6 +162,31 @@ export default function MemoryIndicator() {
               total {fmtBytes(totalBytes())}
             </span>
           </div>
+
+          <Section title="AgentGrove (FE attribution)">
+            <div class="grid grid-cols-2 gap-x-2 gap-y-0.5 font-mono text-fg-muted">
+              <span class="font-semibold text-fg">total</span>
+              <span class="text-fg text-right font-semibold">
+                {fmtBytes(ag().total)}
+              </span>
+              <For each={ag().entries}>
+                {(e) => (
+                  <>
+                    <span class="truncate" title={e.id}>
+                      {e.label}
+                    </span>
+                    <span class="text-right">{fmtBytes(e.bytes)}</span>
+                  </>
+                )}
+              </For>
+            </div>
+            <p class="mt-1 text-[0.73em] text-fg-subtle">
+              Bytes AgentGrove itself owns: chat events, terminal
+              scrollback, editor document, project state. Excludes
+              browser overhead (V8 isolate, CSSOM, GPU buffers, image
+              cache) which only Chrome can measure.
+            </p>
+          </Section>
 
           <Section title="Backend">
             <Row

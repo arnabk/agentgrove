@@ -9,6 +9,14 @@ import {
 import { createStore, produce } from "solid-js/store";
 import { createVirtualizer } from "@tanstack/solid-virtual";
 import {
+  declareMemorySource,
+  estimateJsonBytes,
+  estimateStringBytes,
+  recordMemoryUsage,
+} from "../lib/memory";
+
+declareMemorySource("chat.activeView", "Chat events");
+import {
   api,
   type AgentEvent,
   type ChatView,
@@ -194,6 +202,26 @@ export default function ChatPane() {
   createEffect(() => {
     void activeId();
     void loadChat();
+  });
+
+  // Report this chat's memory footprint to the global registry. The
+  // estimate sums prompt content + per-event JSON + the per-prompt
+  // live token buffer. We recompute on every store change; the work
+  // is O(prompts + events), bounded by the FE store cap.
+  createEffect(() => {
+    let bytes = 0;
+    for (const p of chatStore.prompts) {
+      bytes += estimateStringBytes(p.content);
+      bytes += estimateStringBytes(p.id);
+      bytes += 32; // small constant for the prompt envelope
+      for (const ev of p.events) {
+        bytes += estimateJsonBytes(ev);
+      }
+    }
+    for (const live of Object.values(chatStore.liveTokens)) {
+      bytes += estimateStringBytes(live);
+    }
+    recordMemoryUsage("chat.activeView", bytes);
   });
 
   function openNewChatDialog() {

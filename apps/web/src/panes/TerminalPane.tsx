@@ -5,6 +5,19 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { api } from "../api/client";
 import { confirm } from "../components/dialog";
+import { declareMemorySource, recordMemoryUsage } from "../lib/memory";
+
+declareMemorySource("terminal.scrollback", "Terminal scrollback");
+
+/** Recompute the global terminal-memory cost. xterm.js buffers each
+ *  session's emitted bytes in its scrollback ring; `lastBytes` on our
+ *  cached session is the running byte count we've consumed from the
+ *  BE. Each byte costs ~2 bytes in the UTF-16-backed string buffer. */
+function reportTerminalBytes(cache: Map<string, { lastBytes: number }>) {
+  let total = 0;
+  for (const sess of cache.values()) total += sess.lastBytes * 2;
+  recordMemoryUsage("terminal.scrollback", total);
+}
 import {
   addTerminalTab,
   closeTerminalTab,
@@ -101,6 +114,7 @@ export default function TerminalPane() {
       }
       c.host.remove();
       cache.delete(id);
+      reportTerminalBytes(cache);
     }
     try {
       await api.killTerminal(id);
@@ -149,6 +163,7 @@ export default function TerminalPane() {
           if (h.length > session.lastBytes) {
             term.write(h.slice(session.lastBytes));
             session.lastBytes = h.length;
+            reportTerminalBytes(cache);
           }
         } catch {
           break;

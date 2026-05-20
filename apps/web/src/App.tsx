@@ -6,6 +6,13 @@ import LeftRail from "./components/LeftRail";
 import MemoryIndicator from "./components/MemoryIndicator";
 import SettingsModal from "./components/SettingsModal";
 import Welcome from "./components/Welcome";
+import {
+  declareMemorySource,
+  estimateJsonBytes,
+  recordMemoryUsage,
+} from "./lib/memory";
+
+declareMemorySource("rail.projects", "Project + worktree state");
 import ChatPane from "./panes/ChatPane";
 import EditorPane from "./panes/EditorPane";
 import TerminalPane from "./panes/TerminalPane";
@@ -46,6 +53,17 @@ export default function App() {
       const persisted = state.settings.theme ?? localStorage.getItem("ag-theme");
       setTheme(persisted ?? state.themeId);
     }
+  });
+
+  // Report the project + worktree registry to the memory accountant.
+  // These structures are small (kilobytes), but they're entirely
+  // ours and worth attributing.
+  createEffect(() => {
+    let bytes = 0;
+    bytes += estimateJsonBytes(state.projects);
+    bytes += estimateJsonBytes(state.worktrees);
+    bytes += estimateJsonBytes(state.byScope);
+    recordMemoryUsage("rail.projects", bytes);
   });
 
   // Global keybinding: ⌘+, / Ctrl+, opens Settings.
