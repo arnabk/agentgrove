@@ -4,10 +4,12 @@ GET /ws
 GET /api/projects
 POST /api/projects
 GET /api/projects/{id}
+PATCH /api/projects/{id}
 DELETE /api/projects/{id}
 GET /api/projects/{id}/worktrees
 POST /api/projects/{id}/worktrees
 DELETE /api/projects/{project_id}/worktrees/{worktree_id}
+PATCH /api/projects/{project_id}/worktrees/{worktree_id}
 GET /api/worktrees/history
 POST /api/worktrees/{id}/restore
 GET /api/worktrees/{id}/chats
@@ -20,6 +22,7 @@ GET /api/chats/{id}
 PATCH /api/chats/{id}
 GET /api/chats/{id}/prompts
 POST /api/chats/{id}/prompts
+POST /api/chats/{id}/messages
 POST /api/chats/{chat_id}/prompts/{prompt_id}/revert
 GET /api/chats/{id}/queue
 POST /api/chats/{id}/queue
@@ -50,6 +53,7 @@ POST /api/editor/file
 GET /api/editor/diff
 GET /api/editor/tree
 GET /api/git/status
+POST /api/git/discard
 GET /api/diag/memory
 GET /api/themes
 POST /api/themes

@@ -78,6 +78,45 @@ export default function NewChatDialog(props: Props) {
 
   const activeProvider = () => providers().find((p) => p.id === providerId());
 
+  /** Model dropdown options for the active provider. The list is
+   *  read from `models` on the descriptor; if the field is missing
+   *  (older BE) or empty we return [] so the JSX falls back to a
+   *  free-form input.
+   *
+   *  We annotate each row:
+   *    - family aliases (`sonnet`, `opus`, `haiku`, anything without
+   *      a date suffix) get a `→ latest` hint so users know it
+   *      auto-tracks Anthropic's current release.
+   *    - dated releases get the family name as a hint (parsed out
+   *      of the id) so the list still reads cleanly when collapsed. */
+  const modelOptions = (): SelectOption[] => {
+    const provider = activeProvider();
+    const list = provider?.models ?? [];
+    // Crude but reliable: Claude's dated ids look like
+    // `claude-<family>-<version>-<YYYYMMDD>` so any string with an
+    // 8-digit suffix is a pin; everything else is an alias.
+    const datedRe = /-(\d{8})$/;
+    return list.map((m): SelectOption => {
+      const match = datedRe.exec(m);
+      if (match) {
+        // Family hint = everything between `claude-` and the version
+        // marker, e.g. "claude-sonnet-4-5-20250929" → "sonnet 4.5".
+        const inner = m
+          .replace(/^claude-/, "")
+          .replace(/-\d{8}$/, "")
+          .split("-");
+        const family = inner.shift() ?? "";
+        const version = inner.join(".");
+        return {
+          value: m,
+          label: m,
+          hint: version ? `${family} ${version}` : family,
+        };
+      }
+      return { value: m, label: m, hint: "→ latest" };
+    });
+  };
+
   function onPickProvider(id: string) {
     setProviderId(id);
     const p = providers().find((x) => x.id === id);
@@ -202,17 +241,45 @@ export default function NewChatDialog(props: Props) {
         <label class="block text-[12px] font-medium text-fg-muted mb-1.5">
           Model
         </label>
-        <input
-          class="ag-input font-mono mb-1.5"
-          value={model()}
-          onInput={(e) => setModel(e.currentTarget.value)}
-          data-testid="new-chat-model"
-          placeholder="sonnet"
-        />
+        {/*
+          Themed dropdown of the active provider's curated model
+          aliases. If the BE happens to return an empty list (shouldn't
+          today, but the DTO field is `Vec<String>` so it's possible
+          for future providers), we fall back to a free-form input so
+          the dialog never deadlocks the user.
+
+          For power-user model ids that aren't in the curated list,
+          the per-chat settings dialog still accepts free-form text
+          after creation — keeping this picker tight so the common
+          case (alias-only) doesn't lose to a wall of release tags.
+        */}
+        <Show
+          when={modelOptions().length > 0}
+          fallback={
+            <input
+              class="ag-input font-mono mb-1.5"
+              value={model()}
+              onInput={(e) => setModel(e.currentTarget.value)}
+              data-testid="new-chat-model"
+              placeholder="sonnet"
+            />
+          }
+        >
+          <div data-testid="new-chat-model">
+            <Select
+              value={model()}
+              options={modelOptions()}
+              onChange={(v) => setModel(v)}
+              ariaLabel="Model"
+              testId="new-chat-model-select"
+            />
+          </div>
+        </Show>
         <p class="text-[11px] text-fg-subtle mb-5">
-          Use a provider alias (e.g. <code class="font-mono">sonnet</code>,{" "}
-          <code class="font-mono">opus</code>) or a full model id. The
-          provider's CLI resolves it.
+          Provider aliases (e.g. <code class="font-mono">sonnet</code>,{" "}
+          <code class="font-mono">opus</code>) resolve to the current
+          release. Power users can paste a full model id later from
+          per-chat settings.
         </p>
 
         <Show when={err()}>

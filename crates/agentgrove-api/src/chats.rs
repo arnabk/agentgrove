@@ -529,117 +529,331 @@ pub async fn list_prompts(
     }))
 }
 
+/// Legacy direct-dispatch endpoint. Used by tests + `queue::run_next`.
+/// New FE code should prefer `send_message`, which routes between
+/// dispatch and queue atomically.
+///
+/// This handler still enforces the per-chat serialisation: it takes
+/// the dispatching lock around the prompt insertion + flag-flip so a
+/// concurrent `send_message` can't slip past with a stale "not
+/// dispatching" reading.
 pub async fn add_prompt(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<AddPromptBody>,
 ) -> Result<Json<PromptRecord>, StatusCode> {
-    // Phase 1: record the prompt + capture everything we need for the
-    // provider call. We drop the lock before awaiting any I/O so other
-    // requests on the chat (e.g. polling GET) don't deadlock during a
-    // multi-second model turn.
-    let (prompt, provider_id, model, session_id, effort, cwd) = {
+    let mut dispatching = state.dispatching.lock().await;
+
+    // Record the prompt + capture chat metadata while holding the
+    // routing lock. Returning the canonical record (with its real
+    // id + seq) BEFORE the agent starts streaming is what lets the
+    // FE optimistic placeholder get swapped in time for the first
+    // WS event.
+    let (prompt, chat) = {
         let mut reg = state.chats.write().await;
         let chat = reg.get(&id).ok_or(StatusCode::NOT_FOUND)?.clone();
-        let prompt = reg
+        let p = reg
             .add_prompt(&id, body.content.clone())
             .ok_or(StatusCode::NOT_FOUND)?;
-        let cwd = resolve_cwd(&state, &chat).await;
-        (
-            prompt,
-            chat.provider.clone(),
-            chat.model.clone(),
-            chat.session_id.clone(),
-            chat.effort.clone(),
-            cwd,
-        )
+        (p, chat)
     };
 
-    // Phase 2: dispatch via the registered provider. Fake/echo path:
-    // if the chat's provider isn't in the registry (e.g. legacy
-    // "fake/echo") we fall back to the synchronous echo so existing
-    // tests + UI scaffolding keep working.
-    let topic = format!("chat:{id}");
-    let provider = state.providers.get(&provider_id);
-    if let Some(p) = provider {
-        dispatch_via_provider(
-            &state,
-            &id,
-            &prompt,
-            &topic,
-            p,
-            &body.content,
-            &model,
-            session_id,
-            effort,
-            cwd,
-        )
-        .await;
-    } else {
-        dispatch_echo(&state, &id, &prompt, &topic, &body.content).await;
+    dispatching.insert(id.clone());
+    drop(dispatching);
+
+    spawn_dispatch_task(state.clone(), id, chat, prompt.clone(), body.content);
+    Ok(Json(prompt))
+}
+
+/// Wire body for `POST /api/chats/:id/messages` (the "smart send"
+/// endpoint). Just text content for now; we'll extend with metadata
+/// later (e.g. queue mode override per send).
+#[derive(Debug, Deserialize)]
+pub struct SendMessageBody {
+    pub content: String,
+}
+
+/// Wire response for the smart-send endpoint. The discriminator tells
+/// the FE whether the BE dispatched immediately or parked the message
+/// on the queue — so the FE can update its UI optimistically without
+/// having to guess from busy state.
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SendMessageResponse {
+    Dispatched { prompt: PromptRecord },
+    Queued { item_id: String },
+}
+
+/// Smart send: the FE just hands us a message and the BE decides
+/// whether to dispatch right now or park it on the queue. Rules:
+///
+///   1. If the chat is already mid-turn (`dispatching` set has it),
+///      enqueue.
+///   2. If the queue has any pending items (preserving FIFO ordering
+///      so the new message can't jump ahead of an older one), enqueue.
+///   3. Otherwise, dispatch immediately.
+///
+/// CRITICAL: the decision + the action that commits it (mark
+/// dispatching, or push onto the queue) MUST happen atomically.
+/// Concurrent requests on the same chat would otherwise both pass
+/// the "not dispatching, queue empty" check and both go through the
+/// dispatch path, producing parallel agent turns and dropping or
+/// reordering messages.
+///
+/// We serialise per-chat by holding `state.dispatching` (a single
+/// `Mutex<HashSet<chat_id>>`) across the entire decide+commit
+/// section. Reads of the queue and chat registry happen inside this
+/// guard so no other smart-send call can race past them. The
+/// downstream provider dispatch is still async — it runs on a
+/// spawned task and the guard is dropped before we return.
+pub async fn send_message(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<SendMessageBody>,
+) -> Result<Json<SendMessageResponse>, StatusCode> {
+    // Take the routing lock FIRST. Every send_message call for any
+    // chat goes through this single mutex — short critical section,
+    // no per-chat locks needed.
+    let mut dispatching = state.dispatching.lock().await;
+
+    // Confirm the chat exists under the lock so the 404 path can't
+    // race with a delete.
+    {
+        let reg = state.chats.read().await;
+        if reg.get(&id).is_none() {
+            return Err(StatusCode::NOT_FOUND);
+        }
     }
 
-    // Auto-drain: while the chat is in auto mode and the queue has
-    // pending items, pop them one at a time and dispatch through the
-    // same provider/echo path used above. We drain inline (still
-    // holding the original HTTP request open) rather than spawning a
-    // worker task so the existing per-chat ordering is preserved and
-    // the FE's `busy` signal stays accurate end-to-end.
-    //
-    // The loop fetches the latest chat record each iteration so
-    // session_id updates captured during a turn (Claude resume token)
-    // carry forward to the next drained prompt.
-    while state.queues.read().await.is_auto(&id) {
-        let next_item = state.queues.write().await.pop_next_pending(&id);
-        let Some(item) = next_item else { break };
+    // Rule 1: chat is mid-turn.
+    let is_dispatching = dispatching.contains(&id);
 
-        let (drain_prompt, drain_provider_id, drain_model, drain_session, drain_effort, drain_cwd) = {
-            let mut reg = state.chats.write().await;
-            let chat = match reg.get(&id) {
-                Some(c) => c.clone(),
-                None => break,
-            };
-            let Some(p) = reg.add_prompt(&id, item.body.clone()) else {
-                break;
-            };
-            let cwd = resolve_cwd(&state, &chat).await;
-            (
+    // Rule 2: queue has pending items. We must read this UNDER the
+    // dispatching lock so a parallel send_message that just
+    // enqueued can't slip its item in between our queue-read and
+    // our decision.
+    let pending_in_queue = {
+        let reg = state.queues.read().await;
+        reg.state(&id)
+            .items
+            .iter()
+            .filter(|i| i.status == crate::queue::Status::Pending)
+            .count()
+    };
+
+    if is_dispatching || pending_in_queue > 0 {
+        // Enqueue under the same lock so the resulting "queue
+        // non-empty" state is observable to any next request that
+        // takes the lock after us.
+        let item = state
+            .queues
+            .write()
+            .await
+            .enqueue(&id, body.content.clone());
+        drop(dispatching);
+        return Ok(Json(SendMessageResponse::Queued { item_id: item.id }));
+    }
+
+    // Dispatch path. Mark the chat as dispatching INSIDE the lock
+    // so any concurrent send_message that wakes up after us sees
+    // it and enqueues correctly. The spawned task in
+    // `dispatch_for_chat` clears the flag when the turn (and any
+    // auto-drain follow-up) finishes.
+    dispatching.insert(id.clone());
+
+    // Capture everything we need from the chats registry while the
+    // lock is held — that way the spawned task is purely
+    // self-contained and doesn't need to re-resolve the chat under
+    // contention.
+    let (prompt, chat) = {
+        let mut reg = state.chats.write().await;
+        let chat = reg.get(&id).ok_or(StatusCode::NOT_FOUND)?.clone();
+        let p = reg
+            .add_prompt(&id, body.content.clone())
+            .ok_or(StatusCode::NOT_FOUND)?;
+        (p, chat)
+    };
+    drop(dispatching);
+
+    spawn_dispatch_task(state.clone(), id, chat, prompt.clone(), body.content);
+    Ok(Json(SendMessageResponse::Dispatched { prompt }))
+}
+
+/// RAII guard that clears the chat's `dispatching` flag on drop.
+///
+/// This is the single source of truth for "this chat is no longer
+/// busy". Earlier we cleared the flag manually at the bottom of the
+/// spawned task, which had two failure modes:
+///
+///   1. A panic in `dispatch_via_provider` (or anywhere in the
+///      drain loop) unwound past the manual `remove` call, leaving
+///      the chat permanently marked dispatching — the FE then saw
+///      every `run_next` rejected with 409 and the chat appeared
+///      "stuck".
+///   2. An early `break` from the drain loop on a missing chat /
+///      add_prompt failure didn't orphan the dispatching flag
+///      itself, but it did orphan the Running queue item the same
+///      iteration had just popped. We fix that separately below by
+///      mark_done-ing the popped item if we exit early.
+///
+/// Using a guard means: as long as the tokio task runs *at all* —
+/// even if every internal step panics — we'll release the flag and
+/// publish the idle hint. We use a synchronous `std::sync::Mutex`
+/// in [`AppState::dispatching`] so this `Drop` impl can clear the
+/// flag without `.await` (Drop is not async).
+struct DispatchGuard {
+    state: AppState,
+    chat_id: String,
+}
+
+impl Drop for DispatchGuard {
+    fn drop(&mut self) {
+        // Drop is sync but `tokio::sync::Mutex` is async — we can't
+        // `.await` here, so we hand the clear off to a fresh
+        // tokio::spawn. The happy path in `spawn_dispatch_task`
+        // clears the flag synchronously BEFORE this Drop fires, so
+        // most of the time the spawn finds the flag already gone
+        // and does nothing. This is the panic-safety insurance
+        // path: if the spawned task panicked mid-flight, the guard
+        // still issues a clear so the chat doesn't stay marked
+        // busy forever.
+        let state = self.state.clone();
+        let chat_id = self.chat_id.clone();
+        tokio::spawn(async move {
+            {
+                let mut set = state.dispatching.lock().await;
+                set.remove(&chat_id);
+            }
+            let topic = format!("chat:{chat_id}");
+            state.logbus.publish(
+                &topic,
+                serde_json::json!({ "chat_idle": true }).to_string(),
+            );
+        });
+    }
+}
+
+/// Spawn the agent-turn + auto-drain task for a freshly-dispatched
+/// prompt. Extracted out so both `send_message` and the legacy
+/// `add_prompt` handler share the same code path; the `dispatching`
+/// flag is OWNED by this task — released via [`DispatchGuard`]'s
+/// `Drop` impl so an unwind from a provider panic can't leave the
+/// chat permanently busy.
+pub(crate) fn spawn_dispatch_task(
+    state: AppState,
+    chat_id: String,
+    chat: ChatRecord,
+    prompt: PromptRecord,
+    body: String,
+) {
+    tokio::spawn(async move {
+        // Guard goes on the stack first so it'll be dropped LAST
+        // (after every other local), ensuring the dispatching flag
+        // outlives any panic + the final mark_done call.
+        let _guard = DispatchGuard {
+            state: state.clone(),
+            chat_id: chat_id.clone(),
+        };
+
+        let topic = format!("chat:{chat_id}");
+        let cwd = resolve_cwd(&state, &chat).await;
+        let provider = state.providers.get(&chat.provider);
+        if let Some(p) = provider {
+            dispatch_via_provider(
+                &state,
+                &chat_id,
+                &prompt,
+                &topic,
                 p,
-                chat.provider.clone(),
-                chat.model.clone(),
+                &body,
+                &chat.model,
                 chat.session_id.clone(),
                 chat.effort.clone(),
                 cwd,
             )
-        };
-        let drain_topic = format!("chat:{id}");
-        let drain_provider = state.providers.get(&drain_provider_id);
-        if let Some(p) = drain_provider {
-            dispatch_via_provider(
-                &state,
-                &id,
-                &drain_prompt,
-                &drain_topic,
-                p,
-                &item.body,
-                &drain_model,
-                drain_session,
-                drain_effort,
-                drain_cwd,
-            )
             .await;
         } else {
-            dispatch_echo(&state, &id, &drain_prompt, &drain_topic, &item.body).await;
+            dispatch_echo(&state, &chat_id, &prompt, &topic, &body).await;
         }
-        state.queues.write().await.mark_done(&id, &item.id);
-        // Notify FE so the timeline + queue panel refresh together.
-        state.logbus.publish(
-            &drain_topic,
-            serde_json::json!({ "queue_dispatched": item.id }).to_string(),
-        );
-    }
 
-    Ok(Json(prompt))
+        // Auto-drain: while the chat is in auto mode and the queue
+        // has pending items, pop them one at a time. The drain runs
+        // in this same task so per-chat ordering is preserved and
+        // the `dispatching` flag stays set until the very end.
+        while state.queues.read().await.is_auto(&chat_id) {
+            let next_item = state.queues.write().await.pop_next_pending(&chat_id);
+            let Some(item) = next_item else { break };
+
+            // Resolve the chat record + insert a prompt placeholder.
+            // If EITHER step fails (chat deleted, prompt insert
+            // race), we must NOT leave the item we just popped
+            // sitting in the queue as Running — that's the orphan
+            // bug. Roll it back to Pending so a subsequent
+            // run_next (or the user re-enabling auto mode) can pick
+            // it up again.
+            let drain = {
+                let mut reg = state.chats.write().await;
+                let chat_opt = reg.get(&chat_id).cloned();
+                match chat_opt {
+                    None => None,
+                    Some(c) => reg
+                        .add_prompt(&chat_id, item.body.clone())
+                        .map(|p| (p, c)),
+                }
+            };
+            let Some((drain_prompt, drain_chat)) = drain else {
+                state.queues.write().await.reset_to_pending(&chat_id, &item.id);
+                break;
+            };
+            let drain_topic = format!("chat:{chat_id}");
+            let drain_cwd = resolve_cwd(&state, &drain_chat).await;
+            let drain_provider = state.providers.get(&drain_chat.provider);
+            if let Some(p) = drain_provider {
+                dispatch_via_provider(
+                    &state,
+                    &chat_id,
+                    &drain_prompt,
+                    &drain_topic,
+                    p,
+                    &item.body,
+                    &drain_chat.model,
+                    drain_chat.session_id.clone(),
+                    drain_chat.effort.clone(),
+                    drain_cwd,
+                )
+                .await;
+            } else {
+                dispatch_echo(&state, &chat_id, &drain_prompt, &drain_topic, &item.body).await;
+            }
+            state.queues.write().await.mark_done(&chat_id, &item.id);
+            state.logbus.publish(
+                &drain_topic,
+                serde_json::json!({ "queue_dispatched": item.id }).to_string(),
+            );
+        }
+
+        // Happy-path clear: release the dispatching flag + publish
+        // chat_idle SYNCHRONOUSLY before this task ends so a
+        // follow-up run_next or smart-send sees the cleared flag
+        // immediately. Without this we'd rely on the `_guard`'s
+        // Drop, which spawns a fresh task to clear (Drop can't
+        // .await) and opens a small race window where run_next
+        // returns 409 even though the agent is actually idle.
+        //
+        // The guard still runs at end-of-scope as panic-safety; in
+        // the happy path its spawn just no-ops because the flag is
+        // already gone.
+        {
+            let mut set = state.dispatching.lock().await;
+            set.remove(&chat_id);
+        }
+        let idle_topic = format!("chat:{chat_id}");
+        state.logbus.publish(
+            &idle_topic,
+            serde_json::json!({ "chat_idle": true }).to_string(),
+        );
+        drop(_guard);
+    });
 }
 
 /// Resolve the working directory for a chat: worktree path when the

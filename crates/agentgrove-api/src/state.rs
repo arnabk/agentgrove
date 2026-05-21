@@ -2,9 +2,10 @@
 
 use crate::logbus::LogBus;
 use agentgrove_store::{DbPool, ProjectRepo, WorktreeRepo};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 /// Application state injected into Axum handlers.
 #[derive(Clone)]
@@ -31,6 +32,19 @@ pub struct AppState {
     pub terminals: Arc<crate::terminal::TerminalManager>,
     /// Registry of agent providers (Claude, future Codex/OpenCode/…).
     pub providers: crate::providers::ProviderRegistry,
+    /// Chats currently being dispatched (an agent turn is in flight,
+    /// possibly draining the queue afterward). The smart-send handler
+    /// checks this to decide whether to dispatch or enqueue — making
+    /// the decision authoritative on the server, never racing with
+    /// FE state.
+    ///
+    /// Uses a `tokio::sync::Mutex` so handlers can hold it across
+    /// `.await` points without poisoning the executor's Send bounds.
+    /// The `DispatchGuard` panic-safety cleanup can't `.await`
+    /// inside `Drop`; it gets the lock by spawning a fresh task —
+    /// happy-path callers clear the flag synchronously themselves
+    /// (the guard is just an insurance policy for panics).
+    pub dispatching: Arc<Mutex<HashSet<String>>>,
 }
 
 impl AppState {
@@ -52,6 +66,7 @@ impl AppState {
             editor: Arc::new(RwLock::new(crate::editor::EditorState::default())),
             terminals: Arc::new(crate::terminal::TerminalManager::default()),
             providers: crate::providers::ProviderRegistry::default(),
+            dispatching: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 }

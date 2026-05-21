@@ -15,6 +15,10 @@ export interface Project {
   current_branch?: string | null;
   /** Configured git remote names. */
   remotes?: string[];
+  /** Project-level pre-worktree script. New worktrees inherit this
+   *  unless an explicit per-call override is supplied. `null` /
+   *  missing = no project default. */
+  pre_worktree_script?: string | null;
 }
 
 export interface Worktree {
@@ -90,6 +94,13 @@ export type AgentEvent =
   | { type: "error"; message: string }
   | { type: "truncated"; dropped: number };
 
+/** Tagged response from the smart-send endpoint. `dispatched` means
+ *  the BE has started streaming the agent's reply on the WS topic;
+ *  `queued` means the message is parked and will run later. */
+export type SendMessageResponse =
+  | { kind: "dispatched"; prompt: Prompt }
+  | { kind: "queued"; item_id: string };
+
 /** Backfill page returned by `GET /api/chats/:id/prompts?before=`. */
 export interface PromptsBackfill {
   prompts: Prompt[];
@@ -104,6 +115,10 @@ export interface ProviderDescriptor {
   path: string | null;
   version: string | null;
   default_model: string;
+  /** Curated short list of model aliases the provider's CLI accepts.
+   *  Drives the model dropdown in the new-chat dialog. Power users
+   *  can still type a free-form id in per-chat settings. */
+  models: string[];
   supports_resume: boolean;
   install_hint: string;
 }
@@ -215,6 +230,17 @@ export const api = {
     req<Project>("/api/projects", { method: "POST", body: JSON.stringify(body) }),
   deleteProject: (id: string) =>
     req<void>(`/api/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  /** Partial-update a project. Today only `pre_worktree_script` is
+   *  mutable; empty string OR `null` clears the field, omitted = no
+   *  change. */
+  updateProject: (
+    id: string,
+    body: { pre_worktree_script?: string | null },
+  ) =>
+    req<Project>(`/api/projects/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   // Worktrees
   listWorktrees: (projectId: string) =>
     req<Worktree[]>(`/api/projects/${encodeURIComponent(projectId)}/worktrees`),
@@ -232,10 +258,26 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  deleteWorktree: (projectId: string, worktreeId: string) =>
-    req<void>(
-      `/api/projects/${encodeURIComponent(projectId)}/worktrees/${encodeURIComponent(worktreeId)}`,
+  deleteWorktree: (
+    projectId: string,
+    worktreeId: string,
+    opts?: { deleteBranch?: boolean },
+  ) => {
+    // `delete_branch=true` extends the remove flow to also drop the
+    // local branch in the same call (`git branch -D <branch>` after
+    // `git worktree remove`). The BE intentionally returns 500 — with
+    // a descriptive message — when the worktree is removed but the
+    // branch delete fails, so callers can surface that to the user.
+    const qs = opts?.deleteBranch ? "?delete_branch=true" : "";
+    return req<void>(
+      `/api/projects/${encodeURIComponent(projectId)}/worktrees/${encodeURIComponent(worktreeId)}${qs}`,
       { method: "DELETE" },
+    );
+  },
+  renameWorktree: (projectId: string, worktreeId: string, branch: string) =>
+    req<Worktree>(
+      `/api/projects/${encodeURIComponent(projectId)}/worktrees/${encodeURIComponent(worktreeId)}`,
+      { method: "PATCH", body: JSON.stringify({ branch }) },
     ),
   // Worktree history (soft-deleted) + restore
   listWorktreeHistory: (params?: { q?: string; projectId?: string }) => {
@@ -284,6 +326,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ content }),
     }),
+  /** Smart send: BE decides whether to dispatch immediately or
+   *  queue. Returns a tagged response so the caller can update the
+   *  UI without having to read busy state. Use this instead of
+   *  `addPrompt` + `enqueue` to avoid FE races on stale signals. */
+  sendMessage: (chatId: string, content: string) =>
+    req<SendMessageResponse>(
+      `/api/chats/${encodeURIComponent(chatId)}/messages`,
+      {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      },
+    ),
   revertPrompt: (chatId: string, promptId: string) =>
     req<Prompt>(
       `/api/chats/${encodeURIComponent(chatId)}/prompts/${encodeURIComponent(promptId)}/revert`,
@@ -417,6 +471,14 @@ export const api = {
   // Git status (changes view)
   gitStatus: (path: string) =>
     req<GitStatusResponse>(`/api/git/status?path=${encodeURIComponent(path)}`),
+  // Per-file discard. `cwd` = working-tree root, `relPath` = repo-
+  // relative path of the file to revert. Mirrors VSCode's "Discard
+  // changes" row action in ChangesPanel.
+  gitDiscard: (cwd: string, relPath: string) =>
+    req<GitDiscardResponse>(`/api/git/discard`, {
+      method: "POST",
+      body: JSON.stringify({ cwd, rel_path: relPath }),
+    }),
   // Filesystem browser (folder picker)
   fsHome: () => req<FsHome>("/api/fs/home"),
   fsBrowse: (path: string) =>
@@ -506,6 +568,15 @@ export interface GitStatusEntry {
 export interface GitStatusResponse {
   path: string;
   entries: GitStatusEntry[];
+}
+
+/** Response from `POST /api/git/discard`. The `outcome` field tells
+ *  the caller exactly what happened so the UI can show a precise
+ *  message — restored a tracked file, deleted an untracked one, or
+ *  no-op (file was already clean). */
+export interface GitDiscardResponse {
+  outcome: "restored" | "deleted_untracked" | "noop";
+  path: string;
 }
 
 export interface FsHome {

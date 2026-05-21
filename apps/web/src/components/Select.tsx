@@ -14,6 +14,11 @@ interface SelectProps {
   ariaLabel?: string;
   testId?: string;
   disabled?: boolean;
+  /** Where the dropdown menu opens relative to the trigger. Defaults
+   *  to `bottom`; pass `top` when the trigger lives near the bottom
+   *  of the viewport (e.g. inside the chat composer) so the menu
+   *  doesn't get clipped or push container layout. */
+  placement?: "top" | "bottom";
 }
 
 /** Modern, themed, accessible select. Replaces native <select>. */
@@ -138,6 +143,7 @@ export default function Select(props: SelectProps) {
         <div
           ref={(el) => (menuEl = el)}
           class="ag-select-menu"
+          data-placement={props.placement === "top" ? "top" : "bottom"}
           role="listbox"
           aria-label={props.ariaLabel}
         >

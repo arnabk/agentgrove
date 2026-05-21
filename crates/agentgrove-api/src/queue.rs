@@ -103,12 +103,28 @@ impl QueueRegistry {
         None
     }
 
-    /// Mark a previously-running item as done.
+    /// Drop a previously-running item from the queue. We don't
+    /// preserve history — once an item has been dispatched into the
+    /// chat timeline (where it lives as a regular prompt) keeping a
+    /// `done` copy in the queue just clutters the dock and confuses
+    /// users into thinking the message is still pending elsewhere.
+    /// Returns whether a row was removed.
     pub fn mark_done(&mut self, chat_id: &str, item_id: &str) -> bool {
+        let q = self.ensure(chat_id);
+        let before = q.items.len();
+        q.items.retain(|i| !(i.id == item_id && i.status == Status::Running));
+        q.items.len() != before
+    }
+
+    /// Roll a Running item back to Pending. Used when the dispatch
+    /// task bails out mid-drain (e.g. the chat was deleted between
+    /// pop and add_prompt). Without this, the popped item would be
+    /// stranded as Running with no task tracking it.
+    pub fn reset_to_pending(&mut self, chat_id: &str, item_id: &str) -> bool {
         let q = self.ensure(chat_id);
         if let Some(it) = q.items.iter_mut().find(|i| i.id == item_id) {
             if it.status == Status::Running {
-                it.status = Status::Done;
+                it.status = Status::Pending;
                 return true;
             }
         }
@@ -166,39 +182,68 @@ pub async fn set_mode(
     StatusCode::NO_CONTENT
 }
 
+/// Manually dispatch the next pending queue item. Used by the FE
+/// when the chat is in manual mode and the user clicks Run next.
+///
+/// Concurrency: we serialise via the same `dispatching` lock used by
+/// `send_message` so a Run-next click can't slip past while an
+/// agent turn is already mid-flight (which would dispatch two
+/// parallel turns and corrupt session state). If the chat is busy
+/// we return 409 so the FE can show "already running" instead of
+/// silently double-firing.
 pub async fn run_next(
     State(state): State<AppState>,
     Path(chat_id): Path<String>,
 ) -> Result<Json<QueueItem>, StatusCode> {
+    let mut dispatching = state.dispatching.lock().await;
+    if dispatching.contains(&chat_id) {
+        return Err(StatusCode::CONFLICT);
+    }
     let item = state
         .queues
         .write()
         .await
         .pop_next_pending(&chat_id)
         .ok_or(StatusCode::NOT_FOUND)?;
-    // Forward to chat dispatch (real provider when registered, else
-    // synchronous echo). The handler returns when the turn is done.
-    let _ = crate::chats::add_prompt(
-        State(state.clone()),
-        Path(chat_id.clone()),
-        Json(crate::chats::AddPromptBody {
-            content: item.body.clone(),
-        }),
-    )
-    .await;
-    // Mark the item as done so the UI reflects it.
+
+    // Insert the dispatching flag + record the prompt under the
+    // same lock so a concurrent `send_message` sees us as busy and
+    // routes its message to the queue (the correct FIFO behaviour).
+    let (prompt, chat) = {
+        let mut reg = state.chats.write().await;
+        let chat = match reg.get(&chat_id) {
+            Some(c) => c.clone(),
+            None => return Err(StatusCode::NOT_FOUND),
+        };
+        let Some(p) = reg.add_prompt(&chat_id, item.body.clone()) else {
+            return Err(StatusCode::NOT_FOUND);
+        };
+        (p, chat)
+    };
+    dispatching.insert(chat_id.clone());
+    drop(dispatching);
+
+    // Mark the queue item done (i.e. remove it) up front — it's
+    // already been turned into a real prompt and will live on in
+    // the timeline. The spawned task handles streaming + any
+    // follow-up auto-drain.
     state
         .queues
         .write()
         .await
         .mark_done(&chat_id, &item.id);
-    // Notify any FE clients listening on the chat topic that the
-    // timeline now has new prompts to fetch. The payload is just a
-    // hint; clients re-GET the chat view.
     let topic = format!("chat:{chat_id}");
     state.logbus.publish(
         &topic,
         serde_json::json!({ "queue_dispatched": item.id }).to_string(),
+    );
+
+    crate::chats::spawn_dispatch_task(
+        state.clone(),
+        chat_id,
+        chat,
+        prompt,
+        item.body.clone(),
     );
     Ok(Json(item))
 }

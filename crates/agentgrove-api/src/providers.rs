@@ -35,6 +35,10 @@ pub struct ProviderDto {
     pub version: Option<String>,
     /// Default model alias the FE seeds new chats with.
     pub default_model: String,
+    /// Curated list of model aliases the provider's CLI accepts.
+    /// Drives the model dropdown in the FE's new-chat dialog. May be
+    /// empty for providers that don't have stable aliases.
+    pub models: Vec<String>,
     /// Whether the provider can resume a previous session.
     pub supports_resume: bool,
     /// URL or text the FE can show next to "not installed".
@@ -56,6 +60,7 @@ impl ProviderDto {
             path: d.path.map(|p| p.to_string_lossy().into_owned()),
             version: d.version,
             default_model: d.default_model.to_string(),
+            models: d.models.iter().map(|s| (*s).to_string()).collect(),
             supports_resume: d.supports_resume,
             install_hint,
         }

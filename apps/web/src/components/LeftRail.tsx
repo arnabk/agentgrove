@@ -1,8 +1,10 @@
-import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createResource, createSignal, onCleanup, onMount } from "solid-js";
 import { createStore, produce } from "solid-js/store";
-import { api, type TreeEntry } from "../api/client";
+import { api, type Project, type TreeEntry } from "../api/client";
 import {
   addChatTab,
+  addTerminalTab,
+  currentScopeKey,
   currentWorktreeId,
   refreshProjects,
   refreshWorktreesForProject,
@@ -10,13 +12,17 @@ import {
   selectWorktree,
   selectedFilePath,
   setChangesScope,
+  setState,
   state,
+  type TerminalTab,
 } from "../stores/app";
 import { confirm } from "./dialog";
 import FolderPicker from "./FolderPicker";
 import NewChatDialog from "./NewChatDialog";
 import WorktreeDialog from "./WorktreeDialog";
 import WorktreeHistoryDialog from "./WorktreeHistoryDialog";
+import RenameWorktreeDialog from "./RenameWorktreeDialog";
+import ProjectSettingsDialog from "./ProjectSettingsDialog";
 
 /** Persisted set of expanded project ids — so multiple folders can stay
  *  open in the left rail at once. */
@@ -48,6 +54,10 @@ const RAIL_MIN_PX = 200;
 const RAIL_MAX_PX = 480;
 const RAIL_DEFAULT_PX = 260;
 const RAIL_LS_KEY = "ag-rail-w";
+/** Persisted toggle: show inline file/folder trees under project +
+ *  worktree rows, or hide them (worktrees-only view). Default true
+ *  so existing users see the same UI on first load. */
+const RAIL_SHOW_FILES_LS_KEY = "ag-rail-show-files";
 
 /**
  * Left navigation: projects only.
@@ -66,6 +76,18 @@ export default function LeftRail() {
   const [wtFor, setWtFor] = createSignal<string | null>(null);
   // Active project id whose history dialog is open; null when closed.
   const [historyFor, setHistoryFor] = createSignal<string | null>(null);
+  // Active rename target (projectId + worktreeId + currentBranch) or
+  // null when the rename dialog is closed.
+  const [renameFor, setRenameFor] = createSignal<{
+    projectId: string;
+    worktreeId: string;
+    currentBranch: string;
+  } | null>(null);
+  // Active project whose settings dialog is open; null when closed.
+  // We keep the full Project object (not just an id) so the dialog
+  // can read the current `pre_worktree_script` immediately without a
+  // second fetch.
+  const [settingsFor, setSettingsFor] = createSignal<Project | null>(null);
   // Pending new-chat context. null when the dialog is closed.
   interface NewChatCtx {
     projectId: string;
@@ -95,27 +117,70 @@ export default function LeftRail() {
 
   async function deleteWorktree(projectId: string, wtId: string, ev: MouseEvent) {
     ev.stopPropagation();
+    // Local controlled signal for the checkbox embedded in the
+    // confirm dialog body. We deliberately keep this scoped to the
+    // function so each invocation starts unchecked (the destructive
+    // "also delete branch" option should NEVER be remembered between
+    // invocations).
+    const [alsoDeleteBranch, setAlsoDeleteBranch] = createSignal(false);
     const ok = await confirm({
       title: "Remove worktree",
-      body: "Remove this worktree from disk and AgentGrove? The branch itself is not deleted.",
+      body: (
+        <div class="space-y-3">
+          <p>
+            Remove this worktree from disk and AgentGrove?
+          </p>
+          <label class="flex items-center gap-2 text-[12.5px] text-fg select-none">
+            <input
+              type="checkbox"
+              class="h-3.5 w-3.5 accent-accent cursor-pointer"
+              checked={alsoDeleteBranch()}
+              onChange={(e) => setAlsoDeleteBranch(e.currentTarget.checked)}
+              data-testid="confirm-remove-worktree-also-delete-branch"
+            />
+            Also delete the local branch (
+            <code class="font-mono">git branch -D</code>)
+          </label>
+        </div>
+      ),
       confirmLabel: "Remove",
       danger: true,
       testId: "confirm-remove-worktree",
     });
     if (!ok) return;
+    // Optimistic delete: drop the row from the local store IMMEDIATELY
+    // so the UI doesn't freeze while git removes (potentially large)
+    // worktree contents on disk. We snapshot the previous list so we
+    // can roll back if the BE call ultimately fails. The active-scope
+    // fallback also runs optimistically — otherwise the user would
+    // see a phantom worktree pane until the BE responded.
+    const prevList = state.worktrees[projectId] ?? [];
+    const optimistic = prevList.filter((w) => w.id !== wtId);
+    setState("worktrees", projectId, optimistic);
+    const wasActiveScope =
+      state.selectedProjectId === projectId &&
+      state.selectedWorktreeByProject[projectId] === wtId;
+    if (wasActiveScope) {
+      selectWorktree(projectId, null);
+    }
     try {
-      await api.deleteWorktree(projectId, wtId);
-      // If the user was scoped into the worktree we just deleted, fall
-      // back to the project root scope.
-      if (
-        state.selectedProjectId === projectId &&
-        state.selectedWorktreeByProject[projectId] === wtId
-      ) {
-        selectWorktree(projectId, null);
-      }
-      await refreshWorktreesForProject(projectId);
+      await api.deleteWorktree(projectId, wtId, {
+        deleteBranch: alsoDeleteBranch(),
+      });
+      // Reconcile against the BE's authoritative list — picks up
+      // status flips (e.g. soft-deleted siblings) we don't track
+      // locally. Fire-and-forget; we already showed the optimistic
+      // state.
+      void refreshWorktreesForProject(projectId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      // Roll back the local store so the row reappears, and tell
+      // the user what went wrong. We deliberately do NOT restore the
+      // previous active scope — the user already navigated away and
+      // unwinding that would be jarring.
+      setState("worktrees", projectId, prevList);
+      setErr(
+        `Could not remove worktree: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
 
@@ -133,6 +198,56 @@ export default function LeftRail() {
     setNewChatFor({ projectId, worktreeId, parentName });
   }
 
+  /** Open a new terminal at a project root or worktree path. Mirrors
+   *  the "+ chat" button on each row but spawns a PTY session in the
+   *  matching folder and switches the pane focus to Terminal.
+   *
+   *  Flow:
+   *    1. Make the row's scope the active one — terminals are stored
+   *       per-scope, so spawning into the wrong scope would hide the
+   *       terminal under a different tab strip.
+   *    2. Hit `POST /api/terminals` with `project_id` (+ optional
+   *       `worktree_id`) so the BE resolves `cwd` itself. Default
+   *       `cols`/`rows` match TerminalPane's first spawn.
+   *    3. Push the resulting tab via `addTerminalTab` — that helper
+   *       already flips `activePane = "terminal"` + selects the new
+   *       session.
+   *
+   *  Errors are surfaced through the same `err` signal the other
+   *  row actions use; we don't gate behind a dialog because the
+   *  intent is "give me a shell here, right now".
+   */
+  async function openTerminalAt(
+    projectId: string,
+    worktreeId: string | null,
+    label: string,
+  ) {
+    setErr(null);
+    // Activate the row's scope BEFORE spawning so the terminal lands
+    // in the correct per-scope tab strip.
+    selectWorktree(projectId, worktreeId);
+    try {
+      const t = await api.createTerminal({
+        cols: 80,
+        rows: 24,
+        project_id: projectId,
+        ...(worktreeId ? { worktree_id: worktreeId } : {}),
+      });
+      const scope = state.byScope[currentScopeKey() ?? ""];
+      const tab: TerminalTab = {
+        id: t.id,
+        cwd: t.cwd,
+        // Match TerminalPane's naming convention so labels stay
+        // consistent regardless of where the terminal was created.
+        label: `term ${(scope?.terminals.length ?? 0) + 1}`,
+      };
+      const res = addTerminalTab(tab);
+      if (!res.ok) setErr(res.reason ?? `could not open terminal in ${label}`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   // Resize state.
   const persisted = Number(localStorage.getItem(RAIL_LS_KEY));
   const initial =
@@ -141,6 +256,17 @@ export default function LeftRail() {
       : RAIL_DEFAULT_PX;
   const [width, setWidth] = createSignal(initial);
   const [dragging, setDragging] = createSignal(false);
+  // Whether to render the inline file/folder trees under each
+  // project + worktree row. Some users only care about worktrees +
+  // chats and find the file lists noisy, so we let them collapse to
+  // a worktree-only view. Persisted to localStorage so the choice
+  // survives reloads.
+  const [showFiles, setShowFiles] = createSignal(
+    localStorage.getItem(RAIL_SHOW_FILES_LS_KEY) !== "0",
+  );
+  createEffect(() => {
+    localStorage.setItem(RAIL_SHOW_FILES_LS_KEY, showFiles() ? "1" : "0");
+  });
 
   function clamp(px: number) {
     return Math.min(RAIL_MAX_PX, Math.max(RAIL_MIN_PX, Math.round(px)));
@@ -246,15 +372,42 @@ export default function LeftRail() {
           <h3 class="text-[0.8em] font-semibold uppercase tracking-wider text-fg-subtle">
             Projects
           </h3>
-          <button
-            class="ag-btn ag-btn-ghost ag-btn-xs ag-btn-icon"
-            onClick={() => setPicking(true)}
-            data-testid="add-project-btn"
-            aria-label="Add project"
-            title="Add project"
-          >
-            <PlusIcon />
-          </button>
+          <div class="flex items-center gap-1">
+            {/* Toggle: show vs hide inline file/folder trees. When
+                hidden, the rail collapses to projects + worktrees +
+                their action icons, which is what users running long
+                code reviews want — no noisy filename lists. The
+                icon swaps to indicate the current state. */}
+            <button
+              class="ag-btn ag-btn-ghost ag-btn-xs ag-btn-icon"
+              onClick={() => setShowFiles(!showFiles())}
+              data-testid="toggle-files"
+              aria-label={
+                showFiles()
+                  ? "Hide files and folders"
+                  : "Show files and folders"
+              }
+              aria-pressed={showFiles()}
+              title={
+                showFiles()
+                  ? "Hide files and folders"
+                  : "Show files and folders"
+              }
+            >
+              <Show when={showFiles()} fallback={<FilesOffIcon />}>
+                <FilesOnIcon />
+              </Show>
+            </button>
+            <button
+              class="ag-btn ag-btn-ghost ag-btn-xs ag-btn-icon"
+              onClick={() => setPicking(true)}
+              data-testid="add-project-btn"
+              aria-label="Add project"
+              title="Add project"
+            >
+              <PlusIcon />
+            </button>
+          </div>
         </div>
 
         <Show when={err()}>
@@ -377,6 +530,24 @@ export default function LeftRail() {
                         <ChatPlusIcon />
                       </button>
 
+                      {/* + terminal (icon-only). Spawns a shell cwd'd
+                          at the project root and switches to the
+                          Terminal pane. Parallel surface to "new chat" so
+                          the row reads "two things you can create here". */}
+                      <button
+                        type="button"
+                        class="shrink-0 p-1 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void openTerminalAt(p.id, null, p.name);
+                        }}
+                        aria-label={`New terminal in ${p.name}`}
+                        title="New terminal"
+                        data-testid={`new-terminal-${p.id}`}
+                      >
+                        <TerminalPlusIcon />
+                      </button>
+
                       {/* Changes (git diff) — opens the right-side
                           Changes panel scoped to this project root.
                           Only meaningful for git-tracked projects. */}
@@ -425,6 +596,29 @@ export default function LeftRail() {
                           data-testid={`worktree-history-${p.id}`}
                         >
                           <HistoryIcon />
+                        </button>
+                      </Show>
+
+                      {/* Per-project settings (pre-worktree script,
+                          future fields). Opens the same icon-set
+                          regardless of whether worktrees are enabled
+                          — the script applies on first creation, so
+                          surfacing it for repos that don't yet have a
+                          remote would only mislead users. We gate it
+                          on `is_git` instead. */}
+                      <Show when={p.is_git}>
+                        <button
+                          type="button"
+                          class="shrink-0 p-1 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSettingsFor(p);
+                          }}
+                          aria-label={`Project settings for ${p.name}`}
+                          title="Project settings"
+                          data-testid={`project-settings-${p.id}`}
+                        >
+                          <GearIcon />
                         </button>
                       </Show>
 
@@ -495,11 +689,32 @@ export default function LeftRail() {
                                   <span class="truncate text-[0.83em] font-mono min-w-0 flex-1">
                                     {w.branch}
                                   </span>
-                                  {/* Status chip only when not in the steady
-                                      "ready" state — keeps the row quiet
-                                      while still surfacing failures + busy
-                                      transitions. */}
-                                  <Show when={w.status !== "ready"}>
+                                  {/* Status chip only for states a user can
+                                      act on. We deliberately suppress:
+                                        - "ready"    — the steady state; the
+                                                       row already reads as
+                                                       fine without a label.
+                                        - "removing" — an internal lifecycle
+                                                       state used by the BE
+                                                       to gate concurrent
+                                                       deletes. If a row is
+                                                       still visible in this
+                                                       list while marked
+                                                       `removing`, the
+                                                       previous delete call
+                                                       was interrupted (BE
+                                                       crash, abandoned tab,
+                                                       …). Showing it as a
+                                                       sticky pill confused
+                                                       users; they can just
+                                                       re-click the X to
+                                                       retry the delete. */}
+                                  <Show
+                                    when={
+                                      w.status !== "ready" &&
+                                      w.status !== "removing"
+                                    }
+                                  >
                                     <span
                                       class="ml-auto ag-chip !text-[0.67em] !py-[1px] whitespace-nowrap"
                                       classList={{
@@ -518,7 +733,15 @@ export default function LeftRail() {
                                     type="button"
                                     class="shrink-0 ml-auto p-0.5 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
                                     classList={{
-                                      "!ml-1": w.status !== "ready",
+                                      // Tighten the gap only when a chip is
+                                      // ACTUALLY rendered (i.e. the row is
+                                      // in a noisy transient state). The
+                                      // suppressed "removing" + steady
+                                      // "ready" states should NOT trigger
+                                      // the inset.
+                                      "!ml-1":
+                                        w.status !== "ready" &&
+                                        w.status !== "removing",
                                     }}
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -529,6 +752,22 @@ export default function LeftRail() {
                                     data-testid={`new-chat-wt-${w.id}`}
                                   >
                                     <ChatPlusIcon />
+                                  </button>
+                                  {/* + terminal scoped to this worktree.
+                                      cwd defaults to the worktree path so
+                                      the user lands inside the checkout. */}
+                                  <button
+                                    type="button"
+                                    class="shrink-0 p-0.5 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void openTerminalAt(p.id, w.id, w.branch);
+                                    }}
+                                    aria-label={`New terminal in worktree ${w.branch}`}
+                                    title="New terminal"
+                                    data-testid={`new-terminal-wt-${w.id}`}
+                                  >
+                                    <TerminalPlusIcon />
                                   </button>
                                   {/* Changes for this worktree */}
                                   <button
@@ -545,6 +784,23 @@ export default function LeftRail() {
                                     <DiffIcon />
                                   </button>
                                   <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setRenameFor({
+                                        projectId: p.id,
+                                        worktreeId: w.id,
+                                        currentBranch: w.branch,
+                                      });
+                                    }}
+                                    class="opacity-0 group-hover:opacity-100 text-fg-subtle hover:text-accent p-0.5"
+                                    aria-label={`Rename worktree ${w.branch}`}
+                                    title="Rename"
+                                    data-testid={`rename-wt-${w.id}`}
+                                  >
+                                    <PencilIcon />
+                                  </button>
+                                  <button
                                     onClick={(e) => deleteWorktree(p.id, w.id, e)}
                                     class="opacity-0 group-hover:opacity-100 text-fg-subtle hover:text-danger p-0.5"
                                     aria-label={`Remove worktree ${w.branch}`}
@@ -554,8 +810,10 @@ export default function LeftRail() {
                                   </button>
                                 </div>
 
-                                {/* Inline file tree rooted at the worktree's path. */}
-                                <Show when={wtOpen()}>
+                                {/* Inline file tree rooted at the
+                                    worktree's path. Hidden when the
+                                    rail's Files toggle is off. */}
+                                <Show when={wtOpen() && showFiles()}>
                                   <DirNode path={w.path} depth={2} initiallyOpen />
                                 </Show>
                               </li>
@@ -573,8 +831,9 @@ export default function LeftRail() {
                     </p>
                   </Show>
 
-                  {/* Inline file tree for the project (when expanded). */}
-                  <Show when={open()}>
+                  {/* Inline file tree for the project (when expanded).
+                      Hidden when the rail's Files toggle is off. */}
+                  <Show when={open() && showFiles()}>
                     <DirNode path={p.root} depth={1} initiallyOpen />
                   </Show>
                 </li>
@@ -634,6 +893,41 @@ export default function LeftRail() {
         )}
       </Show>
 
+      <Show when={renameFor()} keyed>
+        {(target) => (
+          <RenameWorktreeDialog
+            projectId={target.projectId}
+            worktreeId={target.worktreeId}
+            currentBranch={target.currentBranch}
+            onCancel={() => setRenameFor(null)}
+            onRenamed={() => {
+              setRenameFor(null);
+              void refreshWorktreesForProject(target.projectId);
+            }}
+          />
+        )}
+      </Show>
+
+      <Show when={settingsFor()} keyed>
+        {(project) => (
+          <ProjectSettingsDialog
+            project={project}
+            onCancel={() => setSettingsFor(null)}
+            onSaved={(updated) => {
+              // Reflect the new pre_worktree_script into the projects
+              // store so subsequent WorktreeDialog opens read the
+              // fresh value. The dialog closes itself right after
+              // (via its own onCancel call) so we don't need to flip
+              // settingsFor here.
+              const idx = state.projects.findIndex((p) => p.id === updated.id);
+              if (idx >= 0) {
+                setState("projects", idx, updated);
+              }
+            }}
+          />
+        )}
+      </Show>
+
       <Show when={newChatFor()} keyed>
         {(ctx) => (
           <NewChatDialog
@@ -679,6 +973,66 @@ function PlusIcon() {
   );
 }
 
+/** Lucide-style folder-tree glyph, used when inline file/folder
+ *  rendering is ON. Em-sized so it scales with --ag-font-size. */
+function FilesOnIcon() {
+  return (
+    <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M3 7a1 1 0 0 1 1-1h4l2 2h5a1 1 0 0 1 1 1v3"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M14 14a1 1 0 0 1 1-1h2l1 1h2a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-5a1 1 0 0 1-1-1v-4Z"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M3 11v8a1 1 0 0 0 1 1h6"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+      />
+    </svg>
+  );
+}
+
+/** Folder-tree glyph with a diagonal strike, used when inline
+ *  file/folder rendering is OFF (worktrees-only view). */
+function FilesOffIcon() {
+  return (
+    <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M3 7a1 1 0 0 1 1-1h4l2 2h5a1 1 0 0 1 1 1v3"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M14 14a1 1 0 0 1 1-1h2l1 1h2a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-5a1 1 0 0 1-1-1v-4Z"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M3 11v8a1 1 0 0 0 1 1h6"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+      />
+      <path
+        d="M4 20 20 4"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+      />
+    </svg>
+  );
+}
+
 function XIcon() {
   return (
     <svg width="0.85em" height="0.85em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -687,6 +1041,36 @@ function XIcon() {
         stroke="currentColor"
         stroke-width="2"
         stroke-linecap="round"
+      />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  // Lucide-style pencil. Sized in em so it scales with --ag-font-size.
+  return (
+    <svg width="0.85em" height="0.85em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 20h9M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5Z"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  // Lucide-style settings cog. Em-sized to track the UI font.
+  return (
+    <svg width="0.9em" height="0.9em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.7" />
+      <path
+        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.43.16.78.46 1 .85L20.91 10H21a2 2 0 1 1 0 4h-.09c-.39.22-.69.57-.85 1Z"
+        stroke="currentColor"
+        stroke-width="1.4"
+        stroke-linejoin="round"
       />
     </svg>
   );
@@ -830,6 +1214,53 @@ function ChatPlusIcon() {
         stroke="currentColor"
         stroke-width="1.6"
         stroke-linejoin="round"
+      />
+      {/* `+` glyph in the corner */}
+      <path
+        d="M19 13v6M16 16h6"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      />
+    </svg>
+  );
+}
+
+function TerminalPlusIcon() {
+  // Terminal window outline + chevron prompt + small `+` in the
+  // top-right corner. Visually parallel to ChatPlusIcon so the row
+  // reads as "create one of these here".
+  return (
+    <svg
+      width="1em" height="1em"
+      viewBox="0 0 24 24"
+      fill="none"
+      class="shrink-0"
+      aria-hidden="true"
+    >
+      {/* window frame */}
+      <rect
+        x="3"
+        y="4"
+        width="14"
+        height="13"
+        rx="2"
+        stroke="currentColor"
+        stroke-width="1.6"
+      />
+      {/* prompt chevron + cursor underscore inside the window */}
+      <path
+        d="M6 9l2.5 2L6 13"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M10.5 14h4"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
       />
       {/* `+` glyph in the corner */}
       <path

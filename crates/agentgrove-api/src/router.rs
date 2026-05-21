@@ -21,7 +21,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/projects", get(projects::list).post(projects::create))
         .route(
             "/api/projects/:id",
-            get(projects::get_one).delete(projects::delete),
+            get(projects::get_one)
+                .patch(projects::update)
+                .delete(projects::delete),
         )
         // Project branches (list + switch)
         .route("/api/projects/:id/branches", get(branches::list_branches))
@@ -33,7 +35,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/api/projects/:project_id/worktrees/:worktree_id",
-            delete(worktrees::delete),
+            delete(worktrees::delete).patch(worktrees::update),
         )
         // Worktree history (soft-deleted) + restore
         .route("/api/worktrees/history", get(worktrees::history))
@@ -53,6 +55,11 @@ pub fn build_router(state: AppState) -> Router {
             "/api/chats/:id/prompts",
             get(chats::list_prompts).post(chats::add_prompt),
         )
+        // "Smart send": the BE decides whether to dispatch immediately
+        // or park on the queue based on authoritative server state.
+        // FE callers should prefer this over POST .../prompts +
+        // POST .../queue to avoid racing on busy / pending counts.
+        .route("/api/chats/:id/messages", post(chats::send_message))
         .route(
             "/api/chats/:chat_id/prompts/:prompt_id/revert",
             post(chats::revert_prompt),
@@ -94,8 +101,9 @@ pub fn build_router(state: AppState) -> Router {
         // Filesystem browser (for folder picker)
         .route("/api/fs/home", get(fsapi::home))
         .route("/api/fs/browse", get(fsapi::browse))
-        // Git inspection
+        // Git inspection + per-file discard
         .route("/api/git/status", get(gitapi::git_status))
+        .route("/api/git/discard", post(gitapi::git_discard))
         // Diagnostics (memory)
         .route("/api/diag/memory", get(diag::memory))
         // Editor

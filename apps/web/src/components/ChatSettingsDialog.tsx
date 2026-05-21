@@ -4,6 +4,7 @@ import {
   type ChatView,
   type SlashCommand,
 } from "../api/client";
+import Select from "./Select";
 
 /** Per-chat configuration dialog: model, effort, slash-commands.
  *  Mounted from inside ChatPane when the user clicks the provider
@@ -160,19 +161,14 @@ export default function ChatSettingsDialog(props: Props) {
               produce more thorough answers but cost more tokens. Only
               Claude uses this today.
             </p>
-            <select
-              class="ag-input font-mono"
+            <Select
               value={effort()}
-              onChange={(e) => void saveEffort(e.currentTarget.value)}
+              options={EFFORT_LEVELS}
+              onChange={(v) => void saveEffort(v)}
               disabled={busy()}
-              data-testid="chat-settings-effort"
-            >
-              <For each={EFFORT_LEVELS}>
-                {(level) => (
-                  <option value={level.value}>{level.label}</option>
-                )}
-              </For>
-            </select>
+              ariaLabel="Thinking effort"
+              testId="chat-settings-effort"
+            />
           </div>
 
           <Show when={commands().length > 0}>

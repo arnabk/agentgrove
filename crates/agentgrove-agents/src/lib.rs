@@ -120,7 +120,10 @@ impl ProviderId {
 /// What the BE returns for each provider on `GET /api/providers`. The
 /// FE uses `available` to gate the picker and `version` / `path` for
 /// debug surfaces.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Outgoing-only: the FE never sends this back, so we don't derive
+/// `Deserialize` (would force the `models` slice off `'static`).
+#[derive(Debug, Clone, Serialize)]
 pub struct ProviderDescriptor {
     /// Stable id (e.g. "claude").
     pub id: ProviderId,
@@ -136,6 +139,13 @@ pub struct ProviderDescriptor {
     /// Default model alias (e.g. "sonnet"). FE seeds new chats with
     /// this if the user doesn't pick one.
     pub default_model: &'static str,
+    /// Curated set of model aliases / ids this provider's CLI accepts
+    /// today, in display order. The FE renders this as a dropdown on
+    /// chat creation so users don't have to remember exact names
+    /// (Anthropic's full model ids are unwieldy). The list is
+    /// intentionally short — power users with custom models can still
+    /// type the id in the per-chat settings dialog.
+    pub models: &'static [&'static str],
     /// Whether the provider supports session resume across turns
     /// (Claude: yes via `--resume`; FakeProvider: no).
     pub supports_resume: bool,

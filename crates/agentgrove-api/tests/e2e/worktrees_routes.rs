@@ -306,3 +306,362 @@ async fn worktree_restore_clears_removed_at() {
         .unwrap();
     assert_eq!(nf.status(), 404);
 }
+
+/// PATCH rename happy path. Creates a worktree, renames its branch,
+/// and verifies the new name lands both in the metadata row and in
+/// the on-disk git repo (via `git branch --list`). Confirms we
+/// changed the right thing without affecting the worktree path.
+#[tokio::test]
+async fn worktree_rename_succeeds() {
+    let h = BeHarness::start().await;
+    let (dir, project_id) = make_project(&h).await;
+
+    // Create.
+    let res = h
+        .post_auth(&format!("/api/projects/{project_id}/worktrees"))
+        .json(&json!({"branch":"feature/rename-me","base_ref":"main"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let wt: Value = res.json().await.unwrap();
+    let wt_id = wt["id"].as_str().unwrap().to_owned();
+    let original_path = wt["path"].as_str().unwrap().to_owned();
+    assert_eq!(
+        wait_for_terminal_status(&h, &project_id, &wt_id).await,
+        "ready"
+    );
+
+    // Rename via PATCH.
+    let rename = h
+        .patch(&format!(
+            "/api/projects/{project_id}/worktrees/{wt_id}"
+        ))
+        .json(&json!({"branch":"feature/renamed"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rename.status(), 200, "body={}", rename.text().await.unwrap());
+    let renamed: Value = rename.json().await.unwrap();
+    assert_eq!(renamed["branch"], "feature/renamed");
+    // Path is intentionally NOT moved — verifies the "rename branch
+    // only" product decision.
+    assert_eq!(renamed["path"].as_str().unwrap(), original_path);
+
+    // List shows the new branch label.
+    let list: Value = h
+        .get_auth(&format!("/api/projects/{project_id}/worktrees"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(list[0]["branch"], "feature/renamed");
+
+    // Git itself agrees — the old branch is gone, the new one exists.
+    let out = std::process::Command::new("git")
+        .args(["-C", &dir.path().to_string_lossy(), "branch", "--list"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("feature/renamed"), "branches:\n{stdout}");
+    assert!(
+        !stdout.contains("feature/rename-me"),
+        "old branch still present:\n{stdout}"
+    );
+}
+
+/// PATCH rename rejects an empty / whitespace-only branch with 400.
+#[tokio::test]
+async fn worktree_rename_rejects_empty_branch() {
+    let h = BeHarness::start().await;
+    let (_dir, project_id) = make_project(&h).await;
+    let res = h
+        .post_auth(&format!("/api/projects/{project_id}/worktrees"))
+        .json(&json!({"branch":"feature/x","base_ref":"main"}))
+        .send()
+        .await
+        .unwrap();
+    let wt_id = res
+        .json::<Value>()
+        .await
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        wait_for_terminal_status(&h, &project_id, &wt_id).await,
+        "ready"
+    );
+
+    let bad = h
+        .patch(&format!(
+            "/api/projects/{project_id}/worktrees/{wt_id}"
+        ))
+        .json(&json!({"branch":"   "}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), 400);
+}
+
+/// PATCH rename rejects a collision against another live worktree's
+/// branch with 409. We don't bother covering the history-collision
+/// case separately — both go through the same code path; this test
+/// pins the BAD_REQUEST→CONFLICT mapping that the FE relies on.
+#[tokio::test]
+async fn worktree_rename_collision_returns_409() {
+    let h = BeHarness::start().await;
+    let (_dir, project_id) = make_project(&h).await;
+
+    // Two worktrees on distinct branches.
+    let a = h
+        .post_auth(&format!("/api/projects/{project_id}/worktrees"))
+        .json(&json!({"branch":"feature/a","base_ref":"main"}))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    let id_a = a["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        wait_for_terminal_status(&h, &project_id, &id_a).await,
+        "ready"
+    );
+
+    let b = h
+        .post_auth(&format!("/api/projects/{project_id}/worktrees"))
+        .json(&json!({"branch":"feature/b","base_ref":"main"}))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    let id_b = b["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        wait_for_terminal_status(&h, &project_id, &id_b).await,
+        "ready"
+    );
+
+    // Try to rename B onto A's branch.
+    let clash = h
+        .patch(&format!(
+            "/api/projects/{project_id}/worktrees/{id_b}"
+        ))
+        .json(&json!({"branch":"feature/a"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(clash.status(), 409, "body={}", clash.text().await.unwrap());
+}
+
+/// DELETE with `?delete_branch=true` removes both the worktree dir
+/// AND the local branch. Verifies the local git state with
+/// `git branch --list`.
+#[tokio::test]
+async fn worktree_delete_with_branch_removes_branch() {
+    let h = BeHarness::start().await;
+    let (dir, project_id) = make_project(&h).await;
+
+    let wt = h
+        .post_auth(&format!("/api/projects/{project_id}/worktrees"))
+        .json(&json!({"branch":"feature/drop-me","base_ref":"main"}))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    let wt_id = wt["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        wait_for_terminal_status(&h, &project_id, &wt_id).await,
+        "ready"
+    );
+
+    let del = h
+        .delete_auth(&format!(
+            "/api/projects/{project_id}/worktrees/{wt_id}?delete_branch=true"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(del.status(), 204, "body={}", del.text().await.unwrap());
+
+    // Branch no longer in git.
+    let out = std::process::Command::new("git")
+        .args(["-C", &dir.path().to_string_lossy(), "branch", "--list"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("feature/drop-me"),
+        "branch was not deleted:\n{stdout}"
+    );
+}
+
+/// A worktree created WITHOUT a per-call `pre_script` inherits the
+/// project-level `pre_worktree_script`. We can't observe the script
+/// body directly from the worktree DTO (it's stored, not surfaced),
+/// so we use a script that creates a sentinel file inside the new
+/// worktree dir — the file's existence proves the script ran with
+/// the project default.
+#[tokio::test]
+async fn worktree_inherits_project_pre_script_when_unset() {
+    let h = BeHarness::start().await;
+    let (_dir, project_id) = make_project(&h).await;
+    // Configure the project default.
+    let set = h
+        .patch(&format!("/api/projects/{project_id}"))
+        .json(&serde_json::json!({
+            "pre_worktree_script": "touch inherited.flag"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(set.status(), 200);
+
+    // Create a worktree with NO per-call pre_script.
+    let res = h
+        .post_auth(&format!("/api/projects/{project_id}/worktrees"))
+        .json(&serde_json::json!({"branch":"feature/inherit","base_ref":"main"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let wt: Value = res.json().await.unwrap();
+    let wt_id = wt["id"].as_str().unwrap().to_owned();
+    let wt_path = std::path::PathBuf::from(wt["path"].as_str().unwrap());
+    assert_eq!(
+        wait_for_terminal_status(&h, &project_id, &wt_id).await,
+        "ready"
+    );
+    assert!(
+        wt_path.join("inherited.flag").exists(),
+        "expected project-level pre_script to have created the sentinel file at {}",
+        wt_path.display()
+    );
+}
+
+/// A per-call `pre_script` overrides the project-level default. We
+/// drop two sentinel filenames so the test can tell which branch of
+/// the resolution logic actually ran.
+#[tokio::test]
+async fn worktree_pre_script_override_wins_over_project_default() {
+    let h = BeHarness::start().await;
+    let (_dir, project_id) = make_project(&h).await;
+    h.patch(&format!("/api/projects/{project_id}"))
+        .json(&serde_json::json!({
+            "pre_worktree_script": "touch project-default.flag"
+        }))
+        .send()
+        .await
+        .unwrap();
+    let res = h
+        .post_auth(&format!("/api/projects/{project_id}/worktrees"))
+        .json(&serde_json::json!({
+            "branch":"feature/override",
+            "base_ref":"main",
+            "pre_script": "touch override.flag"
+        }))
+        .send()
+        .await
+        .unwrap();
+    let wt: Value = res.json().await.unwrap();
+    let wt_id = wt["id"].as_str().unwrap().to_owned();
+    let wt_path = std::path::PathBuf::from(wt["path"].as_str().unwrap());
+    assert_eq!(
+        wait_for_terminal_status(&h, &project_id, &wt_id).await,
+        "ready"
+    );
+    assert!(
+        wt_path.join("override.flag").exists(),
+        "override script did not run"
+    );
+    assert!(
+        !wt_path.join("project-default.flag").exists(),
+        "project default ran even though an override was supplied"
+    );
+}
+
+/// Whitespace-only override is treated as "inherit" — matches the FE
+/// convention that leaving the override input blank means "use the
+/// project default", regardless of trailing whitespace from copy-paste.
+#[tokio::test]
+async fn worktree_whitespace_override_falls_back_to_project_default() {
+    let h = BeHarness::start().await;
+    let (_dir, project_id) = make_project(&h).await;
+    h.patch(&format!("/api/projects/{project_id}"))
+        .json(&serde_json::json!({
+            "pre_worktree_script": "touch inherited.flag"
+        }))
+        .send()
+        .await
+        .unwrap();
+    let res = h
+        .post_auth(&format!("/api/projects/{project_id}/worktrees"))
+        .json(&serde_json::json!({
+            "branch":"feature/ws",
+            "base_ref":"main",
+            "pre_script": "   \n  "
+        }))
+        .send()
+        .await
+        .unwrap();
+    let wt: Value = res.json().await.unwrap();
+    let wt_id = wt["id"].as_str().unwrap().to_owned();
+    let wt_path = std::path::PathBuf::from(wt["path"].as_str().unwrap());
+    assert_eq!(
+        wait_for_terminal_status(&h, &project_id, &wt_id).await,
+        "ready"
+    );
+    assert!(
+        wt_path.join("inherited.flag").exists(),
+        "whitespace-only override should have fallen back to the project default"
+    );
+}
+
+/// DELETE without the query param (default behaviour) keeps the
+/// branch around — this is the existing contract; pinned here so we
+/// don't regress it accidentally.
+#[tokio::test]
+async fn worktree_delete_without_flag_keeps_branch() {
+    let h = BeHarness::start().await;
+    let (dir, project_id) = make_project(&h).await;
+
+    let wt = h
+        .post_auth(&format!("/api/projects/{project_id}/worktrees"))
+        .json(&json!({"branch":"feature/keep-me","base_ref":"main"}))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    let wt_id = wt["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        wait_for_terminal_status(&h, &project_id, &wt_id).await,
+        "ready"
+    );
+
+    let del = h
+        .delete_auth(&format!(
+            "/api/projects/{project_id}/worktrees/{wt_id}"
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(del.status(), 204);
+
+    let out = std::process::Command::new("git")
+        .args(["-C", &dir.path().to_string_lossy(), "branch", "--list"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("feature/keep-me"),
+        "branch was unexpectedly deleted:\n{stdout}"
+    );
+}

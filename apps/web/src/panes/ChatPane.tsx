@@ -22,8 +22,10 @@ import {
   type AgentEvent,
   type ChatView,
   type Prompt,
+  type ProviderDescriptor,
   type UploadDto,
 } from "../api/client";
+import Select from "../components/Select";
 import ChatSettingsDialog from "../components/ChatSettingsDialog";
 import { confirm } from "../components/dialog";
 import Markdown from "../components/Markdown";
@@ -88,7 +90,32 @@ const freshChatStore = (): ChatStore => ({
 export default function ChatPane() {
   const [chatStore, setChatStore] = createStore<ChatStore>(freshChatStore());
   const [input, setInput] = createSignal("");
-  const [busy, setBusy] = createSignal(false);
+  // Whether the agent is currently working on this chat's *latest*
+  // prompt. Only the tail prompt can be in-flight — older prompts
+  // are immutable history.
+  //
+  // We can't rely on the POST /prompts call to flip a flag because
+  // that resolves the instant the BE accepts the prompt, long before
+  // the AI is done streaming tokens. Instead we inspect the tail:
+  //   - empty events array → BE accepted it but no events yet, the
+  //     agent is just spinning up → busy.
+  //   - last event is `done` or `error` → turn finished → idle.
+  //   - anything else → token / thinking / tool_use stream is mid-
+  //     flight → busy.
+  //
+  // Historical prompts can legitimately have empty `events` arrays
+  // when loaded out of a windowed BE response (events are capped
+  // separately) — so scanning the entire list incorrectly marked
+  // the chat permanently busy and forced every new message into
+  // the queue. Looking at only the tail fixes that.
+  const busy = (): boolean => {
+    const tail = chatStore.prompts[chatStore.prompts.length - 1];
+    if (!tail) return false;
+    const evs = tail.events;
+    if (evs.length === 0) return true;
+    const last = evs[evs.length - 1]!;
+    return last.type !== "done" && last.type !== "error";
+  };
   const [err, setErr] = createSignal<string | null>(null);
   // Pending uploads attached to the next prompt. Chips render below
   // the textarea; on send we tack their absolute paths onto the
@@ -113,6 +140,21 @@ export default function ChatPane() {
   const [providerCommands, setProviderCommands] = createSignal<
     { name: string; description: string }[]
   >([]);
+  // Cached provider list so the composer's model dropdown can show
+  // the curated `models` array per provider without refetching on
+  // every chat switch. Loaded once on mount; provider versions don't
+  // change at runtime.
+  const [providers, setProviders] = createSignal<ProviderDescriptor[]>([]);
+  onMount(() => {
+    void (async () => {
+      try {
+        setProviders(await api.listProviders());
+      } catch {
+        // best-effort — composer falls back to a single-item list
+        // ("current model") if the providers endpoint is unreachable.
+      }
+    })();
+  });
   // Queue drawer visibility. Persisted across reloads so users who
   // rely on it don't have to re-open after every refresh.
   const [queueOpen, setQueueOpen] = createSignal(
@@ -127,6 +169,10 @@ export default function ChatPane() {
     total: number;
     pending: number;
     running: number;
+    /** Per-chat queue mode read straight from the BE so the
+     *  composer's mode dropdown reflects what the server will
+     *  actually do, not a stale FE assumption. */
+    mode: "auto" | "manual";
   } | null>(null);
   createEffect(() => {
     const id = activeId();
@@ -143,6 +189,7 @@ export default function ChatPane() {
           total: q.items.length,
           pending: q.items.filter((i) => i.status === "pending").length,
           running: q.items.filter((i) => i.status === "running").length,
+          mode: q.mode,
         });
       } catch {
         // ignore — badge is best-effort
@@ -155,6 +202,8 @@ export default function ChatPane() {
       clearInterval(handle);
     });
   });
+
+
 
   const scope = () => currentScope();
   const tabs = () => scope()?.chats ?? [];
@@ -192,6 +241,52 @@ export default function ChatPane() {
         prompts: view.prompts,
         atStart: view.prompts.length >= view.prompts_total,
       });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** Soft reconcile: pulls the latest chat view but PRESERVES the
+   *  live token / thinking buffers + any optimistic placeholder
+   *  prompts the user just submitted. Used as the response to a
+   *  `queue_dispatched` WS frame — the BE has appended one or more
+   *  drained prompts, and we want them to show up without nuking
+   *  the active token stream.
+   *
+   *  Merge rules:
+   *    - Each BE prompt is identified by its id.
+   *    - If a prompt with the same id already exists locally, we
+   *      replace it with the BE copy (which may have more events).
+   *    - Any local prompt whose id is NOT in the BE view is left
+   *      in place (covers optimistic placeholders that haven't
+   *      been swapped yet).
+   *    - Order = BE order, then locally-only ids appended at the
+   *      tail.
+   */
+  async function reconcileChat() {
+    const id = activeId();
+    if (!id) return;
+    try {
+      const view = await api.getChat(id);
+      setChatStore(
+        produce((s) => {
+          s.view = view;
+          s.atStart = view.prompts.length >= view.prompts_total;
+          const beIds = new Set(view.prompts.map((p) => p.id));
+          const localOnly = s.prompts.filter((p) => !beIds.has(p.id));
+          s.prompts = [...view.prompts, ...localOnly];
+          // Drop any liveTokens / liveThinking entries whose prompt
+          // has reached a terminal event in the BE copy — they're
+          // canonical now.
+          for (const p of view.prompts) {
+            const last = p.events[p.events.length - 1];
+            if (last && (last.type === "done" || last.type === "error")) {
+              delete s.liveTokens[p.id];
+              delete s.liveThinking[p.id];
+            }
+          }
+        }),
+      );
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
@@ -240,14 +335,16 @@ export default function ChatPane() {
     socket.addEventListener("message", (ev) => {
       if (closed) return;
       // `queue_dispatched` is a hint from the BE that the queue
-      // popped an item and dispatched it as a new prompt. Re-fetch
-      // the chat so the new prompt + its events show up in the
-      // timeline; otherwise we'd only see them on next switch.
+      // popped an item and dispatched it as a new prompt. Use the
+      // SOFT reconcile path so we pick up the new prompt without
+      // wiping in-flight liveTokens / liveThinking buffers — those
+      // belong to the prompt the BE is now streaming, and a hard
+      // reload would discard partial tokens between WS deliveries.
       try {
         if (typeof ev.data === "string") {
           const parsed = JSON.parse(ev.data) as { queue_dispatched?: string };
           if (parsed.queue_dispatched) {
-            void loadChat();
+            void reconcileChat();
             return;
           }
         }
@@ -441,59 +538,85 @@ export default function ChatPane() {
       body = `${body}${body ? "\n\n" : ""}Attached files (absolute paths, read with your Read tool):\n${lines}`;
     }
 
-    // Snapshot the busy state *before* we mutate it so we know which
-    // branch the user actually intended.
-    const wasBusy = busy();
-    if (wasBusy) {
-      // Agent is mid-turn: enqueue instead of dispatching. Don't flip
-      // the busy signal — that belongs to the in-flight dispatch.
-      try {
-        await api.enqueue(id, body);
-        setInput("");
-        setUploads([]);
-        queueMicrotask(() => {
-          const el = document.querySelector<HTMLTextAreaElement>(
-            '[data-testid="chat-input"]',
-          );
-          autoResizeTextarea(el);
-        });
-        // Auto-open the queue panel so the user sees what just landed.
-        if (!queueOpen()) setQueueOpen(true);
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
-      }
-      return;
-    }
+    // OPTIMISTIC CLEAR: drop the text + attachments out of the
+    // composer the instant the user hits Enter, BEFORE we await the
+    // BE call. Otherwise the textarea stays full while the request
+    // round-trips, which looks broken to the user. We snapshot the
+    // pre-cleared state so a failure can restore it.
+    const snapshot = { body, uploads: atts };
+    setInput("");
+    setUploads([]);
+    queueMicrotask(() => {
+      const el = document.querySelector<HTMLTextAreaElement>(
+        '[data-testid="chat-input"]',
+      );
+      autoResizeTextarea(el);
+    });
 
-    setBusy(true);
+    // Push an OPTIMISTIC placeholder prompt so the user's message
+    // lands in the timeline instantly. We don't know yet whether
+    // the BE will dispatch or queue — if it queues, we remove the
+    // placeholder once the BE responds.
+    const tempId = `pending-${Math.random().toString(36).slice(2)}`;
+    const placeholder: Prompt = {
+      id: tempId,
+      seq: -1,
+      content: body,
+      events: [],
+      touched_paths: [],
+      created_at: new Date().toISOString(),
+    };
+    setChatStore(
+      produce((s) => {
+        s.prompts.push(placeholder);
+        if (s.prompts.length > MAX_PROMPTS_IN_VIEW) {
+          s.prompts.shift();
+        }
+      }),
+    );
+
     try {
-      // Optimistically add a prompt placeholder; the BE returns the
-      // canonical record we replace it with. Token + tool events
-      // flow in via the WS subscription.
-      const prompt = await api.addPrompt(id, body);
+      // Authoritative server decision: dispatched vs queued. No
+      // FE-side race against stale busy / queue counts.
+      const res = await api.sendMessage(id, body);
+      if (res.kind === "dispatched") {
+        // Swap placeholder for the real prompt record so live WS
+        // events (keyed by the real id) light up the streaming
+        // bubble.
+        setChatStore(
+          produce((s) => {
+            const idx = s.prompts.findIndex((p) => p.id === tempId);
+            if (idx >= 0) {
+              s.prompts[idx] = res.prompt;
+            } else {
+              s.prompts.push(res.prompt);
+            }
+          }),
+        );
+      } else {
+        // Queued. Drop the placeholder (the message lives in the
+        // queue dock, not the timeline) and surface the dock so
+        // the user sees it landed.
+        setChatStore(
+          produce((s) => {
+            const idx = s.prompts.findIndex((p) => p.id === tempId);
+            if (idx >= 0) s.prompts.splice(idx, 1);
+          }),
+        );
+        if (!queueOpen()) setQueueOpen(true);
+      }
+    } catch (e) {
+      // Remove the placeholder + restore the composer so the user
+      // can retry without retyping.
       setChatStore(
         produce((s) => {
-          s.prompts.push(prompt);
-          if (s.prompts.length > MAX_PROMPTS_IN_VIEW) {
-            s.prompts.shift();
-          }
+          const idx = s.prompts.findIndex((p) => p.id === tempId);
+          if (idx >= 0) s.prompts.splice(idx, 1);
         }),
       );
-      setInput("");
-      setUploads([]);
-      // Snap the textarea back to its initial height now that the
-      // text is gone. queueMicrotask lets Solid finish patching the
-      // value first.
-      queueMicrotask(() => {
-        const el = document.querySelector<HTMLTextAreaElement>(
-          '[data-testid="chat-input"]',
-        );
-        autoResizeTextarea(el);
-      });
-    } catch (e) {
+      setInput(snapshot.body);
+      setUploads(snapshot.uploads);
       setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -512,6 +635,64 @@ export default function ChatPane() {
   }
 
   const chat = createMemo(() => chatStore.view);
+
+  /** Dropdown options for the inline composer-row model picker.
+   *  Pulls the curated `models` list off the active chat's provider
+   *  descriptor + decorates each entry with a hint:
+   *    - aliases (no date suffix) → `→ latest`
+   *    - dated releases           → `family X.Y` parsed from the id
+   *
+   *  Also ensures the chat's currently-selected model is present in
+   *  the list even if the provider doesn't expose it in its curated
+   *  set (e.g. a power-user picked a custom id via the settings
+   *  dialog). Without this safeguard the Select would render the
+   *  trigger blank because none of its options match `value`. */
+  const modelOptions = createMemo(() => {
+    const c = chat();
+    if (!c) return [];
+    const provider = providers().find((p) => p.id === c.provider);
+    const list = [...(provider?.models ?? [])];
+    if (c.model && !list.includes(c.model)) list.push(c.model);
+    const datedRe = /-(\d{8})$/;
+    return list.map((m) => {
+      const match = datedRe.exec(m);
+      if (match) {
+        const inner = m
+          .replace(/^claude-/, "")
+          .replace(/-\d{8}$/, "")
+          .split("-");
+        const family = inner.shift() ?? "";
+        const version = inner.join(".");
+        return {
+          value: m,
+          label: m,
+          hint: version ? `${family} ${version}` : family,
+        };
+      }
+      return { value: m, label: m, hint: "→ latest" };
+    });
+  });
+
+  /** Persist a model change for the current chat. PATCHes the BE,
+   *  then merges the updated DTO into the local chat store so the
+   *  trigger label reflects the change immediately. We deliberately
+   *  do NOT bounce the agent's running session — model selection
+   *  applies to the next turn. */
+  async function changeModel(model: string) {
+    const c = chat();
+    if (!c || c.model === model) return;
+    try {
+      const updated = await api.updateChat(c.id, { model });
+      setChatStore("view", (v) => (v ? { ...v, ...updated } : v));
+      setScopeChats(
+        tabs().map((t) =>
+          t.id === updated.id ? { ...t, title: updated.title } : t,
+        ),
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   // Load slash commands for the active chat's provider. Refreshes
   // whenever the chat (and therefore the provider) changes.
@@ -715,20 +896,7 @@ export default function ChatPane() {
             </div>
           )}
         </For>
-        <Show when={chat()}>
-          <button
-            type="button"
-            class="ml-2 ag-chip ag-chip-accent hover:opacity-80"
-            title={`${chat()!.provider}/${chat()!.model}${chat()!.effort ? ` · effort ${chat()!.effort}` : ""} — click to configure`}
-            data-testid="chat-provider"
-            onClick={() => setChatSettingsOpen(true)}
-          >
-            {chat()!.provider}/{chat()!.model}
-            <Show when={chat()!.effort}>
-              <span class="ml-1 text-fg-subtle">· {chat()!.effort}</span>
-            </Show>
-          </button>
-        </Show>
+
         <Show when={activeId() && (queueSummary()?.total ?? 0) > 0}>
           <button
             type="button"
@@ -760,24 +928,54 @@ export default function ChatPane() {
         </Show>
       </header>
 
-      <VirtualizedTimeline
-        prompts={chatStore.prompts}
-        liveTokens={chatStore.liveTokens}
-        liveThinking={chatStore.liveThinking}
-        atStart={chatStore.atStart}
-        loadingOlder={chatStore.loadingOlder}
-        onLoadOlder={() => void loadOlder()}
-        onRevert={(p) => void revert(p)}
-      />
+      {/*
+        Chat body: a horizontal split with the timeline + composer
+        on the left and the queue dock as an optional right column.
+        The queue is per-chat (the BE stores mode + items keyed by
+        chatId) so docking it inside this pane matches its scope.
+        `min-h-0` on the row + `min-w-0` on the left column let the
+        timeline shrink horizontally when the dock opens; without
+        them the textarea pushes the row wider than the pane.
+      */}
+      <div class="flex-1 flex min-h-0">
+        <div class="flex-1 flex flex-col min-w-0">
+          <VirtualizedTimeline
+            prompts={chatStore.prompts}
+            liveTokens={chatStore.liveTokens}
+            liveThinking={chatStore.liveThinking}
+            atStart={chatStore.atStart}
+            loadingOlder={chatStore.loadingOlder}
+            onLoadOlder={() => void loadOlder()}
+            onRevert={(p) => void revert(p)}
+          />
 
-      <Show when={activeId()}>
-        <QueueDrawer
-          chatId={activeId()!}
-          open={queueOpen()}
-          onClose={() => setQueueOpen(false)}
-        />
-      </Show>
-
+      {/* Composer renders ONLY when there's an active chat. Otherwise
+          we show a small empty-state strip so the bottom of the pane
+          doesn't carry a disabled input that the user can't act on.
+          This guards against the post-deletion view too: when the
+          scope (project or worktree) is removed under us, activeId()
+          flips to null and we collapse the composer rather than
+          leaving a ghost "Send" button below the maze. */}
+      <Show
+        when={activeId()}
+        fallback={
+          <div
+            class="px-4 py-4 border-t border-border bg-bg-1 text-center text-[12.5px] text-fg-subtle"
+            data-testid="chat-empty-composer"
+          >
+            <Show
+              when={state.selectedProjectId}
+              fallback={
+                <span>Select a project on the left to start chatting.</span>
+              }
+            >
+              <span>
+                Open or create a chat in the left rail to start messaging.
+              </span>
+            </Show>
+          </div>
+        }
+      >
       <form
         onSubmit={send}
         onDrop={onDrop}
@@ -833,147 +1031,243 @@ export default function ChatPane() {
             </Show>
           </div>
         </Show>
-        <div class="flex gap-2 items-end">
-          <button
-            type="button"
-            class="ag-btn ag-btn-ghost ag-btn-icon"
-            title="Attach files"
-            aria-label="Attach files"
-            data-testid="chat-attach"
-            onClick={(e) => {
-              const input = (e.currentTarget as HTMLButtonElement)
-                .nextElementSibling as HTMLInputElement | null;
-              input?.click();
-            }}
-          >
-            <PaperclipIcon />
-          </button>
-          <input
-            type="file"
-            multiple
-            class="hidden"
-            data-testid="chat-attach-input"
-            onChange={(e) => {
-              const files = Array.from(e.currentTarget.files ?? []);
-              e.currentTarget.value = "";
-              if (files.length > 0) void uploadFileList(files);
-            }}
+        {/*
+          Unified input shell — borders + focus ring live on the
+          OUTER container so the textarea, the action icons, and the
+          Send button read as a single surface (closer to ChatGPT /
+          VSCode's chat composer). Layout:
+
+            ┌──┬─────────────────────────────────┐
+            │📎│ textarea (border-less, grows)   │
+            │✨│                                  │
+            │  │                          [Send] │
+            └──┴─────────────────────────────────┘
+
+          The icon column on the left stacks attach + prompts
+          vertically (so the previously-empty vertical band gets
+          filled), and Send floats in the bottom-right corner over the
+          textarea via absolute positioning. We pin it to the bottom
+          rather than the top so it stays close to where the caret is
+          when the user is finishing a message.
+        */}
+        {/*
+          Composer shell — single bordered surface laid out top→bottom:
+            ┌──────────────────────────────────────────────────┐
+            │ textarea (border-less, full width, grows up to   │
+            │           max-h-60)                              │
+            │                                                  │
+            ├──────────────────────────────────────────────────┤
+            │ 📎  ✨                                       [↑] │  ← action row
+            └──────────────────────────────────────────────────┘
+          The earlier left-gutter design left a tall vertical band of
+          empty space next to short messages. Moving the action icons
+          underneath the textarea matches Antigravity/ChatGPT and
+          removes the dead space entirely. SlashMenu still positions
+          itself above the textarea via its own absolute layer.
+        */}
+        <div
+          class="ag-chat-input-shell flex flex-col rounded-lg border border-border bg-bg-0 shadow-sm relative"
+          classList={{ "opacity-60": !activeId() }}
+        >
+          <SlashMenu
+            query={slashQuery()}
+            suggestions={suggestions()}
+            activeIdx={slashIdx()}
+            onPick={applySlash}
+            onHoverIdx={setSlashIdx}
           />
-          <PromptsPicker
-            onInsert={(body) => {
-              const ta = document.querySelector<HTMLTextAreaElement>(
-                '[data-testid="chat-input"]',
-              );
-              if (!ta) return;
-              const start = ta.selectionStart;
-              const end = ta.selectionEnd;
-              const newValue =
-                ta.value.slice(0, start) + body + ta.value.slice(end);
-              ta.value = newValue;
-              setInput(newValue);
-              const caret = start + body.length;
-              ta.focus();
-              ta.setSelectionRange(caret, caret);
-              autoResizeTextarea(ta);
+          <textarea
+            rows="3"
+            class="resize-none max-h-60 min-h-[3.2em] w-full leading-relaxed bg-transparent px-3 pt-2.5 pb-1 text-fg placeholder:text-fg-subtle border-0 outline-none focus:outline-none focus-visible:outline-none focus:ring-0"
+            placeholder="Message the agent…  (⏎ to send, ⇧⏎ for newline, / for commands, - for bullets, paste/drop files to attach)"
+            value={input()}
+            onInput={(e) => {
+              setInput(e.currentTarget.value);
+              autoResizeTextarea(e.currentTarget);
+              updateSlashState(e.currentTarget);
             }}
-          />
-          <div class="flex-1 relative">
-            <SlashMenu
-              query={slashQuery()}
-              suggestions={suggestions()}
-              activeIdx={slashIdx()}
-              onPick={applySlash}
-              onHoverIdx={setSlashIdx}
-            />
-            <textarea
-              rows="3"
-              class="ag-input resize-none max-h-60 min-h-[3.2em] w-full leading-relaxed"
-              placeholder={
-                busy()
-                  ? "Agent is working… ⏎ to enqueue, ⇧⏎ for newline"
-                  : "Message the agent…  (⏎ to send, ⇧⏎ for newline, / for commands, - for bullets, paste/drop files to attach)"
-              }
-              value={input()}
-              onInput={(e) => {
-                setInput(e.currentTarget.value);
-                autoResizeTextarea(e.currentTarget);
-                updateSlashState(e.currentTarget);
-              }}
-              onPaste={onPaste}
-              onKeyDown={(e) => {
-                // While the slash menu is open, arrow keys + Enter +
-                // Tab + Escape drive the menu instead of the
-                // textarea defaults.
-                if (slashQuery() !== null) {
-                  const list = suggestions();
-                  if (e.key === "ArrowDown") {
-                    e.preventDefault();
-                    if (list.length > 0) {
-                      setSlashIdx((i) => (i + 1) % list.length);
-                    }
-                    return;
+            onPaste={onPaste}
+            onKeyDown={(e) => {
+              // While the slash menu is open, arrow keys + Enter +
+              // Tab + Escape drive the menu instead of the
+              // textarea defaults.
+              if (slashQuery() !== null) {
+                const list = suggestions();
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  if (list.length > 0) {
+                    setSlashIdx((i) => (i + 1) % list.length);
                   }
-                  if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    if (list.length > 0) {
-                      setSlashIdx((i) => (i - 1 + list.length) % list.length);
-                    }
-                    return;
+                  return;
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  if (list.length > 0) {
+                    setSlashIdx((i) => (i - 1 + list.length) % list.length);
                   }
-                  if (e.key === "Enter" || e.key === "Tab") {
-                    if (list.length > 0) {
-                      e.preventDefault();
-                      applySlash(list[slashIdx()] ?? list[0]!);
-                      return;
-                    }
-                  }
-                  if (e.key === "Escape") {
+                  return;
+                }
+                if (e.key === "Enter" || e.key === "Tab") {
+                  if (list.length > 0) {
                     e.preventDefault();
-                    setSlashQuery(null);
+                    applySlash(list[slashIdx()] ?? list[0]!);
                     return;
                   }
                 }
-                onChatInputKeyDown(e, () => {
-                  const form = (e.currentTarget as HTMLTextAreaElement).form;
-                  form?.requestSubmit();
-                });
-              }}
-              onSelect={(e) =>
-                updateSlashState(e.currentTarget as HTMLTextAreaElement)
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setSlashQuery(null);
+                  return;
+                }
               }
-              onBlur={() => {
-                // Defer close so a mouse click on the menu still
-                // fires before the menu disappears.
-                setTimeout(() => setSlashQuery(null), 150);
+              onChatInputKeyDown(e, () => {
+                const form = (e.currentTarget as HTMLTextAreaElement).form;
+                form?.requestSubmit();
+              });
+            }}
+            onSelect={(e) =>
+              updateSlashState(e.currentTarget as HTMLTextAreaElement)
+            }
+            onBlur={() => {
+              // Defer close so a mouse click on the menu still
+              // fires before the menu disappears.
+              setTimeout(() => setSlashQuery(null), 150);
+            }}
+            ref={(el) => {
+              queueMicrotask(() => autoResizeTextarea(el));
+            }}
+            disabled={!activeId()}
+            data-testid="chat-input"
+          />
+
+          {/* Bottom action row. Icons left, Send right. No divider
+              between the textarea and this row — the reference design
+              treats the whole shell as one surface, so a visible
+              border line just split the composer in two. The slight
+              `pt-0` keeps icons hugging the textarea without leaving
+              an awkward gap. */}
+          <div class="flex items-center gap-1 px-2 pt-0 pb-1.5">
+            <button
+              type="button"
+              class="ag-btn ag-btn-ghost ag-btn-icon"
+              title="Attach files"
+              aria-label="Attach files"
+              data-testid="chat-attach"
+              onClick={(e) => {
+                const input = (e.currentTarget as HTMLButtonElement)
+                  .nextElementSibling as HTMLInputElement | null;
+                input?.click();
               }}
-              ref={(el) => {
-                queueMicrotask(() => autoResizeTextarea(el));
+            >
+              <PaperclipIcon />
+            </button>
+            <input
+              type="file"
+              multiple
+              class="hidden"
+              data-testid="chat-attach-input"
+              onChange={(e) => {
+                const files = Array.from(e.currentTarget.files ?? []);
+                e.currentTarget.value = "";
+                if (files.length > 0) void uploadFileList(files);
               }}
-              disabled={!activeId()}
-              data-testid="chat-input"
             />
+            <PromptsPicker
+              onInsert={(body) => {
+                const ta = document.querySelector<HTMLTextAreaElement>(
+                  '[data-testid="chat-input"]',
+                );
+                if (!ta) return;
+                const start = ta.selectionStart;
+                const end = ta.selectionEnd;
+                const newValue =
+                  ta.value.slice(0, start) + body + ta.value.slice(end);
+                ta.value = newValue;
+                setInput(newValue);
+                const caret = start + body.length;
+                ta.focus();
+                ta.setSelectionRange(caret, caret);
+                autoResizeTextarea(ta);
+              }}
+            />
+
+            {/*
+              Inline model picker. We render it next to the other
+              composer-row controls so the user can switch models
+              without opening the per-chat Settings dialog (which
+              still hosts thinking-effort and slash commands).
+
+              Layout notes:
+                - Wrapper is `relative` + has a fixed width so the
+                  trigger doesn't stretch the action row when the
+                  selected label is long.
+                - `placement="top"` makes the dropdown open ABOVE
+                  the composer, avoiding the bug where the menu
+                  pushed the input upwards because it grew the row.
+                - We hide the picker entirely when no chat is
+                  active or providers haven't loaded yet, instead of
+                  rendering a disabled trigger that would look like
+                  a layout glitch.
+            */}
+            <Show when={chat() && modelOptions().length > 0}>
+              <div
+                class="w-44 text-[11.5px]"
+                title="Model — switch on the fly"
+                data-testid="chat-model-picker"
+              >
+                <Select
+                  value={chat()!.model}
+                  options={modelOptions()}
+                  onChange={(v) => void changeModel(v)}
+                  ariaLabel="Model"
+                  placement="top"
+                  testId="chat-model-select"
+                />
+              </div>
+            </Show>
+
+            <button
+              type="submit"
+              class="ag-btn ag-btn-primary ml-auto !py-1 !px-2.5 text-[12px]"
+              disabled={
+                !activeId() ||
+                (!input().trim() && uploads().length === 0)
+              }
+              // Always "Send" from the user's perspective. The
+              // send handler routes idle messages to the dispatch
+              // path and busy ones to the queue path automatically;
+              // queue mode defaults to auto, so the BE drains
+              // messages back-to-back without manual intervention.
+              // Surfacing "Enqueue" mid-turn used to confuse users
+              // into thinking they had to press Send a second time.
+              title="Send to the agent"
+              data-testid="chat-send"
+            >
+              Send
+              <span class="ag-kbd !bg-transparent !border-transparent text-[var(--ag-accent-fg)] opacity-80 ml-1">
+                ⏎
+              </span>
+            </button>
           </div>
-          <button
-            type="submit"
-            class="ag-btn ag-btn-primary"
-            disabled={
-              !activeId() ||
-              (!input().trim() && uploads().length === 0)
-            }
-            title={
-              busy()
-                ? "Agent is busy — your message will be queued"
-                : "Send to the agent"
-            }
-            data-testid="chat-send"
-          >
-            {busy() ? "Enqueue" : "Send"}
-            <span class="ag-kbd !bg-transparent !border-transparent text-[var(--ag-accent-fg)] opacity-80">
-              ⏎
-            </span>
-          </button>
         </div>
       </form>
+      </Show>
+        </div>
+
+        {/* Queue dock — toggled by the chat-header badge. Renders as
+            the right column INSIDE the chat pane so it shares the
+            tab strip + composer surface with the rest of the chat.
+            QueueDrawer is now a misnomer (it used to overlay) — we
+            keep the import name for diff cleanliness; the component
+            itself was converted to an inline aside. */}
+        <Show when={activeId() && queueOpen()}>
+          <QueueDrawer
+            chatId={activeId()!}
+            open={queueOpen()}
+            onClose={() => setQueueOpen(false)}
+          />
+        </Show>
+      </div>
 
       <Show when={chatSettingsOpen() && chat()}>
         <ChatSettingsDialog
@@ -1062,17 +1356,43 @@ function VirtualizedTimeline(props: {
     return Math.max(0, total - (last.start + last.size));
   };
 
-  // Auto-scroll to bottom when a new prompt is appended at the tail
-  // (the user just hit send). Don't auto-scroll on backfill of older
-  // prompts — that would yank the viewport away from what the user
-  // was reading.
+  // Auto-scroll behaviour:
+  //   - On the FIRST render with a non-empty prompt list (chat
+  //     switch, page refresh, etc.) jump straight to the bottom so
+  //     the user lands on the most recent turn. The BE already caps
+  //     us at ~50 prompts, so this isn't a "scroll past 10k rows"
+  //     concern — we just need to land at the tail.
+  //   - On tail growth (user just hit send), follow the new prompt
+  //     into view.
+  //   - On backfill of OLDER prompts (firstId changes but len grows
+  //     and the previous firstId still exists somewhere in the
+  //     list) we deliberately do NOT scroll — that would yank the
+  //     viewport away from what the user was reading.
+  //
+  // The "scroll" calls go through a microtask so layout has settled
+  // before the virtualizer recomputes offsets. `requestAnimationFrame`
+  // would be more conservative but introduces a visible flash where
+  // the user sees the top of the chat for one frame.
   createEffect(() => {
     const ps = props.prompts;
     const len = ps.length;
     const firstId = ps[0]?.id;
-    if (len > prevLength && firstId === prevFirstId) {
-      // Tail growth.
+
+    // First non-empty load → scroll to bottom unconditionally.
+    if (prevLength === 0 && len > 0) {
+      queueMicrotask(() => {
+        virtualizer.scrollToIndex(len - 1, { align: "end" });
+      });
+    } else if (len > prevLength && firstId === prevFirstId) {
+      // Tail growth in an already-mounted chat.
       virtualizer.scrollToIndex(len - 1, { align: "end" });
+    } else if (firstId !== prevFirstId && len > 0 && prevLength > 0) {
+      // Chat switch (firstId changed while we already had prompts).
+      // Reset prevLength so the "first load" branch above doesn't
+      // also fire next tick.
+      queueMicrotask(() => {
+        virtualizer.scrollToIndex(len - 1, { align: "end" });
+      });
     }
     prevLength = len;
     prevFirstId = firstId;
@@ -1202,6 +1522,19 @@ function PromptRow(props: {
     );
   }
 
+  /** True while the agent hasn't yet finished this prompt. Used to
+   *  show a placeholder assistant bubble (with a pulsing dots
+   *  affordance) before the first token arrives. */
+  function isPending(): boolean {
+    if (props.liveToken !== undefined || props.liveThinking !== undefined) {
+      return true;
+    }
+    const evs = props.prompt.events;
+    if (evs.length === 0) return true;
+    const last = evs[evs.length - 1]!;
+    return last.type !== "done" && last.type !== "error";
+  }
+
   // Thinking blocks collapse by default — they're verbose and most
   // users don't want them in the way. Sticky to true once expanded.
   const [thinkingOpen, setThinkingOpen] = createSignal(false);
@@ -1211,9 +1544,25 @@ function PromptRow(props: {
       class="space-y-3 group py-2.5"
       data-testid={`prompt-${props.prompt.id}`}
     >
+      {/*
+        User bubble. Wrapped in a `group/bubble` so the copy button
+        only reveals on hover of THIS bubble, not the whole row
+        (otherwise hovering anywhere in the row — including the
+        assistant bubble — would reveal both copy buttons at once
+        and confuse the user about which one they're about to
+        click).
+      */}
       <div class="flex justify-end">
-        <div class="max-w-[80%] rounded-2xl rounded-br-md bg-accent text-[var(--ag-accent-fg)] px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap shadow-sm">
-          {props.prompt.content}
+        <div class="relative group/bubble max-w-[80%]">
+          <div class="rounded-2xl rounded-br-md bg-accent text-[var(--ag-accent-fg)] px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap shadow-sm">
+            {props.prompt.content}
+          </div>
+          <CopyButton
+            text={props.prompt.content}
+            class="absolute -top-2 -left-2 opacity-0 group-hover/bubble:opacity-100 transition-opacity"
+            testId={`copy-user-${props.prompt.id}`}
+            label="Copy your message"
+          />
         </div>
       </div>
       <Show when={thinkingText()}>
@@ -1236,16 +1585,48 @@ function PromptRow(props: {
           </details>
         </div>
       </Show>
-      <Show when={assistantText() || tools().length > 0}>
+      {/*
+        Assistant bubble. We render it whenever:
+          - the assistant has produced any text or tool activity, OR
+          - the prompt is fresh (no terminal event yet) — this
+            covers the optimistic-placeholder case where the user
+            just hit Enter and is waiting for the first token. A
+            pulsing "working…" affordance makes the wait visible
+            instead of leaving the user staring at their own
+            bubble wondering if anything happened.
+      */}
+      <Show when={assistantText() || tools().length > 0 || isPending()}>
         <div class="flex justify-start">
-          <div class="max-w-[80%] rounded-2xl rounded-bl-md bg-bg-1 border border-border text-[13.5px] leading-relaxed px-4 py-2.5">
-            <Show
-              when={assistantText()}
-              fallback={<em class="text-fg-subtle">working…</em>}
-            >
-              <Markdown source={assistantText()} />
+          <div class="relative group/bubble max-w-[80%]">
+            <div class="rounded-2xl rounded-bl-md bg-bg-1 border border-border text-[13.5px] leading-relaxed px-4 py-2.5">
+              <Show
+                when={assistantText()}
+                fallback={
+                  <span class="flex items-center gap-2 text-fg-subtle">
+                    <span class="inline-flex gap-0.5">
+                      <span class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse" style="animation-delay:0ms" />
+                      <span class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse" style="animation-delay:150ms" />
+                      <span class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse" style="animation-delay:300ms" />
+                    </span>
+                    <em>working…</em>
+                  </span>
+                }
+              >
+                <Markdown source={assistantText()} />
+              </Show>
+              <For each={tools()}>{(ev) => <ToolBadge ev={ev} />}</For>
+            </div>
+            {/* Only offer Copy when there's actual text to copy — a
+                bubble that still shows just the "working…" pulse
+                has nothing useful to put on the clipboard yet. */}
+            <Show when={assistantText()}>
+              <CopyButton
+                text={assistantText()}
+                class="absolute -top-2 -right-2 opacity-0 group-hover/bubble:opacity-100 transition-opacity"
+                testId={`copy-assistant-${props.prompt.id}`}
+                label="Copy AI response"
+              />
             </Show>
-            <For each={tools()}>{(ev) => <ToolBadge ev={ev} />}</For>
           </div>
         </div>
       </Show>
@@ -1671,6 +2052,99 @@ function PaperclipIcon() {
       aria-hidden="true"
     >
       <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 17.93 8.8l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+    </svg>
+  );
+}
+
+/** Floating copy-to-clipboard button that pops over a chat bubble's
+ *  corner on hover. Uses the async clipboard API with a textarea
+ *  fallback for browsers that block it (rare on a localhost dev
+ *  server but worth not crashing on).
+ *
+ *  Visual feedback: the icon swaps to a check for ~1.2 s after a
+ *  successful copy so the user knows something happened — without
+ *  this it was easy to double-click thinking the first one missed. */
+function CopyButton(props: {
+  text: string;
+  class?: string;
+  label: string;
+  testId?: string;
+}) {
+  const [copied, setCopied] = createSignal(false);
+  let timer: number | null = null;
+
+  async function doCopy(ev: MouseEvent) {
+    ev.stopPropagation();
+    const payload = props.text;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(payload);
+      } else {
+        // Fallback for non-secure contexts. Solid's reactivity is
+        // fine with a temporary DOM node we clean up ourselves.
+        const ta = document.createElement("textarea");
+        ta.value = payload;
+        ta.style.position = "fixed";
+        ta.style.top = "-1000px";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // Silent fail — the next attempt or a hard "select-all + copy"
+      // is the user's escape hatch.
+    }
+  }
+
+  onCleanup(() => {
+    if (timer !== null) window.clearTimeout(timer);
+  });
+
+  return (
+    <button
+      type="button"
+      class={`rounded-md border border-border bg-bg-1 text-fg-subtle hover:text-fg hover:bg-bg-2 shadow-sm p-1 ${props.class ?? ""}`}
+      onClick={(e) => void doCopy(e)}
+      aria-label={props.label}
+      title={copied() ? "Copied!" : props.label}
+      data-testid={props.testId}
+    >
+      <Show when={copied()} fallback={<CopyIcon />}>
+        <CheckIcon />
+      </Show>
+    </button>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.6" />
+      <path
+        d="M5 15V6a2 2 0 0 1 2-2h9"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M5 12l5 5 9-11"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
     </svg>
   );
 }

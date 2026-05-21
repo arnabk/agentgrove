@@ -218,10 +218,16 @@ export default function EditorPane() {
     return `saved ${Math.floor(dt / 60)}m ago`;
   }
   // Re-tick the status label every 5 s so "5s ago" stays current.
-  const [, forceTick] = createSignal(0);
+  // We DO read the signal (inside `savedLabel` callers via the
+  // tracking scope below) so destructure both halves; the
+  // solid/reactivity lint rule prefers a named first slot.
+  const [tick, setTick] = createSignal(0);
+  // Touch `tick()` so the surrounding tracked scope re-runs on
+  // every interval — that's the whole point of the ticker.
+  void tick;
   createEffect(() => {
     if (!savedAt()) return;
-    const id = setInterval(() => forceTick((n) => n + 1), 5000);
+    const id = setInterval(() => setTick((n) => n + 1), 5000);
     onCleanup(() => clearInterval(id));
   });
 

@@ -37,6 +37,7 @@ impl AgentProvider for FakeProvider {
             path: None,
             version: Some("test".into()),
             default_model: "echo",
+            models: &["echo"],
             supports_resume: false,
         }
     }

@@ -1,0 +1,13 @@
+-- Project-level pre-worktree script.
+--
+-- Developers do not want to retype the same `pnpm install && bundle
+-- install && ...` for every worktree they spin up — that command is
+-- a property of the project, not of the individual worktree. We move
+-- it onto `projects` and let worktree creation inherit unless an
+-- explicit per-worktree override is supplied (kept for power-users
+-- doing one-off experiments).
+--
+-- Nullable: existing projects start with NO script. The FE shows a
+-- prominent "configure" hint when the field is unset so the value
+-- doesn't stay invisible.
+ALTER TABLE projects ADD COLUMN pre_worktree_script TEXT;

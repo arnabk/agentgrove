@@ -351,7 +351,7 @@ function ToolBtn(props: {
       classList={{ "!bg-bg-3 !text-fg": !!props.active }}
       title={props.title}
       onMouseDown={(e) => e.preventDefault()}
-      onClick={props.onClick}
+      onClick={() => props.onClick()}
       data-testid={`notes-tool-${props.title.replace(/\W+/g, "-").toLowerCase()}`}
     >
       {props.label}

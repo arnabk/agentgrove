@@ -4,6 +4,7 @@ import { EditorView, lineNumbers } from "@codemirror/view";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { api, type GitStatusEntry } from "../api/client";
 import { changesScope, setChangesScope } from "../stores/app";
+import { confirm } from "./dialog";
 
 /**
  * Right-side slide-in panel showing the git status for the active
@@ -113,6 +114,52 @@ export default function ChangesPanel() {
 
   onCleanup(() => tearDownView());
 
+  /** Discard the working-tree changes for a single file (VSCode-style
+   *  per-row Discard action). Restores tracked files from HEAD,
+   *  deletes untracked files from disk. Destructive — gated behind a
+   *  themed confirm with the precise wording tailored to each case.
+   *  After the BE call we refresh the entries list and tear down the
+   *  diff view if the just-discarded file was the one being viewed. */
+  async function discardFile(entry: GitStatusEntry, ev: MouseEvent) {
+    ev.stopPropagation();
+    const scope = changesScope();
+    if (!scope) return;
+    const isUntracked = entry.untracked;
+    const ok = await confirm({
+      title: isUntracked ? "Delete file" : "Discard changes",
+      body: isUntracked ? (
+        <div>
+          Delete the untracked file{" "}
+          <code class="font-mono">{entry.path}</code> from disk? This
+          cannot be undone.
+        </div>
+      ) : (
+        <div>
+          Discard all changes in{" "}
+          <code class="font-mono">{entry.path}</code>? The file will be
+          restored to its HEAD revision.
+        </div>
+      ),
+      confirmLabel: isUntracked ? "Delete" : "Discard",
+      danger: true,
+      testId: "confirm-discard-file",
+    });
+    if (!ok) return;
+    try {
+      await api.gitDiscard(scope.path, entry.path);
+      // If we were viewing this file's diff, tear it down — there's
+      // nothing to diff against once the file is back at HEAD (or
+      // gone). The next select() rebuilds the view as needed.
+      if (selected() === entry.path) {
+        tearDownView();
+        setSelected(null);
+      }
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   // Group entries by stage (x != ' ') vs unstaged.
   const staged = () => entries().filter((e) => e.x !== " " && e.x !== "?");
   const unstaged = () => entries().filter((e) => e.y !== " " || e.x === "?");
@@ -192,9 +239,11 @@ export default function ChangesPanel() {
           {/* File list */}
           <div class="border-r border-border overflow-y-auto">
             <Section title="Staged" items={staged()} statusLabel={statusLabel}
-              selected={selected()} onSelect={(p) => void openDiff(p)} />
+              selected={selected()} onSelect={(p) => void openDiff(p)}
+              onDiscard={(e, ev) => void discardFile(e, ev)} />
             <Section title="Unstaged" items={unstaged()} statusLabel={statusLabel}
-              selected={selected()} onSelect={(p) => void openDiff(p)} />
+              selected={selected()} onSelect={(p) => void openDiff(p)}
+              onDiscard={(e, ev) => void discardFile(e, ev)} />
             <Show when={!loading() && entries().length === 0}>
               <p
                 class="text-center text-[12.5px] text-fg-subtle py-6 px-3"
@@ -225,6 +274,10 @@ interface SectionProps {
   selected: string | null;
   statusLabel: (e: GitStatusEntry) => string;
   onSelect: (path: string) => void;
+  /** Per-row discard handler. Receives the entry + the mouse event
+   *  (the button stops propagation so the row's onSelect doesn't also
+   *  fire when the user clicks the discard icon). */
+  onDiscard: (entry: GitStatusEntry, ev: MouseEvent) => void;
 }
 
 function Section(props: SectionProps) {
@@ -237,10 +290,10 @@ function Section(props: SectionProps) {
         <ul>
           <For each={props.items}>
             {(e) => (
-              <li>
+              <li class="group relative">
                 <button
                   type="button"
-                  class="w-full flex items-center gap-2 px-3 py-1 text-left hover:bg-bg-2 text-[12.5px] font-mono"
+                  class="w-full flex items-center gap-2 px-3 py-1 pr-8 text-left hover:bg-bg-2 text-[12.5px] font-mono"
                   classList={{ "!bg-accent-soft": props.selected === e.path }}
                   onClick={() => props.onSelect(e.path)}
                   data-testid={`changes-row-${e.path}`}
@@ -251,11 +304,47 @@ function Section(props: SectionProps) {
                   </span>
                   <span class="truncate">{e.path}</span>
                 </button>
+                {/* Per-row discard icon. Reveals on hover so the
+                    file list stays clean; absolutely positioned so it
+                    overlays the row's right edge without taking flex
+                    width from the path label. The button is OUTSIDE
+                    the row button to avoid nested-button semantics. */}
+                <button
+                  type="button"
+                  class="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 rounded text-fg-subtle hover:text-danger hover:bg-bg-2"
+                  onClick={(ev) => props.onDiscard(e, ev)}
+                  aria-label={
+                    e.untracked
+                      ? `Delete untracked file ${e.path}`
+                      : `Discard changes in ${e.path}`
+                  }
+                  title={e.untracked ? "Delete untracked file" : "Discard changes"}
+                  data-testid={`changes-discard-${e.path}`}
+                >
+                  <DiscardIcon />
+                </button>
               </li>
             )}
           </For>
         </ul>
       </div>
     </Show>
+  );
+}
+
+/** Lucide-style "undo" / counter-clockwise arrow. Matches VSCode's
+ *  Discard glyph closely enough to read without a label. Em-sized so
+ *  it scales with --ag-font-size. */
+function DiscardIcon() {
+  return (
+    <svg width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M3 7v6h6M3.51 15a9 9 0 1 0 2.13-9.36L3 8"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
   );
 }

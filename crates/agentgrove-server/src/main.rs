@@ -41,6 +41,19 @@ async fn main() -> Result<()> {
     }
 
     let state = AppState::new(state_dir.clone(), pool);
+
+    // Best-effort recovery: rewrite worktree rows that were left in
+    // a transient lifecycle state (`creating`, `pre_script`,
+    // `removing`) by a previous run of the server that didn't shut
+    // down cleanly. Without this the FE would keep showing stale
+    // "removing" pills forever. Errors are logged but non-fatal —
+    // the server still starts so the user can investigate.
+    match state.worktrees.recover_stale_lifecycle().await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(rows = n, "recovered stale worktree lifecycle rows"),
+        Err(e) => tracing::warn!(error = %e, "worktree lifecycle recovery failed"),
+    }
+
     let app = build_router(state);
 
     let addr = SocketAddr::new(bind_addr, port);

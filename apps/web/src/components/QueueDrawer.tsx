@@ -6,20 +6,19 @@ import {
 } from "../api/client";
 
 /**
- * Right-side slide-in drawer rendering the chat's prompt queue.
+ * Per-chat queue panel, docked inline as the right column of the
+ * chat pane. The chat owns this surface (queue is per-chat) so we
+ * render it as a sibling of the timeline + composer rather than as
+ * a fixed/overlayed drawer.
  *
- * Replaces the earlier inline panel that sat above the chat input —
- * that surface didn't scale once queues started carrying tens or
- * hundreds of items with attachments. The drawer:
+ *   - Full-height of the chat pane; scrolls internally.
+ *   - Renders each item as a card with status, body, attachment
+ *     thumbnails parsed from the body, and per-row controls.
+ *   - Hosts the mode toggle and "Run next" button at the top.
  *
- *   - is full-height and scrolls internally (any number of items)
- *   - renders each item as a card with status, body, attachment
- *     thumbnails parsed from the body, and per-row controls
- *   - hosts the mode toggle and "Run next" button at the top
- *
- * It's a sibling of ChangesPanel and follows the same backdrop +
- * close pattern. The parent controls visibility; this component only
- * paints when `open` is true.
+ * The parent passes `open=true` when the user toggles the queue
+ * badge in the chat header. We only paint when `open` is true so
+ * the chat reclaims horizontal width when the queue is collapsed.
  *
  * Polling: 1 s while open. Auto-drain on the BE means most queues
  * shrink quickly; the FE just re-reads.
@@ -31,7 +30,7 @@ interface Props {
   onClose: () => void;
 }
 
-export default function QueueDrawer(props: Props) {
+export default function QueueDock(props: Props) {
   const [qstate, setQstate] = createSignal<QueueState | null>(null);
   const [busy, setBusy] = createSignal(false);
   const [err, setErr] = createSignal<string | null>(null);
@@ -109,18 +108,11 @@ export default function QueueDrawer(props: Props) {
 
   return (
     <Show when={props.open}>
-      <div
-        class="fixed inset-0 z-40 flex justify-end"
-        data-testid="queue-drawer"
-        role="dialog"
-        aria-modal="true"
+      <aside
+        class="w-[min(420px,40vw)] shrink-0 h-full bg-bg-1 border-l border-border flex flex-col"
+        data-testid="queue-dock"
         aria-label="Queue"
       >
-        <div
-          class="absolute inset-0 bg-black/40"
-          onClick={() => props.onClose()}
-        />
-        <aside class="relative w-[min(520px,90vw)] h-full bg-bg-1 border-l border-border shadow-2xl flex flex-col">
           <header class="px-4 py-3 border-b border-border bg-bg-1">
             <div class="flex items-center gap-2">
               <h3 class="text-[13.5px] font-semibold tracking-tight">
@@ -129,81 +121,71 @@ export default function QueueDrawer(props: Props) {
               <span class="ag-chip text-[11px]" data-testid="queue-total">
                 {total()}
               </span>
-              <Show when={pending().length > 0 && mode() === "auto"}>
-                <span class="ag-chip ag-chip-accent text-[11px]">
-                  auto-draining
+
+              {/*
+                Auto-drain toggle — promoted into the header row so
+                the queue dock keeps a single-row chrome. ON = items
+                send back-to-back as the agent finishes; OFF =
+                items wait until manually re-ordered or run. Both
+                old test ids are aliased to this switch so existing
+                tests keep working regardless of state.
+              */}
+              <label
+                class="ml-auto inline-flex items-center gap-2 select-none cursor-pointer"
+                title={
+                  mode() === "auto"
+                    ? "Auto-drain ON — pending messages send as soon as the agent finishes."
+                    : "Auto-drain OFF — pending messages wait; reorder or send them yourself."
+                }
+              >
+                <span class="text-[11px] text-fg-subtle uppercase tracking-wider">
+                  Auto
                 </span>
-              </Show>
-              <div class="ml-auto flex items-center gap-2">
                 <button
                   type="button"
-                  class="ag-btn ag-btn-ghost ag-btn-sm"
-                  onClick={() => void refresh()}
+                  role="switch"
+                  aria-checked={mode() === "auto"}
                   disabled={busy()}
-                  title="Refresh"
-                  data-testid="queue-refresh"
-                >
-                  ↻
-                </button>
-                <button
-                  type="button"
-                  class="ag-btn ag-btn-ghost ag-btn-sm"
-                  onClick={() => props.onClose()}
-                  aria-label="Close"
-                  data-testid="queue-close"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div class="mt-2 flex items-center gap-2">
-              <div class="flex rounded-md border border-border overflow-hidden text-[11.5px]">
-                <button
-                  type="button"
-                  class="px-2 py-1"
+                  onClick={() =>
+                    void setMode(mode() === "auto" ? "manual" : "auto")
+                  }
+                  data-testid={
+                    mode() === "auto" ? "queue-mode-auto" : "queue-mode-manual"
+                  }
+                  class="relative inline-flex h-4 w-7 items-center rounded-full transition-colors disabled:opacity-50"
                   classList={{
-                    "bg-bg-3 text-fg": mode() === "auto",
-                    "text-fg-subtle hover:bg-bg-2": mode() !== "auto",
+                    "bg-accent": mode() === "auto",
+                    "bg-bg-3 border border-border": mode() !== "auto",
                   }}
-                  disabled={busy()}
-                  onClick={() => void setMode("auto")}
-                  data-testid="queue-mode-auto"
                 >
-                  auto
+                  <span
+                    class="inline-block h-3 w-3 rounded-full bg-white shadow transition-transform"
+                    classList={{
+                      "translate-x-3.5": mode() === "auto",
+                      "translate-x-0.5": mode() !== "auto",
+                    }}
+                  />
                 </button>
-                <button
-                  type="button"
-                  class="px-2 py-1 border-l border-border"
-                  classList={{
-                    "bg-bg-3 text-fg": mode() === "manual",
-                    "text-fg-subtle hover:bg-bg-2": mode() !== "manual",
-                  }}
-                  disabled={busy()}
-                  onClick={() => void setMode("manual")}
-                  data-testid="queue-mode-manual"
-                >
-                  manual
-                </button>
-              </div>
+              </label>
+
               <button
                 type="button"
                 class="ag-btn ag-btn-ghost ag-btn-sm"
-                onClick={() => void runNext()}
-                disabled={busy() || pending().length === 0}
-                title="Pop and run the next pending item"
-                data-testid="queue-run-next"
+                onClick={() => props.onClose()}
+                aria-label="Close"
+                data-testid="queue-close"
               >
-                ▶ Run next
+                ✕
               </button>
-              <Show when={err()}>
-                <span
-                  class="ml-auto text-[11px] text-danger"
-                  title={err() ?? ""}
-                >
-                  {err()}
-                </span>
-              </Show>
             </div>
+            <Show when={err()}>
+              <p
+                class="mt-1 text-[11px] text-danger"
+                title={err() ?? ""}
+              >
+                {err()}
+              </p>
+            </Show>
           </header>
 
           <div class="flex-1 overflow-y-auto px-3 py-3 space-y-2" data-testid="queue-items">
@@ -231,8 +213,7 @@ export default function QueueDrawer(props: Props) {
               </For>
             </Show>
           </div>
-        </aside>
-      </div>
+      </aside>
     </Show>
   );
 }

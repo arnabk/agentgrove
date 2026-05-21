@@ -5,7 +5,7 @@ use agentgrove_git as git;
 use agentgrove_scripts::{run_script, ScriptEvent, Shell};
 use agentgrove_store::{NewWorktree, WorktreeError, WorktreeRecord, WorktreeStatus};
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -133,6 +133,21 @@ pub async fn create(
             .join(&safe_branch),
     };
 
+    // Resolve the effective pre-script. Project setting wins as the
+    // default; the per-worktree dialog override (if any) takes
+    // precedence so power-users can still run a one-off command for
+    // a specific branch (e.g. trying a different package manager).
+    // Whitespace-only overrides collapse to "use the project default"
+    // — matches the FE convention where leaving the field blank means
+    // "inherit".
+    let effective_pre_script: Option<String> = body
+        .pre_script
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .or_else(|| project.pre_worktree_script.clone());
+
     // Insert metadata row first so we have an id to stream logs
     // against. The status is `creating` for the FE to render.
     let record = state
@@ -142,7 +157,7 @@ pub async fn create(
             branch: body.branch.clone(),
             base_ref: body.base_ref.clone(),
             path: wt_path.clone(),
-            pre_script: body.pre_script.clone(),
+            pre_script: effective_pre_script.clone(),
             post_script: body.post_script.clone(),
         })
         .await
@@ -156,7 +171,7 @@ pub async fn create(
     let topic = format!("worktree:{}:script", record.id);
     let dto: WorktreeDto = record.clone().into();
     let state_for_task = state.clone();
-    let pre_script = body.pre_script.clone();
+    let pre_script = effective_pre_script.clone();
     let branch = body.branch.clone();
     let base_ref = body.base_ref.clone();
     let wt_id = record.id.clone();
@@ -268,9 +283,24 @@ pub async fn create(
     Ok(Json(dto))
 }
 
+/// Query params accepted by `DELETE /api/projects/:id/worktrees/:wid`.
+///
+/// `delete_branch=true` extends the remove flow to also drop the local
+/// branch (`git branch -D <branch>`) after the worktree directory is
+/// removed. This is the "single shot" UX option requested by the
+/// product: the user no longer has to follow the worktree removal
+/// with a manual branch cleanup. Default is `false` so existing
+/// callers keep their current semantics.
+#[derive(Debug, Deserialize, Default)]
+pub struct DeleteQuery {
+    #[serde(default)]
+    pub delete_branch: bool,
+}
+
 pub async fn delete(
     State(state): State<AppState>,
     Path((project_id, worktree_id)): Path<(String, String)>,
+    Query(q): Query<DeleteQuery>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let project = state
         .projects
@@ -310,12 +340,142 @@ pub async fn delete(
             format!("git worktree remove failed: {e}"),
         ));
     }
+
+    // Optional follow-up: drop the local branch in the same call so
+    // the user doesn't need a second action. We deliberately run this
+    // AFTER `git worktree remove` — git refuses to delete a branch
+    // that's still checked out by any worktree. Failure here does NOT
+    // roll back the worktree removal: the worktree is gone either way,
+    // and surfacing the branch-delete error gives the user a clear
+    // signal of what (if anything) is left to clean up manually.
+    if q.delete_branch {
+        if let Err(e) = git::delete_branch(&project.root, &wt.branch).await {
+            // Mark the metadata row deleted first so the UI doesn't
+            // keep showing a stale "removing" entry indefinitely.
+            let _ = state.worktrees.delete(&worktree_id).await;
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("worktree removed, but git branch -D failed: {e}"),
+            ));
+        }
+    }
+
     state
         .worktrees
         .delete(&worktree_id)
         .await
         .map_err(map_wt_err)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Body for `PATCH /api/projects/:id/worktrees/:wid`.
+///
+/// Only `branch` is supported today — that's the rename operation. The
+/// struct is shaped as a partial-update map so we can grow it (e.g.
+/// pre-script edits, post-script edits) without breaking older
+/// clients.
+#[derive(Debug, Deserialize)]
+pub struct UpdateWorktreeBody {
+    /// New branch name. When present and different from the current
+    /// branch, the worktree's branch is renamed both in git and in
+    /// our metadata row.
+    pub branch: Option<String>,
+}
+
+/// Rename a worktree's branch (and update the stored metadata row).
+///
+/// Per the product decision the on-disk worktree directory is NOT
+/// moved — only the branch label changes. This keeps the path stable
+/// across renames and avoids the failure modes of `git worktree move`
+/// (which refuses if the directory is busy / has unstaged changes).
+///
+/// 409 is returned when the new name collides with any live or
+/// soft-deleted worktree's branch — mirroring the suggester logic the
+/// FE already uses on creation. The FE can react by showing the
+/// `Suggest` button next to the rename input.
+pub async fn update(
+    State(state): State<AppState>,
+    Path((project_id, worktree_id)): Path<(String, String)>,
+    Json(body): Json<UpdateWorktreeBody>,
+) -> Result<Json<WorktreeDto>, (StatusCode, String)> {
+    let project = state
+        .projects
+        .get(&project_id)
+        .await
+        .map_err(|_| (StatusCode::NOT_FOUND, "project not found".into()))?;
+    let wt = state
+        .worktrees
+        .get(&worktree_id)
+        .await
+        .map_err(map_wt_err)?;
+    if wt.project_id != project_id {
+        return Err((StatusCode::BAD_REQUEST, "worktree not in project".into()));
+    }
+
+    let Some(raw) = body.branch.as_deref() else {
+        // No-op patch — return the current row unchanged. This is
+        // benign and saves clients from having to special-case empty
+        // payloads.
+        return Ok(Json(wt.into()));
+    };
+    let new_branch = raw.trim().to_owned();
+    if new_branch.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "branch must not be empty".into()));
+    }
+    if new_branch == wt.branch {
+        // Idempotent no-op.
+        return Ok(Json(wt.into()));
+    }
+
+    // Collision check — live worktrees in this project + soft-deleted
+    // rows everywhere (because restoring a history entry would clash
+    // with a re-used name). We don't have to scan git's branch list
+    // separately: any branch git knows about would have come from one
+    // of our rows, OR was created outside AgentGrove — in which case
+    // `git branch -m` will refuse below and we'll surface that as a
+    // 409 too.
+    let live = state
+        .worktrees
+        .list_for_project(&project_id)
+        .await
+        .map_err(map_wt_err)?;
+    let history = state
+        .worktrees
+        .list_removed_all()
+        .await
+        .map_err(map_wt_err)?;
+    if live
+        .iter()
+        .any(|w| w.id != worktree_id && w.branch == new_branch)
+        || history.iter().any(|w| w.branch == new_branch)
+    {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("a worktree on '{new_branch}' already exists"),
+        ));
+    }
+
+    // Rename in git first — if git refuses (e.g. the branch name
+    // contains a reserved character, or git knows of a collision we
+    // didn't catch above), we want to fail BEFORE mutating our row.
+    if let Err(e) = git::rename_branch(&project.root, &wt.branch, &new_branch).await {
+        // Most failures from `git branch -m` indicate a name conflict
+        // (existing branch). Map those to 409; leave the rest as 500.
+        let status = if matches!(&e, git::GitError::NonZero { stderr, .. } if stderr.contains("already exists"))
+        {
+            StatusCode::CONFLICT
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        };
+        return Err((status, format!("git branch -m failed: {e}")));
+    }
+
+    let updated = state
+        .worktrees
+        .rename(&worktree_id, &new_branch)
+        .await
+        .map_err(map_wt_err)?;
+    Ok(Json(updated.into()))
 }
 
 /// Query params for `GET /api/worktrees/history`.

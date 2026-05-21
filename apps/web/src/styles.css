@@ -65,11 +65,32 @@
 
 /* ---------- Base ---------- */
 
+:root {
+  /* Hard minimum viewport width the layout is designed for. Below this
+     the LeftRail + main pane + chat/editor tabs start to overlap and
+     truncate awkwardly, so instead of allowing the UI to degrade we
+     force the viewport to scroll horizontally. Tune here in one place. */
+  --ag-min-app-width: 1024px;
+}
+
 html,
 body,
 #root {
   height: 100%;
   margin: 0;
+}
+
+/* Enforce the minimum app width on the viewport. When the user shrinks
+   the window narrower than this, the browser shows a horizontal
+   scrollbar instead of letting the layout collapse. We set min-width on
+   #root (not body) so body's fixed maze background still covers the
+   full viewport; #root carries the actual flexbox shell. */
+#root {
+  min-width: var(--ag-min-app-width);
+}
+
+body {
+  overflow-x: auto;
 }
 
 html {
@@ -395,10 +416,23 @@ textarea::placeholder {
 }
 .ag-select-menu {
   position: absolute;
-  top: calc(100% + 6px);
   left: 0;
-  right: 0;
-  z-index: 50;
+  /* Grow to fit the longest option but never narrower than the
+     trigger. The earlier `right: 0` clamp forced every option to
+     wrap inside skinny triggers (composer model picker) — switching
+     to `min-width: 100%` + `width: max-content` lets the menu spill
+     to the right of the trigger when it needs the room. */
+  min-width: 100%;
+  width: max-content;
+  /* Hard ceiling so a runaway label can't push the menu past the
+     viewport. Combined with the per-option `nowrap` rule this gives
+     each row enough room without letting the menu turn into a
+     screen-wide bar. */
+  max-width: min(540px, calc(100vw - 24px));
+  /* Lifted to clear the chat composer (z-30) + queue dock + slash
+     menu (z-20). Anything above 80 starts colliding with modal
+     dialogs (z-50 each), so leave headroom. */
+  z-index: 60;
   max-height: 280px;
   overflow-y: auto;
   background-color: var(--ag-bg-1);
@@ -410,6 +444,18 @@ textarea::placeholder {
   padding: 4px;
   animation: ag-pop 120ms ease-out;
   transform-origin: top center;
+}
+/* Default (or explicit) bottom placement: drop below the trigger. */
+.ag-select-menu[data-placement="bottom"],
+.ag-select-menu:not([data-placement]) {
+  top: calc(100% + 6px);
+}
+/* Top placement: open ABOVE the trigger. Used by composer-row
+   dropdowns so the menu doesn't clip against the bottom of the
+   chat pane or get hidden behind it. */
+.ag-select-menu[data-placement="top"] {
+  bottom: calc(100% + 6px);
+  transform-origin: bottom center;
 }
 @keyframes ag-pop {
   from {
@@ -424,13 +470,19 @@ textarea::placeholder {
 .ag-select-option {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
+  gap: 12px;
+  padding: 8px 12px;
   font-size: 13.5px;
   color: var(--ag-fg);
   border-radius: 6px;
   cursor: pointer;
   user-select: none;
+  /* Options must stay on one line — wrapping at narrow trigger
+     widths (composer model picker is only 11rem) made labels like
+     `claude-sonnet-4-5-20250929 sonnet 4.5` break across two lines
+     and bunched the whole menu together. The menu itself grows to
+     fit the longest option via `width: max-content` below. */
+  white-space: nowrap;
 }
 .ag-select-option:hover,
 .ag-select-option[data-active="true"] {

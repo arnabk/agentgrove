@@ -291,6 +291,102 @@ impl WorktreeRepo {
             .await?;
         Ok(res.rows_affected() == 1)
     }
+
+    /// Rename a worktree's branch label. This is a metadata-only
+    /// update: the caller is responsible for invoking
+    /// `git branch -m` against the on-disk repo. The worktree's path
+    /// is left untouched (we deliberately do not move the directory —
+    /// keeping the on-disk layout stable across renames matches the
+    /// "rename branch only" policy chosen by the product).
+    ///
+    /// Returns the updated record on success.
+    ///
+    /// # Errors
+    ///
+    /// - [`WorktreeError::EmptyBranch`] if `new_branch` is blank.
+    /// - [`WorktreeError::NotFound`] if no row matched `id`.
+    /// - [`WorktreeError::Db`] for any underlying sqlx failure.
+    /// Reset lifecycle rows that are stuck in a transient state from a
+    /// previous run of the server.
+    ///
+    /// Statuses like `creating` / `pre_script` / `removing` are only
+    /// valid mid-task; if the server was killed (or panicked) before
+    /// the task finished, those rows stay in the transient state
+    /// forever — there's no resumable task on disk to flip them. We
+    /// rewrite them as follows:
+    ///
+    ///   - `creating` / `pre_script` → `failed`  (the create flow
+    ///     never reached `ready`; surfacing the failure is more
+    ///     honest than silently pretending the worktree is fine.
+    ///     The user can delete + retry.)
+    ///   - `removing` → `ready`  (the delete flow never finished;
+    ///     the row is back to its pre-delete state. The user can
+    ///     re-click Remove to retry.)
+    ///
+    /// Returns the number of rows touched so the caller can log it.
+    /// Idempotent: a second call after recovery is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WorktreeError::Db`] for any underlying sqlx failure.
+    pub async fn recover_stale_lifecycle(&self) -> Result<u64, WorktreeError> {
+        let to_failed = sqlx::query(
+            "UPDATE worktrees \
+             SET status = 'failed', updated_at = ?1 \
+             WHERE removed_at IS NULL AND status IN ('creating','pre_script')",
+        )
+        .bind(Utc::now().timestamp_millis())
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+
+        let to_ready = sqlx::query(
+            "UPDATE worktrees \
+             SET status = 'ready', updated_at = ?1 \
+             WHERE removed_at IS NULL AND status = 'removing'",
+        )
+        .bind(Utc::now().timestamp_millis())
+        .execute(&self.pool)
+        .await?
+        .rows_affected();
+
+        Ok(to_failed + to_ready)
+    }
+
+    /// Rename a worktree's branch label. Metadata-only — the caller
+    /// is responsible for invoking `git branch -m` against the
+    /// on-disk repo. The worktree's path is left untouched per the
+    /// "rename branch only" policy.
+    ///
+    /// Returns the updated record on success.
+    ///
+    /// # Errors
+    ///
+    /// - [`WorktreeError::EmptyBranch`] if `new_branch` is blank.
+    /// - [`WorktreeError::NotFound`] if no row matched `id`.
+    /// - [`WorktreeError::Db`] for any underlying sqlx failure.
+    pub async fn rename(
+        &self,
+        id: &str,
+        new_branch: &str,
+    ) -> Result<WorktreeRecord, WorktreeError> {
+        if new_branch.trim().is_empty() {
+            return Err(WorktreeError::EmptyBranch);
+        }
+        let now_ms = Utc::now().timestamp_millis();
+        let res = sqlx::query(
+            "UPDATE worktrees SET branch = ?1, updated_at = ?2 WHERE id = ?3",
+        )
+        .bind(new_branch)
+        .bind(now_ms)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        if res.rows_affected() == 0 {
+            return Err(WorktreeError::NotFound(id.to_owned()));
+        }
+        self.get(id).await
+    }
 }
 
 #[allow(clippy::type_complexity)]

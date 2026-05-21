@@ -38,6 +38,44 @@ const INSTALL_HINT: &str = "https://docs.claude.com/en/docs/claude-code/quicksta
 /// resolves to the current Sonnet release.
 const DEFAULT_MODEL: &str = "sonnet";
 
+/// Models Claude's CLI accepts, in dropdown display order.
+///
+/// Two tiers, deliberately in this order so the picker reads from
+/// "easy default" → "specific pin":
+///
+///   1. Family aliases (`opus`, `sonnet`, `haiku`). Each one resolves
+///      to whatever Anthropic currently routes that family to — the
+///      dropdown never ages out for the common case.
+///   2. Dated releases the CLI accepts today. We list these so users
+///      who need reproducibility (benchmarks, regression tests,
+///      sticky behaviour across releases) can pin an exact version
+///      without leaving the dropdown for the per-chat free-form
+///      input.
+///
+/// Adding new releases here is the only edit required when Anthropic
+/// ships a new model — no other code changes hook off this list.
+const MODELS: &[&str] = &[
+    // Tier 1: family aliases — pick this for "I just want a good
+    // current default" without thinking about release tags.
+    "sonnet",
+    "opus",
+    "haiku",
+    // Tier 2: specific dated releases, newest first within each
+    // family. Keep families grouped so the dropdown reads top-down.
+    // Opus 4.x family.
+    "claude-opus-4-5-20251101",
+    "claude-opus-4-1-20250805",
+    "claude-opus-4-20250514",
+    // Sonnet 4.x family.
+    "claude-sonnet-4-5-20250929",
+    "claude-sonnet-4-20250514",
+    // Haiku 4.x family.
+    "claude-haiku-4-5-20251001",
+    // Older 3.x lines users sometimes still pin to.
+    "claude-3-7-sonnet-20250219",
+    "claude-3-5-haiku-20241022",
+];
+
 /// Concrete [`AgentProvider`] backed by the `claude` CLI.
 #[derive(Debug, Default, Clone)]
 pub struct ClaudeProvider;
@@ -88,6 +126,7 @@ impl AgentProvider for ClaudeProvider {
             path,
             version,
             default_model: DEFAULT_MODEL,
+            models: MODELS,
             supports_resume: true,
         }
     }

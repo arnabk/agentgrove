@@ -33,6 +33,10 @@ pub struct ProjectDto {
     pub current_branch: Option<String>,
     /// Configured git remote names.
     pub remotes: Vec<String>,
+    /// Project-level pre-worktree script. Inherited by every new
+    /// worktree of this project (unless the create call supplies an
+    /// explicit override).
+    pub pre_worktree_script: Option<String>,
 }
 
 async fn record_to_dto(r: ProjectRecord) -> ProjectDto {
@@ -47,6 +51,7 @@ async fn record_to_dto(r: ProjectRecord) -> ProjectDto {
         has_remote: info.has_remote,
         current_branch: info.current_branch,
         remotes: info.remotes,
+        pre_worktree_script: r.pre_worktree_script,
     }
 }
 
@@ -124,4 +129,44 @@ pub async fn delete(
         return Err((StatusCode::NOT_FOUND, format!("project {id} not found")));
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// PATCH a project. Currently only updates the pre-worktree script;
+/// the partial-update shape is intentional so callers won't have to
+/// migrate as we add more mutable fields.
+pub async fn update(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(raw): Json<serde_json::Value>,
+) -> Result<Json<ProjectDto>, (StatusCode, String)> {
+    // Ensure the project exists up front so a no-op patch still 404s
+    // on a bogus id (matches the symmetric behaviour of GET).
+    let current = state.projects.get(&id).await.map_err(map_err)?;
+
+    // Hand-parse so we can distinguish "field absent" from "field set
+    // to empty string". `serde_json::Value::get(key)` returns `None`
+    // only when the key is missing.
+    let obj = raw.as_object();
+    let mut record = current;
+    if let Some(map) = obj {
+        if let Some(v) = map.get("pre_worktree_script") {
+            // Accept either a string (set/clear) or `null` (clear).
+            let new_value: Option<&str> = match v {
+                serde_json::Value::Null => None,
+                serde_json::Value::String(s) => Some(s.as_str()),
+                _ => {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        "pre_worktree_script must be a string or null".into(),
+                    ));
+                }
+            };
+            record = state
+                .projects
+                .update_pre_worktree_script(&id, new_value)
+                .await
+                .map_err(map_err)?;
+        }
+    }
+    Ok(Json(record_to_dto(record).await))
 }

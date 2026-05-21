@@ -135,3 +135,143 @@ async fn create_conflict_on_duplicate_root() {
         .unwrap();
     assert_eq!(r2.status(), 409);
 }
+
+/// PATCH sets, then clears, the project-level pre-worktree script.
+/// Empty string + null both clear; trimmed whitespace is normalised.
+#[tokio::test]
+async fn project_patch_pre_worktree_script_roundtrip() {
+    let h = BeHarness::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let created: Value = h
+        .post_auth("/api/projects")
+        .json(&json!({"name":"p","root": dir.path().to_string_lossy()}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap().to_owned();
+    // Initial: null/missing.
+    assert!(created["pre_worktree_script"].is_null());
+
+    // Set.
+    let set = h
+        .patch(&format!("/api/projects/{id}"))
+        .json(&json!({"pre_worktree_script": "  pnpm install  "}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(set.status(), 200, "body={}", set.text().await.unwrap());
+    let after: Value = h
+        .get_auth(&format!("/api/projects/{id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(after["pre_worktree_script"], "pnpm install");
+
+    // Clear via empty string.
+    let clear = h
+        .patch(&format!("/api/projects/{id}"))
+        .json(&json!({"pre_worktree_script": ""}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(clear.status(), 200);
+    let after2: Value = h
+        .get_auth(&format!("/api/projects/{id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(after2["pre_worktree_script"].is_null());
+
+    // Set again then clear via explicit null.
+    h.patch(&format!("/api/projects/{id}"))
+        .json(&json!({"pre_worktree_script": "echo hi"}))
+        .send()
+        .await
+        .unwrap();
+    let clear_null = h
+        .patch(&format!("/api/projects/{id}"))
+        .json(&json!({"pre_worktree_script": null}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(clear_null.status(), 200);
+    let after3: Value = clear_null.json().await.unwrap();
+    assert!(after3["pre_worktree_script"].is_null());
+}
+
+/// PATCH with an empty body is a no-op (leaves the field unchanged).
+#[tokio::test]
+async fn project_patch_empty_body_is_noop() {
+    let h = BeHarness::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let created: Value = h
+        .post_auth("/api/projects")
+        .json(&json!({"name":"p","root": dir.path().to_string_lossy()}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap().to_owned();
+    h.patch(&format!("/api/projects/{id}"))
+        .json(&json!({"pre_worktree_script": "first-value"}))
+        .send()
+        .await
+        .unwrap();
+    let noop = h
+        .patch(&format!("/api/projects/{id}"))
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(noop.status(), 200);
+    let body: Value = noop.json().await.unwrap();
+    assert_eq!(body["pre_worktree_script"], "first-value");
+}
+
+/// PATCH with a non-string non-null value returns 400.
+#[tokio::test]
+async fn project_patch_rejects_wrong_type() {
+    let h = BeHarness::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let created: Value = h
+        .post_auth("/api/projects")
+        .json(&json!({"name":"p","root": dir.path().to_string_lossy()}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = created["id"].as_str().unwrap().to_owned();
+    let bad = h
+        .patch(&format!("/api/projects/{id}"))
+        .json(&json!({"pre_worktree_script": 42}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), 400);
+}
+
+/// PATCH against an unknown project returns 404.
+#[tokio::test]
+async fn project_patch_unknown_returns_404() {
+    let h = BeHarness::start().await;
+    let res = h
+        .patch("/api/projects/does-not-exist")
+        .json(&json!({"pre_worktree_script": "x"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
