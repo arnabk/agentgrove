@@ -133,7 +133,8 @@ pub async fn create(
             .join(&safe_branch),
     };
 
-    // Insert metadata row first so we can stream logs against it.
+    // Insert metadata row first so we have an id to stream logs
+    // against. The status is `creating` for the FE to render.
     let record = state
         .worktrees
         .create(NewWorktree {
@@ -147,69 +148,124 @@ pub async fn create(
         .await
         .map_err(map_wt_err)?;
 
+    // Hand the actual git+script work to a background task so the
+    // HTTP response can return the row id immediately. The FE
+    // subscribes to `worktree:{id}:script` for live output (LogBus
+    // history replays the prefix so the FE never misses events even
+    // if its WS connects a few ms late).
     let topic = format!("worktree:{}:script", record.id);
-
-    // git worktree add
-    if let Err(e) = git::add_worktree(&project.root, &wt_path, &body.branch, &body.base_ref).await {
-        let _ = state
-            .worktrees
-            .set_status(&record.id, WorktreeStatus::Failed)
-            .await;
-        let msg = format!("git worktree add failed: {e}");
-        state.logbus.publish(
-            &topic,
-            serde_json::json!({"type":"stderr","line": msg}).to_string(),
+    let dto: WorktreeDto = record.clone().into();
+    let state_for_task = state.clone();
+    let pre_script = body.pre_script.clone();
+    let branch = body.branch.clone();
+    let base_ref = body.base_ref.clone();
+    let wt_id = record.id.clone();
+    let project_root = project.root.clone();
+    let wt_path_for_task = wt_path.clone();
+    let topic_for_task = topic.clone();
+    tokio::spawn(async move {
+        // Announce start so the FE renders the console with a header
+        // line.
+        state_for_task.logbus.publish(
+            &topic_for_task,
+            serde_json::json!({"type":"stage","stage":"git_add"}).to_string(),
         );
-        state.logbus.publish(
-            &topic,
-            serde_json::json!({"type":"exit","code": -1}).to_string(),
+        if let Err(e) =
+            git::add_worktree(&project_root, &wt_path_for_task, &branch, &base_ref).await
+        {
+            let _ = state_for_task
+                .worktrees
+                .set_status(&wt_id, WorktreeStatus::Failed)
+                .await;
+            state_for_task.logbus.publish(
+                &topic_for_task,
+                serde_json::json!({"type":"stderr","line": format!("git worktree add failed: {e}")})
+                    .to_string(),
+            );
+            state_for_task.logbus.publish(
+                &topic_for_task,
+                serde_json::json!({"type":"exit","code": -1}).to_string(),
+            );
+            return;
+        }
+        state_for_task.logbus.publish(
+            &topic_for_task,
+            serde_json::json!({"type":"stage","stage":"git_add_done"}).to_string(),
         );
-        return Err((StatusCode::BAD_REQUEST, msg));
-    }
 
-    // Pre-script
-    if let Some(script) = &body.pre_script {
-        let _ = state
-            .worktrees
-            .set_status(&record.id, WorktreeStatus::PreScript)
+        if let Some(script) = pre_script {
+            let _ = state_for_task
+                .worktrees
+                .set_status(&wt_id, WorktreeStatus::PreScript)
+                .await;
+            state_for_task.logbus.publish(
+                &topic_for_task,
+                serde_json::json!({"type":"stage","stage":"pre_script"}).to_string(),
+            );
+            let (tx, mut rx) = mpsc::unbounded_channel::<ScriptEvent>();
+            let bus = state_for_task.logbus.clone();
+            let topic_relay = topic_for_task.clone();
+            tokio::spawn(async move {
+                while let Some(ev) = rx.recv().await {
+                    bus.publish(&topic_relay, serde_json::to_string(&ev).unwrap_or_default());
+                }
+            });
+            let res = run_script(
+                &script,
+                &wt_path_for_task,
+                &Shell::Auto,
+                Duration::from_secs(120),
+                tx,
+            )
             .await;
-        let (tx, mut rx) = mpsc::unbounded_channel::<ScriptEvent>();
-        let bus = state.logbus.clone();
-        let topic_c = topic.clone();
-        tokio::spawn(async move {
-            while let Some(ev) = rx.recv().await {
-                bus.publish(&topic_c, serde_json::to_string(&ev).unwrap_or_default());
-            }
-        });
-        let res = run_script(script, &wt_path, &Shell::Auto, Duration::from_secs(120), tx).await;
-        match res {
-            Ok(0) => {}
-            Ok(code) => {
-                let _ = state
-                    .worktrees
-                    .set_status(&record.id, WorktreeStatus::Failed)
-                    .await;
-                return Err((StatusCode::BAD_REQUEST, format!("pre-script exited {code}")));
-            }
-            Err(e) => {
-                let _ = state
-                    .worktrees
-                    .set_status(&record.id, WorktreeStatus::Failed)
-                    .await;
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("pre-script error: {e}"),
-                ));
+            match res {
+                Ok(0) => {}
+                Ok(code) => {
+                    let _ = state_for_task
+                        .worktrees
+                        .set_status(&wt_id, WorktreeStatus::Failed)
+                        .await;
+                    state_for_task.logbus.publish(
+                        &topic_for_task,
+                        serde_json::json!({"type":"stderr","line": format!("pre-script exited {code}")})
+                            .to_string(),
+                    );
+                    state_for_task.logbus.publish(
+                        &topic_for_task,
+                        serde_json::json!({"type":"exit","code": code}).to_string(),
+                    );
+                    return;
+                }
+                Err(e) => {
+                    let _ = state_for_task
+                        .worktrees
+                        .set_status(&wt_id, WorktreeStatus::Failed)
+                        .await;
+                    state_for_task.logbus.publish(
+                        &topic_for_task,
+                        serde_json::json!({"type":"stderr","line": format!("pre-script error: {e}")})
+                            .to_string(),
+                    );
+                    state_for_task.logbus.publish(
+                        &topic_for_task,
+                        serde_json::json!({"type":"exit","code": -1}).to_string(),
+                    );
+                    return;
+                }
             }
         }
-    }
 
-    let _ = state
-        .worktrees
-        .set_status(&record.id, WorktreeStatus::Ready)
-        .await;
-    let fresh = state.worktrees.get(&record.id).await.map_err(map_wt_err)?;
-    Ok(Json(fresh.into()))
+        let _ = state_for_task
+            .worktrees
+            .set_status(&wt_id, WorktreeStatus::Ready)
+            .await;
+        state_for_task.logbus.publish(
+            &topic_for_task,
+            serde_json::json!({"type":"stage","stage":"ready"}).to_string(),
+        );
+    });
+
+    Ok(Json(dto))
 }
 
 pub async fn delete(

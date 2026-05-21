@@ -9,6 +9,36 @@ async fn make_repo() -> tempfile::TempDir {
     dir
 }
 
+/// Poll the project's worktree list until the entry with `wt_id`
+/// reaches a terminal status (`ready` or `failed`). Times out after
+/// 5 s so tests fail fast if the BE is stuck.
+async fn wait_for_terminal_status(
+    h: &BeHarness,
+    project_id: &str,
+    wt_id: &str,
+) -> String {
+    for _ in 0..50 {
+        let arr: Value = h
+            .get_auth(&format!("/api/projects/{project_id}/worktrees"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if let Some(items) = arr.as_array() {
+            if let Some(item) = items.iter().find(|i| i["id"] == wt_id) {
+                let status = item["status"].as_str().unwrap_or("").to_string();
+                if status == "ready" || status == "failed" {
+                    return status;
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("worktree {wt_id} did not reach terminal status in time");
+}
+
 async fn make_project(h: &BeHarness) -> (tempfile::TempDir, String) {
     let dir = make_repo().await;
     let res = h
@@ -34,6 +64,12 @@ async fn worktree_create_list_delete() {
         .await
         .unwrap();
     assert_eq!(res.status(), 200, "body={}", res.text().await.unwrap());
+    let created: Value = res.json().await.unwrap();
+    let wt_id = created["id"].as_str().unwrap().to_owned();
+    // POST returns immediately while git work happens in the
+    // background. Poll until the entry reaches a terminal status.
+    let status = wait_for_terminal_status(&h, &project_id, &wt_id).await;
+    assert_eq!(status, "ready");
 
     let list = h
         .get_auth(&format!("/api/projects/{project_id}/worktrees"))
@@ -42,7 +78,6 @@ async fn worktree_create_list_delete() {
         .unwrap();
     let arr: Value = list.json().await.unwrap();
     assert_eq!(arr.as_array().unwrap().len(), 1);
-    let wt_id = arr[0]["id"].as_str().unwrap().to_owned();
     assert_eq!(arr[0]["status"], "ready");
 
     let del = h
@@ -69,13 +104,21 @@ async fn worktree_pre_script_runs() {
         .await
         .unwrap();
     assert_eq!(res.status(), 200);
+    let wt: Value = res.json().await.unwrap();
+    let wt_id = wt["id"].as_str().unwrap().to_owned();
+    let status = wait_for_terminal_status(&h, &project_id, &wt_id).await;
+    assert_eq!(status, "ready");
 }
 
 #[tokio::test]
-async fn worktree_pre_script_failure_returns_400() {
+async fn worktree_pre_script_failure_marks_status_failed() {
     let h = BeHarness::start().await;
     let (_dir, project_id) = make_project(&h).await;
 
+    // POST returns 200 immediately even when the pre-script will
+    // fail — the background task surfaces the failure by flipping
+    // the worktree's status to `failed` and publishing stderr/exit
+    // events on the LogBus topic.
     let res = h
         .post_auth(&format!("/api/projects/{project_id}/worktrees"))
         .json(&json!({
@@ -86,7 +129,11 @@ async fn worktree_pre_script_failure_returns_400() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 400);
+    assert_eq!(res.status(), 200);
+    let wt: Value = res.json().await.unwrap();
+    let wt_id = wt["id"].as_str().unwrap().to_owned();
+    let status = wait_for_terminal_status(&h, &project_id, &wt_id).await;
+    assert_eq!(status, "failed");
 }
 
 #[tokio::test]
@@ -115,6 +162,10 @@ async fn worktree_history_lists_and_filters_after_delete() {
     assert_eq!(res_a.status(), 200);
     let wt_a: Value = res_a.json().await.unwrap();
     let id_a = wt_a["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        wait_for_terminal_status(&h, &project_id, &id_a).await,
+        "ready"
+    );
 
     let res_b = h
         .post_auth(&format!("/api/projects/{project_id}/worktrees"))
@@ -125,6 +176,10 @@ async fn worktree_history_lists_and_filters_after_delete() {
     assert_eq!(res_b.status(), 200);
     let wt_b: Value = res_b.json().await.unwrap();
     let id_b = wt_b["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        wait_for_terminal_status(&h, &project_id, &id_b).await,
+        "ready"
+    );
 
     // Soft-delete both.
     for id in [&id_a, &id_b] {
@@ -200,6 +255,13 @@ async fn worktree_restore_clears_removed_at() {
     assert_eq!(res.status(), 200);
     let wt: Value = res.json().await.unwrap();
     let id = wt["id"].as_str().unwrap().to_owned();
+    // Wait for the background creation task to finish before
+    // soft-deleting so the worktree's `git worktree remove` can run
+    // cleanly.
+    assert_eq!(
+        wait_for_terminal_status(&h, &project_id, &id).await,
+        "ready"
+    );
 
     let del = h
         .delete_auth(&format!("/api/projects/{project_id}/worktrees/{id}"))
