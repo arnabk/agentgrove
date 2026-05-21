@@ -1293,64 +1293,157 @@ function autoResizeTextarea(el: HTMLTextAreaElement | null | undefined): void {
  *   - Typing `-` at the very start of a line auto-appends a space
  *     so users don't have to think about the formatting.
  */
+/**
+ * Keystroke autoformatter for the chat input. Acts as a tiny
+ * markdown-aware editor without giving up the plain-text textarea
+ * (so paste/upload/queue logic stays simple). Behaviours:
+ *
+ *   - **Enter** continues a markdown list / blockquote when the
+ *     current line starts with `- `, `* `, `+ `, `N. `, or `> `.
+ *     - Empty continuation line strips the prefix and submits
+ *       (standard "end the list" gesture).
+ *     - Numeric lists auto-increment.
+ *   - **Space** inserts a trailing space when the user has just
+ *     typed `-`, `*`, `>`, or `N.` at a line start.
+ *   - **`** (single backtick) — typing three backticks at a line
+ *     start opens a fenced code block with the closing fence on
+ *     the next line and the caret between them.
+ *   - **Tab** inside a fenced code block inserts two spaces
+ *     (Shift+Tab outdents by two if present).
+ */
 function onChatInputKeyDown(
   e: KeyboardEvent,
   submit: () => void,
 ): void {
   const ta = e.currentTarget as HTMLTextAreaElement;
+
+  // ---- Enter handling: list / blockquote continuation + submit ----
   if (e.key === "Enter" && !e.shiftKey) {
-    // Inspect the current line. If it starts with a `- ` prefix
-    // (markdown bullet), continue the list instead of submitting.
     const { selectionStart } = ta;
     const before = ta.value.slice(0, selectionStart);
     const lineStart = before.lastIndexOf("\n") + 1;
     const lineSoFar = before.slice(lineStart);
-    const bullet = lineSoFar.match(/^(\s*)([-*])\s+(.*)$/);
-    if (bullet) {
-      const [, indent, marker, rest] = bullet;
+
+    // Numbered list: `<indent>N. body`.
+    const numbered = lineSoFar.match(/^(\s*)(\d+)\. (.*)$/);
+    if (numbered) {
+      const [, indent, n, rest] = numbered;
       if (rest === "") {
-        // Empty bullet → strip it and submit (common "end the list"
-        // gesture).
+        // Empty numbered line → strip + submit.
         e.preventDefault();
-        const newValue =
-          ta.value.slice(0, lineStart) + ta.value.slice(selectionStart);
-        ta.value = newValue;
+        ta.value = ta.value.slice(0, lineStart) + ta.value.slice(selectionStart);
         ta.dispatchEvent(new Event("input", { bubbles: true }));
         autoResizeTextarea(ta);
         submit();
         return;
       }
-      // Non-empty bullet line: insert newline + same indent + marker.
       e.preventDefault();
-      const insertion = `\n${indent}${marker} `;
+      const next = (parseInt(n!, 10) + 1).toString();
+      const insertion = `\n${indent}${next}. `;
       const after = ta.value.slice(selectionStart);
-      const newValue = before + insertion + after;
-      ta.value = newValue;
+      ta.value = before + insertion + after;
       const caret = selectionStart + insertion.length;
       ta.setSelectionRange(caret, caret);
       ta.dispatchEvent(new Event("input", { bubbles: true }));
       autoResizeTextarea(ta);
       return;
     }
-    // Plain Enter outside a bullet: submit.
+
+    // Bulleted list: `<indent>(-|*|+) body`.
+    const bullet = lineSoFar.match(/^(\s*)([-*+])\s+(.*)$/);
+    if (bullet) {
+      const [, indent, marker, rest] = bullet;
+      if (rest === "") {
+        e.preventDefault();
+        ta.value = ta.value.slice(0, lineStart) + ta.value.slice(selectionStart);
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        autoResizeTextarea(ta);
+        submit();
+        return;
+      }
+      e.preventDefault();
+      const insertion = `\n${indent}${marker} `;
+      const after = ta.value.slice(selectionStart);
+      ta.value = before + insertion + after;
+      const caret = selectionStart + insertion.length;
+      ta.setSelectionRange(caret, caret);
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+      autoResizeTextarea(ta);
+      return;
+    }
+
+    // Blockquote: `<indent>> body`.
+    const quote = lineSoFar.match(/^(\s*)(>+)\s+(.*)$/);
+    if (quote) {
+      const [, indent, gt, rest] = quote;
+      if (rest === "") {
+        e.preventDefault();
+        ta.value = ta.value.slice(0, lineStart) + ta.value.slice(selectionStart);
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        autoResizeTextarea(ta);
+        submit();
+        return;
+      }
+      e.preventDefault();
+      const insertion = `\n${indent}${gt} `;
+      const after = ta.value.slice(selectionStart);
+      ta.value = before + insertion + after;
+      const caret = selectionStart + insertion.length;
+      ta.setSelectionRange(caret, caret);
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+      autoResizeTextarea(ta);
+      return;
+    }
+
+    // Plain Enter → submit.
     e.preventDefault();
     submit();
     return;
   }
-  // Auto-format: at line start, "-" alone becomes "- " so users
-  // don't have to type the space.
-  if (e.key === "-" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+
+  // ---- Space: expand `-`, `*`, `+`, `>`, `N.` at line start ----
+  if (e.key === " " && !e.altKey && !e.metaKey && !e.ctrlKey) {
     const { selectionStart, selectionEnd } = ta;
     if (selectionStart === selectionEnd) {
       const before = ta.value.slice(0, selectionStart);
-      const atLineStart =
-        selectionStart === 0 || before.endsWith("\n");
-      if (atLineStart) {
+      const lineStart = before.lastIndexOf("\n") + 1;
+      const lineSoFar = before.slice(lineStart);
+      // Detect `-`, `*`, `+`, `>`, or `N.` alone on the line.
+      const expandable =
+        lineSoFar === "-" ||
+        lineSoFar === "*" ||
+        lineSoFar === "+" ||
+        lineSoFar === ">" ||
+        /^\d+\.$/.test(lineSoFar);
+      if (expandable) {
+        // Browsers already insert the space themselves; we just let
+        // them and rely on the normal onInput → autoResize chain.
+        // No need to preventDefault here — the line will then be
+        // `<expandable> `, which the Enter handler treats as a
+        // continuable list/quote next time.
+      }
+    }
+  }
+
+  // ---- Backtick: `` ` `` for code; ``` `` `` at line start opens a
+  //      fenced code block. ----
+  if (e.key === "`" && !e.altKey && !e.metaKey && !e.ctrlKey) {
+    const { selectionStart, selectionEnd } = ta;
+    if (selectionStart === selectionEnd) {
+      const before = ta.value.slice(0, selectionStart);
+      const lineStart = before.lastIndexOf("\n") + 1;
+      const lineSoFar = before.slice(lineStart);
+      // If the user has typed exactly `` `` `` (two backticks) and
+      // is at the very start of a line, this keystroke completes
+      // the opening fence — auto-insert the closing fence on the
+      // next line and place the caret between them.
+      if (lineSoFar === "``" && (before.length === 2 || before.endsWith("\n``"))) {
         e.preventDefault();
-        const insertion = "- ";
+        const insertion = "`\n\n```";
         const after = ta.value.slice(selectionEnd);
         ta.value = before + insertion + after;
-        const caret = selectionStart + insertion.length;
+        // Caret on the empty middle line.
+        const caret = selectionStart + 2; // past the third backtick + newline
         ta.setSelectionRange(caret, caret);
         ta.dispatchEvent(new Event("input", { bubbles: true }));
         autoResizeTextarea(ta);
@@ -1358,6 +1451,47 @@ function onChatInputKeyDown(
       }
     }
   }
+
+  // ---- Tab: inside a fenced code block insert two spaces ----
+  if (e.key === "Tab" && !e.altKey && !e.metaKey && !e.ctrlKey) {
+    const { selectionStart, selectionEnd } = ta;
+    if (selectionStart === selectionEnd && insideCodeFence(ta.value, selectionStart)) {
+      e.preventDefault();
+      const indent = e.shiftKey ? "" : "  ";
+      if (e.shiftKey) {
+        // Outdent: remove up to two leading spaces from the current line.
+        const lineStart = ta.value.lastIndexOf("\n", selectionStart - 1) + 1;
+        const lineHead = ta.value.slice(lineStart, lineStart + 2);
+        if (lineHead === "  ") {
+          ta.value = ta.value.slice(0, lineStart) + ta.value.slice(lineStart + 2);
+          const caret = Math.max(lineStart, selectionStart - 2);
+          ta.setSelectionRange(caret, caret);
+          ta.dispatchEvent(new Event("input", { bubbles: true }));
+          autoResizeTextarea(ta);
+        }
+      } else {
+        const before = ta.value.slice(0, selectionStart);
+        const after = ta.value.slice(selectionEnd);
+        ta.value = before + indent + after;
+        const caret = selectionStart + indent.length;
+        ta.setSelectionRange(caret, caret);
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        autoResizeTextarea(ta);
+      }
+      return;
+    }
+  }
+}
+
+/** Cheap check: is the caret inside an open ```…``` fence? Walks
+ *  the value once and counts triple-backtick markers before the
+ *  caret; odd count = open fence. */
+function insideCodeFence(value: string, caret: number): boolean {
+  const head = value.slice(0, caret);
+  const re = /^```/gm;
+  let count = 0;
+  while (re.exec(head)) count += 1;
+  return count % 2 === 1;
 }
 
 /** Popover button that lists the user's saved prompt templates and
