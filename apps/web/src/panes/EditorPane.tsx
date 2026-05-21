@@ -21,15 +21,73 @@ function langFor(path: string): Extension {
   return javascript({ typescript: true });
 }
 
+/** Autosave debounce. Edits within this window after a previous edit
+ *  coalesce into a single write. */
+const AUTOSAVE_DEBOUNCE_MS = 600;
+
+/**
+ * Editor pane with **autosave**.
+ *
+ * Saving happens automatically:
+ *
+ *   - 600 ms after the last keystroke (debounced)
+ *   - immediately before switching to a different file
+ *   - immediately on window blur (so closing the tab is safe)
+ *   - on Cmd/Ctrl+S (still useful for users who want to force a
+ *     flush; we just acknowledge the keystroke)
+ *
+ * The Save button is gone. The header shows the open path and a
+ * subtle "saving…" / "saved Xs ago" indicator instead.
+ */
 export default function EditorPane() {
   let host!: HTMLDivElement;
   const langComp = new Compartment();
   const editableComp = new Compartment();
   const [openPath, setOpenPath] = createSignal<string | null>(null);
-  const [saved, setSaved] = createSignal<string | null>(null);
-  const [busy, setBusy] = createSignal(false);
+  const [savedAt, setSavedAt] = createSignal<Date | null>(null);
+  const [saving, setSaving] = createSignal(false);
+  const [dirty, setDirty] = createSignal(false);
   const [loadErr, setLoadErr] = createSignal<string | null>(null);
   let view: EditorView | null = null;
+  /** Path the editor's current buffer belongs to. Distinct from
+   *  `openPath()` so writes can target the correct file even if the
+   *  user has already started switching to a new one. */
+  let bufferPath: string | null = null;
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  // True while we're loading content into the view (so the
+  // updateListener that fires from our own dispatch doesn't think
+  // the user edited anything).
+  let loading = false;
+
+  /** Persist the editor's current contents. Used by the debounced
+   *  timer, file-switch, blur, and explicit Cmd/Ctrl+S. */
+  async function flush() {
+    if (!view) return;
+    const p = bufferPath;
+    if (!p) return;
+    if (!dirty()) return;
+    setSaving(true);
+    try {
+      const content = view.state.doc.toString();
+      await api.writeFile(p, content);
+      setDirty(false);
+      setSavedAt(new Date());
+      recordMemoryUsage("editor.document", content.length * 2);
+    } catch (e) {
+      setLoadErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /** Schedule a debounced flush. Cancels any pending timer first. */
+  function scheduleFlush() {
+    if (saveTimer !== null) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      void flush();
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }
 
   onMount(() => {
     view = new EditorView({
@@ -39,38 +97,82 @@ export default function EditorPane() {
         extensions: [
           lineNumbers(),
           history(),
-          keymap.of([...defaultKeymap, ...historyKeymap]),
+          keymap.of([
+            // Force-flush save shortcut (no-op for autosave but
+            // satisfies the muscle memory).
+            {
+              key: "Mod-s",
+              preventDefault: true,
+              run: () => {
+                void flush();
+                return true;
+              },
+            },
+            ...defaultKeymap,
+            ...historyKeymap,
+          ]),
           oneDark,
           langComp.of([]),
           editableComp.of([EditorView.editable.of(false)]),
+          EditorView.updateListener.of((u) => {
+            if (loading) return;
+            if (u.docChanged) {
+              setDirty(true);
+              scheduleFlush();
+            }
+          }),
           EditorView.theme({
             "&": { height: "100%", fontSize: "13px" },
           }),
         ],
       }),
     });
+
+    // Save when the window loses focus / before unload so unsaved
+    // edits don't disappear if the user closes the tab.
+    const onBlur = () => {
+      if (dirty()) void flush();
+    };
+    window.addEventListener("blur", onBlur);
+    onCleanup(() => window.removeEventListener("blur", onBlur));
   });
 
-  onCleanup(() => view?.destroy());
+  onCleanup(() => {
+    if (saveTimer !== null) clearTimeout(saveTimer);
+    // Best-effort final flush before tearing the view down.
+    if (dirty()) void flush();
+    view?.destroy();
+  });
 
   async function loadPath(p: string) {
-    setBusy(true);
+    // If there are unsaved changes on the *current* buffer, flush
+    // them synchronously before swapping in the new file so edits
+    // aren't lost during a fast click-through in the file tree.
+    if (dirty() && bufferPath && bufferPath !== p) {
+      await flush();
+    }
     setLoadErr(null);
     try {
       const f = await api.readFile(p);
-      setOpenPath(f.path);
-      view?.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: f.content },
-        effects: [
-          langComp.reconfigure(langFor(f.path)),
-          editableComp.reconfigure([EditorView.editable.of(true)]),
-        ],
-      });
+      loading = true;
+      try {
+        setOpenPath(f.path);
+        bufferPath = f.path;
+        view?.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: f.content },
+          effects: [
+            langComp.reconfigure(langFor(f.path)),
+            editableComp.reconfigure([EditorView.editable.of(true)]),
+          ],
+        });
+      } finally {
+        loading = false;
+      }
+      setDirty(false);
+      setSavedAt(new Date());
       recordMemoryUsage("editor.document", f.content.length * 2);
     } catch (e) {
       setLoadErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -80,35 +182,47 @@ export default function EditorPane() {
     if (p && p !== openPath()) {
       void loadPath(p);
     } else if (!p && openPath() !== null) {
-      // Selection cleared (e.g. project switch). Empty the buffer and
-      // make the editor non-editable again.
-      setOpenPath(null);
-      view?.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: "" },
-        effects: [
-          langComp.reconfigure([]),
-          editableComp.reconfigure([EditorView.editable.of(false)]),
-        ],
-      });
-      recordMemoryUsage("editor.document", 0);
+      // Selection cleared (e.g. project switch). Flush pending edits
+      // first, then empty the buffer.
+      void (async () => {
+        if (dirty() && bufferPath) await flush();
+        loading = true;
+        try {
+          setOpenPath(null);
+          bufferPath = null;
+          view?.dispatch({
+            changes: { from: 0, to: view.state.doc.length, insert: "" },
+            effects: [
+              langComp.reconfigure([]),
+              editableComp.reconfigure([EditorView.editable.of(false)]),
+            ],
+          });
+        } finally {
+          loading = false;
+        }
+        setDirty(false);
+        recordMemoryUsage("editor.document", 0);
+      })();
     }
   });
 
-  async function save() {
-    const p = openPath();
-    if (!p || !view) return;
-    setBusy(true);
-    try {
-      await api.writeFile(p, view.state.doc.toString());
-      setSaved(new Date().toLocaleTimeString());
-    } finally {
-      setBusy(false);
-    }
+  /** Human-friendly "saved 5s ago" / "saving…" / "modified" hint. */
+  function statusLabel(): string {
+    if (saving()) return "saving…";
+    if (dirty()) return "modified";
+    const t = savedAt();
+    if (!t) return "";
+    const dt = Math.max(0, Math.floor((Date.now() - t.getTime()) / 1000));
+    if (dt < 3) return "saved";
+    if (dt < 60) return `saved ${dt}s ago`;
+    return `saved ${Math.floor(dt / 60)}m ago`;
   }
-
+  // Re-tick the status label every 5 s so "5s ago" stays current.
+  const [, forceTick] = createSignal(0);
   createEffect(() => {
-    setSaved(null);
-    void openPath();
+    if (!savedAt()) return;
+    const id = setInterval(() => forceTick((n) => n + 1), 5000);
+    onCleanup(() => clearInterval(id));
   });
 
   return (
@@ -125,20 +239,23 @@ export default function EditorPane() {
         >
           {openPath() ?? "No file selected"}
         </div>
-        <button
-          class="ag-btn ag-btn-primary"
-          onClick={save}
-          disabled={!openPath() || busy()}
-          data-testid="editor-save"
-        >
-          Save{" "}
-          <span class="ag-kbd !bg-transparent !border-transparent text-[var(--ag-accent-fg)] opacity-80">
-            ⌘S
-          </span>
-        </button>
-        <Show when={saved()}>
-          <span class="ag-chip ag-chip-success" data-testid="editor-saved-at">
-            saved {saved()}
+        <Show when={openPath()}>
+          <span
+            class="ag-chip text-[11px]"
+            classList={{
+              "ag-chip-success": !dirty() && !saving() && !!savedAt(),
+              "text-fg-subtle": dirty() || saving(),
+            }}
+            data-testid="editor-status"
+            title={
+              dirty()
+                ? "Unsaved edits — autosaves shortly"
+                : saving()
+                  ? "Saving…"
+                  : "All changes saved"
+            }
+          >
+            {statusLabel()}
           </span>
         </Show>
       </header>
