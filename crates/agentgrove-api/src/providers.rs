@@ -84,10 +84,15 @@ pub struct ProviderRegistry {
 
 impl Default for ProviderRegistry {
     fn default() -> Self {
-        // Order matters: the first non-fake provider is what the FE
-        // pre-selects in the new-chat dialog.
+        // Order matters: the first available provider is what the FE
+        // pre-selects in the new-chat dialog. We register CLI-style
+        // providers here; HTTP-API providers (9router) come in via
+        // `providers::resolve` because they need runtime config.
         Self {
-            providers: vec![Arc::new(agentgrove_agents::claude::ClaudeProvider::new())],
+            providers: vec![
+                Arc::new(agentgrove_agents::claude::ClaudeProvider::new()),
+                Arc::new(agentgrove_agents::opencode::OpencodeProvider::new()),
+            ],
         }
     }
 }

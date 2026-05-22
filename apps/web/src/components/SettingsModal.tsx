@@ -1,6 +1,10 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { produce } from "solid-js/store";
-import { api, type PromptTemplate } from "../api/client";
+import {
+  api,
+  type PromptTemplate,
+  type ProviderDescriptor,
+} from "../api/client";
 import {
   FONT_FAMILY_PRESETS,
   FONT_SIZES,
@@ -402,16 +406,132 @@ function PromptsTab() {
  * the wire shape is identical.
  */
 function ProvidersTab() {
+  // Load the canonical provider list from the BE so the tab stays
+  // in sync with what the chat picker offers. Each entry gets a
+  // card whose body shape depends on the provider's integration
+  // kind:
+  //   - CLI subprocess (Claude, future opencode) → read-only card
+  //     showing detection state + install hint. Nothing for the
+  //     user to configure here — auth lives in the CLI itself.
+  //   - HTTP API (9router) → editable form for base URL + key.
+  const [providers, setProviders] = createSignal<ProviderDescriptor[]>([]);
+  onMount(() => {
+    void (async () => {
+      try {
+        setProviders(await api.listProviders());
+      } catch {
+        // Best-effort. The empty list will just render a hint.
+      }
+    })();
+  });
+
   return (
     <div class="space-y-6" data-testid="settings-providers-tab">
-      <ProviderForm
-        providerId="9router"
-        label="9router"
-        installHint="Install with `npm install -g 9router`, run `9router`, then copy the API key from http://localhost:3000."
-        defaultBaseUrl="http://localhost:20128/v1"
-        defaultModelPlaceholder="free-combo"
-      />
+      <Show
+        when={providers().length > 0}
+        fallback={
+          <p class="text-[12px] text-fg-subtle italic">
+            Loading providers…
+          </p>
+        }
+      >
+        <For each={providers()}>
+          {(p) => <ProviderCard provider={p} />}
+        </For>
+      </Show>
     </div>
+  );
+}
+
+/** Per-provider settings card. Routes to the right body
+ *  (`CliProviderCard` or `HttpProviderCard`) based on the
+ *  provider's id. New HTTP-API providers slot in by extending the
+ *  `HTTP_PROVIDERS` map below; new CLI providers just need an
+ *  entry on `GET /api/providers` to appear here automatically. */
+function ProviderCard(props: { provider: ProviderDescriptor }) {
+  const cfg = HTTP_PROVIDERS[props.provider.id];
+  return (
+    <Show
+      when={cfg}
+      fallback={<CliProviderCard provider={props.provider} />}
+    >
+      <ProviderForm
+        providerId={props.provider.id}
+        label={props.provider.label}
+        installHint={cfg!.installHint}
+        defaultBaseUrl={cfg!.defaultBaseUrl}
+        defaultModelPlaceholder={cfg!.defaultModel}
+      />
+    </Show>
+  );
+}
+
+/** HTTP-API providers we know how to talk to. Keyed by provider id
+ *  so the routing in `ProviderCard` is a single dictionary
+ *  lookup. */
+const HTTP_PROVIDERS: Record<
+  string,
+  { installHint: string; defaultBaseUrl: string; defaultModel: string }
+> = {
+  "9router": {
+    installHint:
+      "Install with `npm install -g 9router`, run `9router`, then copy the API key from http://localhost:3000.",
+    defaultBaseUrl: "http://localhost:20128/v1",
+    defaultModel: "free-combo",
+  },
+};
+
+/** Read-only card for CLI subprocess providers (Claude, future
+ *  opencode). The user can't configure anything here — auth lives
+ *  in the CLI tool itself — but we show the detection status so
+ *  it's clear whether the provider is usable. */
+function CliProviderCard(props: { provider: ProviderDescriptor }) {
+  const p = props.provider;
+  return (
+    <section
+      class="rounded-lg border border-border bg-bg-2 p-4 space-y-2"
+      data-testid={`provider-card-${p.id}`}
+    >
+      <header class="flex items-center justify-between">
+        <h3 class="text-[13.5px] font-semibold">{p.label}</h3>
+        <Show
+          when={p.available}
+          fallback={
+            <span class="ag-chip text-[11px]">not installed</span>
+          }
+        >
+          <span class="ag-chip ag-chip-accent text-[11px]">
+            {p.version ? `v${p.version}` : "available"}
+          </span>
+        </Show>
+      </header>
+      <Show when={p.available && p.path}>
+        <p class="text-[11.5px] text-fg-subtle font-mono break-all">
+          {p.path}
+        </p>
+      </Show>
+      <Show
+        when={p.available}
+        fallback={
+          <p class="text-[12px] text-fg-muted">
+            Install the CLI to enable this provider:{" "}
+            <a
+              href={p.install_hint}
+              target="_blank"
+              rel="noreferrer"
+              class="text-accent hover:underline"
+            >
+              {p.install_hint}
+            </a>
+          </p>
+        }
+      >
+        <p class="text-[12px] text-fg-muted">
+          Managed by the CLI. Authentication lives wherever the
+          tool is already configured — nothing to set up here.
+        </p>
+      </Show>
+    </section>
   );
 }
 

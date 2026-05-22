@@ -27,6 +27,7 @@ use tokio::sync::mpsc;
 pub mod claude;
 pub mod fake;
 pub mod nine_router;
+pub mod opencode;
 
 /// Streaming event emitted by an agent provider.
 ///

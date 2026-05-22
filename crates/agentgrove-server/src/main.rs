@@ -1,7 +1,7 @@
 //! AgentGrove server binary.
 
 use agentgrove_api::{build_router, AppState};
-use agentgrove_store::{open_pool, run_migrations};
+use agentgrove_store::{open_pool, run_migrations, snapshot_db_to_backups};
 use anyhow::{Context, Result};
 use std::env;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -32,6 +32,15 @@ async fn main() -> Result<()> {
     fs::create_dir_all(&state_dir)
         .await
         .with_context(|| format!("create state dir {}", state_dir.display()))?;
+
+    // Defensive backup BEFORE we open the pool: if the user (or a
+    // bad migration) corrupts the live DB later, the timestamped
+    // snapshot under <state_dir>/backups/ is the easiest rollback
+    // path. No-op on first run because the DB doesn't exist yet.
+    // See `agentgrove_store::snapshot_db_to_backups`.
+    if let Some(dir) = snapshot_db_to_backups(&state_dir) {
+        tracing::info!(path = %dir.display(), "wrote DB snapshot");
+    }
 
     let pool = open_pool(&state_dir).await.context("open db")?;
     run_migrations(&pool).await.context("run migrations")?;

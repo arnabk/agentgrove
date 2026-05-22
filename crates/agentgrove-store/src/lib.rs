@@ -17,7 +17,7 @@ pub mod worktree;
 
 pub use blob::{BlobStore, Sha256};
 pub use chat::{ChatError, ChatRepo, ChatRow, PromptRow};
-pub use db::{open_pool, run_migrations, DbPool};
+pub use db::{open_pool, run_migrations, snapshot_db_to_backups, DbPool, MAX_DB_BACKUPS};
 pub use layout::{LayoutError, LayoutRepo};
 pub use project::{NewProject, ProjectError, ProjectRecord, ProjectRepo};
 pub use provider_secret::{
