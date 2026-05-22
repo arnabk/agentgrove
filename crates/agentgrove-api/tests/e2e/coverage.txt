@@ -39,6 +39,9 @@ GET /api/projects/{id}/scratchpad
 PUT /api/projects/{id}/scratchpad
 GET /api/settings
 PUT /api/settings
+GET /api/layout
+PUT /api/layout/global
+PUT /api/layout/scope
 GET /api/terminals
 POST /api/terminals
 DELETE /api/terminals/{id}

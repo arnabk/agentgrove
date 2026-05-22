@@ -86,6 +86,27 @@ directly for the queue / chat-view assertions. The BE e2e suite is the
 faster source of truth — only run Playwright when you're touching the
 composer JSX or the WS event flow.
 
+## Session persistence
+
+The state described above isn't ephemeral. Three SQLite tables back
+it so a server restart preserves the user's session:
+
+- `chats` + `prompts` — chat metadata + the full prompt history
+  (events stored as JSON inline). Hydrated into the in-memory
+  `ChatRegistry` on startup by `chats::hydrate_from_store`.
+- `queue_items` + `chat_queue_mode` — pending queue items and the
+  per-chat auto/manual toggle. Read straight from the store on
+  every operation (no in-memory cache); `recover_stale_running`
+  rolls Running items back to Pending on startup so a crashed
+  dispatch task can't strand them.
+- `layout_scope` + `layout_global` — opaque JSON blobs the FE
+  writes through on every scope mutation (debounced). `GET
+  /api/layout` returns the singleton + every scope in one round-
+  trip for the FE's boot hydration.
+
+Restart-survival regressions live in
+`crates/agentgrove-api/tests/e2e/persistence.rs`.
+
 ## Historical bugs
 
 These shipped, broke users, and now have permanent test coverage. If a
@@ -109,6 +130,25 @@ test in the table above starts failing, check this list first.
    dispatched. Fix: hold the dispatching lock across the entire
    decision + commit. Regression:
    `smart_send_no_loss_under_concurrent_fire`.
+
+4. **Drain exit race under rapid-fire.** The drain loop's `is_auto`
+   check + `pop_next_pending` ran outside the dispatching lock,
+   so a smart-send could enqueue an item *between* the drain's
+   last empty-pop and its dispatching-flag clear — leaving the
+   item with no drainer. Fix: `clear_dispatching` re-reads pending
+   under the lock; if any items arrived it returns `false` and the
+   caller keeps draining. Regression:
+   `rapid_fire_10_then_followup_send_runs_immediately`.
+
+5. **Lost session continuity on restart.** Chats, prompts, and the
+   queue lived in-memory only. Every restart wiped them. Fix:
+   move to SQLite (migrations 0005-0007), hydrate the chat
+   registry on startup, persist queue + layout via repos. The
+   in-memory ChatRegistry is now a write-through cache; QueueRepo
+   is consulted on every operation; LayoutRepo serves a single
+   `/api/layout` GET on boot and PUTs from the FE on mutation.
+   Regression: `persistence::{chats_and_prompts_survive_restart,
+   queue_items_and_mode_survive_restart, layout_survives_restart}`.
 
 [`POST /api/chats/:id/messages`]: ../../crates/agentgrove-api/src/chats.rs
 [`POST /api/chats/:id/queue/next`]: ../../crates/agentgrove-api/src/queue.rs

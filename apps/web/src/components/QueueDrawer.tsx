@@ -66,19 +66,6 @@ export default function QueueDock(props: Props) {
     }
   }
 
-  async function runNext() {
-    setBusy(true);
-    setErr(null);
-    try {
-      await api.runNextQueue(props.chatId);
-      await refresh();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function cancel(item: QueueItem) {
     setBusy(true);
     setErr(null);
@@ -102,7 +89,6 @@ export default function QueueDock(props: Props) {
   }
 
   const items = () => qstate()?.items ?? [];
-  const pending = createMemo(() => items().filter((i) => i.status === "pending"));
   const total = () => items().length;
   const mode = () => qstate()?.mode ?? "auto";
 
@@ -237,34 +223,35 @@ function QueueCard(props: {
       class="rounded-lg border border-border bg-bg-2 p-3 space-y-2"
       data-testid={`queue-card-${props.item.id}`}
     >
+      {/*
+        Item header — timestamp + remove button only. Status labels
+        were redundant here: an item only lives in the queue while
+        it's waiting to run; once dispatched the BE moves it into
+        the chat timeline and removes the row. Three lifecycle
+        states are now possible from the user's perspective:
+
+          - in the queue (this card is rendered)
+          - in the chat timeline (it left the queue)
+          - deleted (user clicked Remove → also gone from the queue)
+
+        The remove button is unconditionally rendered; cancelling a
+        queue item is a tracked-but-rare operation, never a footgun
+        on items the user "shouldn't" cancel.
+      */}
       <header class="flex items-center gap-2 text-[11.5px]">
-        <StatusDot status={props.item.status} />
-        <span
-          class="font-mono uppercase tracking-wide"
-          classList={{
-            "text-fg-subtle": props.item.status === "pending",
-            "text-accent": props.item.status === "running",
-            "text-success": props.item.status === "done",
-            "text-danger": props.item.status === "cancelled",
-          }}
-        >
-          {props.item.status}
-        </span>
-        <span class="ml-auto text-fg-subtle">
+        <span class="text-fg-subtle">
           {new Date(props.item.created_at).toLocaleTimeString()}
         </span>
-        <Show when={props.item.status === "pending"}>
-          <button
-            type="button"
-            class="text-fg-subtle hover:text-danger"
-            onClick={() => props.onCancel()}
-            title="Cancel"
-            aria-label="Cancel"
-            data-testid={`queue-cancel-${props.item.id}`}
-          >
-            ✕
-          </button>
-        </Show>
+        <button
+          type="button"
+          class="ml-auto text-fg-subtle hover:text-danger"
+          onClick={() => props.onCancel()}
+          title="Remove"
+          aria-label="Remove"
+          data-testid={`queue-cancel-${props.item.id}`}
+        >
+          ✕
+        </button>
       </header>
 
       <Show
@@ -384,26 +371,4 @@ function splitBodyAndAttachments(raw: string): SplitResult {
 function basename(p: string): string {
   const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
   return i >= 0 ? p.slice(i + 1) : p;
-}
-
-/** Coloured dot reflecting QueueItem.status. */
-function StatusDot(props: { status: QueueItem["status"] }) {
-  const color = () => {
-    switch (props.status) {
-      case "pending":
-        return "bg-fg-subtle";
-      case "running":
-        return "bg-accent animate-pulse";
-      case "done":
-        return "bg-success";
-      case "cancelled":
-        return "bg-danger/60";
-    }
-  };
-  return (
-    <span
-      class={`inline-block w-1.5 h-1.5 rounded-full ${color()}`}
-      title={props.status}
-    />
-  );
 }

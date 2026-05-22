@@ -54,6 +54,22 @@ async fn main() -> Result<()> {
         Err(e) => tracing::warn!(error = %e, "worktree lifecycle recovery failed"),
     }
 
+    // Roll any queue items left mid-dispatch back to Pending. A
+    // crashed dispatch task could otherwise leave items as Running
+    // with no task tracking them — `run_next` (which only pops
+    // Pending) would then ignore them forever.
+    match state.queue_store.recover_stale_running().await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(rows = n, "rolled stale Running queue items back to Pending"),
+        Err(e) => tracing::warn!(error = %e, "queue recovery failed"),
+    }
+
+    // Hydrate the in-memory chat registry from the persistent store
+    // so chats + their prompt history survive a server restart.
+    // Done before serving so the first request sees the cache
+    // already populated.
+    agentgrove_api::chats::hydrate_from_store(&state).await;
+
     let app = build_router(state);
 
     let addr = SocketAddr::new(bind_addr, port);

@@ -103,19 +103,10 @@ export default function ChatPane() {
   //   - anything else → token / thinking / tool_use stream is mid-
   //     flight → busy.
   //
-  // Historical prompts can legitimately have empty `events` arrays
-  // when loaded out of a windowed BE response (events are capped
-  // separately) — so scanning the entire list incorrectly marked
-  // the chat permanently busy and forced every new message into
-  // the queue. Looking at only the tail fixes that.
-  const busy = (): boolean => {
-    const tail = chatStore.prompts[chatStore.prompts.length - 1];
-    if (!tail) return false;
-    const evs = tail.events;
-    if (evs.length === 0) return true;
-    const last = evs[evs.length - 1]!;
-    return last.type !== "done" && last.type !== "error";
-  };
+  // Note: there's no FE-side `busy` signal anymore — the BE's
+  // smart-send endpoint (POST /api/chats/:id/messages) makes the
+  // authoritative dispatch-vs-queue decision and returns a tagged
+  // response. See `docs/architecture/chat-queue-routing.md`.
   const [err, setErr] = createSignal<string | null>(null);
   // Pending uploads attached to the next prompt. Chips render below
   // the textarea; on send we tack their absolute paths onto the

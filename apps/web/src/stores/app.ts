@@ -163,6 +163,7 @@ export function setActivePane(pane: PaneId) {
   if (!key) return;
   ensureScope(key);
   setState("byScope", key, "activePane", pane);
+  scheduleScopeLayoutWrite(key);
 }
 
 // ---- editor (single file per scope) ------------------------------------
@@ -173,6 +174,7 @@ export function selectFile(path: string) {
   ensureScope(key);
   setState("byScope", key, "activeEditor", path);
   setState("byScope", key, "activePane", "editor");
+  scheduleScopeLayoutWrite(key);
 }
 
 export function selectedFilePath(): string | null {
@@ -192,6 +194,7 @@ export function addChatTab(chat: ChatTab): { ok: boolean; reason?: string } {
   const scope = state.byScope[key]!;
   if (scope.chats.find((c) => c.id === chat.id)) {
     setState("byScope", key, "activeChat", chat.id);
+    scheduleScopeLayoutWrite(key);
     return { ok: true };
   }
   // No per-scope chat cap: users can create as many chats as they want.
@@ -204,6 +207,7 @@ export function addChatTab(chat: ChatTab): { ok: boolean; reason?: string } {
       s.activePane = "chat";
     }),
   );
+  scheduleScopeLayoutWrite(key);
   return { ok: true };
 }
 
@@ -228,6 +232,7 @@ export function setScopeChats(chats: ChatTab[]) {
       }
     }),
   );
+  scheduleScopeLayoutWrite(key);
 }
 
 export function closeChatTab(chatId: string) {
@@ -245,12 +250,14 @@ export function closeChatTab(chatId: string) {
       }
     }),
   );
+  scheduleScopeLayoutWrite(key);
 }
 
 export function setActiveChat(chatId: string) {
   const key = currentScopeKey();
   if (!key) return;
   setState("byScope", key, "activeChat", chatId);
+  scheduleScopeLayoutWrite(key);
 }
 
 // ---- terminal tabs -----------------------------------------------------
@@ -262,6 +269,7 @@ export function addTerminalTab(t: TerminalTab): { ok: boolean; reason?: string }
   const scope = state.byScope[key]!;
   if (scope.terminals.find((x) => x.id === t.id)) {
     setState("byScope", key, "activeTerminal", t.id);
+    scheduleScopeLayoutWrite(key);
     return { ok: true };
   }
   setState(
@@ -273,6 +281,7 @@ export function addTerminalTab(t: TerminalTab): { ok: boolean; reason?: string }
       s.activePane = "terminal";
     }),
   );
+  scheduleScopeLayoutWrite(key);
   return { ok: true };
 }
 
@@ -291,12 +300,14 @@ export function closeTerminalTab(id: string) {
       }
     }),
   );
+  scheduleScopeLayoutWrite(key);
 }
 
 export function setActiveTerminal(id: string) {
   const key = currentScopeKey();
   if (!key) return;
   setState("byScope", key, "activeTerminal", id);
+  scheduleScopeLayoutWrite(key);
 }
 
 // ---- project + worktree lifecycle --------------------------------------
@@ -384,7 +395,69 @@ export async function bootstrap() {
     applySettings({});
   }
   await refreshProjects();
+  // Layout hydration runs AFTER projects load so we can map the
+  // BE's per-scope blobs into our `byScope` cache without
+  // overwriting any defaults set by `selectProject`.
+  await hydrateLayoutFromBackend();
   setState("ready", true);
+}
+
+/** Pull the latest layout snapshot from the BE and merge it into
+ *  the store. Each per-scope blob becomes (or overwrites) the
+ *  matching `state.byScope[key]` entry; missing scopes stay at
+ *  their freshScope defaults so a never-seen project still works.
+ *
+ *  The global blob isn't wired into anything user-visible yet
+ *  (we'll add it as we move rail-width / show-files / etc.
+ *  off localStorage). The endpoint is already there + tested. */
+async function hydrateLayoutFromBackend() {
+  try {
+    const snap = await api.getLayout();
+    for (const s of snap.scopes) {
+      const key = s.worktree_id
+        ? `${s.project_id}::${s.worktree_id}`
+        : s.project_id;
+      // Spread over a freshScope so any missing field gets a sane
+      // default — the BE's blob is the FE's shape, but tolerant
+      // hydration protects us across schema additions.
+      const incoming = s.blob as Partial<Scope>;
+      setState("byScope", key, { ...freshScope(), ...incoming });
+    }
+  } catch {
+    // Layout is best-effort — running without it just means a
+    // fresh start on this device.
+  }
+}
+
+/** Persist a single scope's snapshot to the BE. Throttled by
+ *  `scheduleScopeLayoutWrite` below — call THAT, not this. */
+async function writeScopeLayout(key: string) {
+  const [projectId, worktreeId = ""] = key.split("::");
+  if (!projectId) return;
+  const scope = state.byScope[key];
+  if (!scope) return;
+  try {
+    await api.putScopeLayout(projectId, worktreeId, scope);
+  } catch {
+    // Best-effort — a transient BE error doesn't break the UI;
+    // the next mutation will retry.
+  }
+}
+
+/** Debounced per-scope layout writer. The composer + tabs +
+ *  pane switcher all mutate `byScope` rapidly; coalescing the
+ *  writes keeps the BE quiet (one PUT per scope per ~400 ms)
+ *  while still feeling instant.
+ *
+ *  Call this whenever you mutate `state.byScope[key]`. */
+const scopeWriteTimers: Record<string, ReturnType<typeof setTimeout> | undefined> = {};
+export function scheduleScopeLayoutWrite(key: string) {
+  const existing = scopeWriteTimers[key];
+  if (existing) clearTimeout(existing);
+  scopeWriteTimers[key] = setTimeout(() => {
+    scopeWriteTimers[key] = undefined;
+    void writeScopeLayout(key);
+  }, 400);
 }
 
 export function setTheme(themeId: string) {

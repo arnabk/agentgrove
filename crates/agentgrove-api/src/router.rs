@@ -1,13 +1,13 @@
 //! Axum router.
 
 use crate::{
-    branches, chats, diag, editor, fs as fsapi, git as gitapi, health::health, notes, projects,
-    providers, queue, scratchpad, settings, state::AppState, terminal, themes, uploads, worktrees,
-    ws,
+    branches, chats, diag, editor, fs as fsapi, git as gitapi, health::health, layout, notes,
+    projects, providers, queue, scratchpad, settings, state::AppState, terminal, themes, uploads,
+    worktrees, ws,
 };
 use axum::{
     http::Method,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use tower_http::cors::{Any, CorsLayer};
@@ -86,6 +86,15 @@ pub fn build_router(state: AppState) -> Router {
         )
         // Settings
         .route("/api/settings", get(settings::get).put(settings::put))
+        // Per-scope + global UI layout state (chat tabs, active
+        // pane, queue dock visibility, etc.). Replaces the previous
+        // localStorage-only model so the FE survives restarts and
+        // follows the user across machines. See
+        // `docs/architecture/chat-queue-routing.md` for the full
+        // session-state model.
+        .route("/api/layout", get(layout::get_all))
+        .route("/api/layout/global", put(layout::put_global))
+        .route("/api/layout/scope", put(layout::put_scope))
         // Per-project rich-text scratchpad
         .route(
             "/api/projects/:id/scratchpad",

@@ -1,6 +1,14 @@
 //! Prompt queue. Per-chat ordered queue with auto/manual modes.
+//!
+//! Backed by `agentgrove_store::QueueRepo` (SQLite) so pending
+//! messages and the per-chat mode toggle survive a server restart.
+//! There is no in-memory registry — every operation goes straight to
+//! the store. The store rows are small and the queue is rarely deep,
+//! so the round-trip cost is negligible compared to the previously-
+//! ephemeral in-memory map. See `docs/architecture/chat-queue-routing.md`.
 
 use crate::state::AppState;
+use agentgrove_store::{QueueItemRow, QueueMode, QueueStatus};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -8,34 +16,90 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use uuid::Uuid;
 
+/// Wire shape for queue mode. Mirrors `QueueMode` from the store but
+/// owns its own serde because the FE serialises the snake-case form
+/// (`"auto"` / `"manual"`).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
+    /// Drain pending messages back-to-back as the agent finishes.
     Auto,
+    /// Park pending messages until the user runs them.
     Manual,
 }
 
+impl From<Mode> for QueueMode {
+    fn from(m: Mode) -> Self {
+        match m {
+            Mode::Auto => Self::Auto,
+            Mode::Manual => Self::Manual,
+        }
+    }
+}
+impl From<QueueMode> for Mode {
+    fn from(m: QueueMode) -> Self {
+        match m {
+            QueueMode::Auto => Self::Auto,
+            QueueMode::Manual => Self::Manual,
+        }
+    }
+}
+
+/// Wire shape for queue item lifecycle.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
+    /// Waiting for dispatch.
     Pending,
+    /// Popped + currently being dispatched.
     Running,
+    /// Dispatch finished — items in this state are removed from the
+    /// queue today; the variant stays for completeness.
     Done,
+    /// Removed by the user.
     Cancelled,
 }
 
+impl From<QueueStatus> for Status {
+    fn from(s: QueueStatus) -> Self {
+        match s {
+            QueueStatus::Pending => Self::Pending,
+            QueueStatus::Running => Self::Running,
+            QueueStatus::Done => Self::Done,
+            QueueStatus::Cancelled => Self::Cancelled,
+        }
+    }
+}
+
+/// A single item the FE renders in the queue dock.
 #[derive(Debug, Clone, Serialize)]
 pub struct QueueItem {
+    /// UUID v7 string assigned by the store.
     pub id: String,
+    /// Owning chat.
     pub chat_id: String,
+    /// User prompt text (with attachment trailer if any).
     pub body: String,
+    /// Lifecycle status.
     pub status: Status,
+    /// Creation timestamp.
     pub created_at: DateTime<Utc>,
 }
 
+impl From<QueueItemRow> for QueueItem {
+    fn from(r: QueueItemRow) -> Self {
+        Self {
+            id: r.id,
+            chat_id: r.chat_id,
+            body: r.body,
+            status: r.status.into(),
+            created_at: r.created_at,
+        }
+    }
+}
+
+/// Aggregated state for one chat's queue (mode + items).
 #[derive(Debug, Clone, Serialize)]
 pub struct QueueState {
     pub chat_id: String,
@@ -43,109 +107,104 @@ pub struct QueueState {
     pub items: Vec<QueueItem>,
 }
 
-#[derive(Default, Debug)]
-pub struct QueueRegistry {
-    by_chat: HashMap<String, QueueState>,
+// ----- store-backed helpers --------------------------------------------------
+//
+// These replace the old `QueueRegistry` methods. Call sites that used
+// to take a `state.queues.write().await` guard now call these
+// helpers directly. They return `Result` because the underlying
+// store calls can fail; the call sites either propagate the error
+// or log + carry on depending on whether the operation is critical.
+
+/// True if the chat's queue mode is auto. Defaults to true when no
+/// row exists (the FE flips to manual only when the user toggles).
+pub async fn is_auto(state: &AppState, chat_id: &str) -> bool {
+    match state.queue_store.get_mode(chat_id).await {
+        Ok(m) => matches!(m, QueueMode::Auto),
+        Err(e) => {
+            tracing::warn!(chat_id, error = %e, "queue mode read failed; defaulting to auto");
+            true
+        }
+    }
 }
 
-impl QueueRegistry {
-    fn ensure(&mut self, chat_id: &str) -> &mut QueueState {
-        self.by_chat
-            .entry(chat_id.to_owned())
-            .or_insert_with(|| QueueState {
-                chat_id: chat_id.to_owned(),
-                mode: Mode::Auto,
-                items: vec![],
-            })
+/// Read the full queue state for a chat (mode + items, lowest
+/// position first).
+pub async fn read_state(state: &AppState, chat_id: &str) -> QueueState {
+    let mode: Mode = state
+        .queue_store
+        .get_mode(chat_id)
+        .await
+        .unwrap_or(QueueMode::Auto)
+        .into();
+    let items: Vec<QueueItem> = state
+        .queue_store
+        .list(chat_id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    QueueState {
+        chat_id: chat_id.to_owned(),
+        mode,
+        items,
     }
+}
 
-    pub fn enqueue(&mut self, chat_id: &str, body: String) -> QueueItem {
-        let q = self.ensure(chat_id);
-        let item = QueueItem {
-            id: Uuid::now_v7().to_string(),
-            chat_id: chat_id.to_owned(),
-            body,
-            status: Status::Pending,
-            created_at: Utc::now(),
-        };
-        q.items.push(item.clone());
-        item
-    }
+/// Append a new item to the queue's tail.
+pub async fn enqueue_item(
+    state: &AppState,
+    chat_id: &str,
+    body: &str,
+) -> Result<QueueItem, agentgrove_store::QueueError> {
+    state.queue_store.enqueue(chat_id, body).await.map(Into::into)
+}
 
-    pub fn set_mode(&mut self, chat_id: &str, mode: Mode) {
-        self.ensure(chat_id).mode = mode;
-    }
+/// Set the queue mode (auto or manual).
+pub async fn write_mode(
+    state: &AppState,
+    chat_id: &str,
+    mode: Mode,
+) -> Result<(), agentgrove_store::QueueError> {
+    state.queue_store.set_mode(chat_id, mode.into()).await
+}
 
-    pub fn cancel(&mut self, chat_id: &str, item_id: &str) -> bool {
-        let q = self.ensure(chat_id);
-        if let Some(it) = q.items.iter_mut().find(|i| i.id == item_id) {
-            if it.status == Status::Pending {
-                it.status = Status::Cancelled;
-                return true;
-            }
-        }
-        false
-    }
+/// Pop the next pending item, marking it Running atomically.
+pub async fn pop_next_pending(
+    state: &AppState,
+    chat_id: &str,
+) -> Result<Option<QueueItem>, agentgrove_store::QueueError> {
+    Ok(state
+        .queue_store
+        .pop_next_pending(chat_id)
+        .await?
+        .map(Into::into))
+}
 
-    /// Move the head pending item to `Running` and return a clone.
-    /// The caller is responsible for calling [`mark_done`] (success)
-    /// or [`mark_cancelled`] (failure) once dispatch finishes; without
-    /// that, the item stays Running on subsequent GETs so the UI can
-    /// reflect the live state.
-    pub fn pop_next_pending(&mut self, chat_id: &str) -> Option<QueueItem> {
-        let q = self.ensure(chat_id);
-        for it in q.items.iter_mut() {
-            if it.status == Status::Pending {
-                it.status = Status::Running;
-                return Some(it.clone());
-            }
-        }
-        None
-    }
+/// Remove a Running item from the queue (used after a successful
+/// dispatch lands it as a real prompt in the timeline).
+pub async fn mark_done(
+    state: &AppState,
+    item_id: &str,
+) -> Result<bool, agentgrove_store::QueueError> {
+    state.queue_store.mark_done(item_id).await
+}
 
-    /// Drop a previously-running item from the queue. We don't
-    /// preserve history — once an item has been dispatched into the
-    /// chat timeline (where it lives as a regular prompt) keeping a
-    /// `done` copy in the queue just clutters the dock and confuses
-    /// users into thinking the message is still pending elsewhere.
-    /// Returns whether a row was removed.
-    pub fn mark_done(&mut self, chat_id: &str, item_id: &str) -> bool {
-        let q = self.ensure(chat_id);
-        let before = q.items.len();
-        q.items.retain(|i| !(i.id == item_id && i.status == Status::Running));
-        q.items.len() != before
-    }
+/// Roll a Running item back to Pending. Used when a drain task
+/// bails out mid-flight.
+pub async fn reset_to_pending(
+    state: &AppState,
+    item_id: &str,
+) -> Result<bool, agentgrove_store::QueueError> {
+    state.queue_store.reset_to_pending(item_id).await
+}
 
-    /// Roll a Running item back to Pending. Used when the dispatch
-    /// task bails out mid-drain (e.g. the chat was deleted between
-    /// pop and add_prompt). Without this, the popped item would be
-    /// stranded as Running with no task tracking it.
-    pub fn reset_to_pending(&mut self, chat_id: &str, item_id: &str) -> bool {
-        let q = self.ensure(chat_id);
-        if let Some(it) = q.items.iter_mut().find(|i| i.id == item_id) {
-            if it.status == Status::Running {
-                it.status = Status::Pending;
-                return true;
-            }
-        }
-        false
-    }
-
-    /// True if the chat's queue is set to auto-drain mode.
-    pub fn is_auto(&self, chat_id: &str) -> bool {
-        self.by_chat
-            .get(chat_id)
-            .map(|q| q.mode == Mode::Auto)
-            .unwrap_or(true)
-    }
-
-    pub fn state(&self, chat_id: &str) -> QueueState {
-        self.by_chat.get(chat_id).cloned().unwrap_or(QueueState {
-            chat_id: chat_id.to_owned(),
-            mode: Mode::Auto,
-            items: vec![],
-        })
-    }
+/// Cancel (delete) a Pending item.
+pub async fn cancel_item(
+    state: &AppState,
+    item_id: &str,
+) -> Result<bool, agentgrove_store::QueueError> {
+    state.queue_store.cancel(item_id).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,15 +221,21 @@ pub async fn get_queue(
     State(state): State<AppState>,
     Path(chat_id): Path<String>,
 ) -> Json<QueueState> {
-    Json(state.queues.read().await.state(&chat_id))
+    Json(read_state(&state, &chat_id).await)
 }
 
 pub async fn enqueue(
     State(state): State<AppState>,
     Path(chat_id): Path<String>,
     Json(body): Json<EnqueueBody>,
-) -> Json<QueueItem> {
-    Json(state.queues.write().await.enqueue(&chat_id, body.body))
+) -> Result<Json<QueueItem>, StatusCode> {
+    enqueue_item(&state, &chat_id, &body.body)
+        .await
+        .map(Json)
+        .map_err(|e| {
+            tracing::warn!(chat_id, error = %e, "enqueue failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })
 }
 
 pub async fn set_mode(
@@ -178,7 +243,10 @@ pub async fn set_mode(
     Path(chat_id): Path<String>,
     Json(body): Json<ModeBody>,
 ) -> StatusCode {
-    state.queues.write().await.set_mode(&chat_id, body.mode);
+    if let Err(e) = write_mode(&state, &chat_id, body.mode).await {
+        tracing::warn!(chat_id, error = %e, "queue mode write failed");
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
     StatusCode::NO_CONTENT
 }
 
@@ -199,26 +267,26 @@ pub async fn run_next(
     if dispatching.contains(&chat_id) {
         return Err(StatusCode::CONFLICT);
     }
-    let item = state
-        .queues
-        .write()
+    let item = pop_next_pending(&state, &chat_id)
         .await
-        .pop_next_pending(&chat_id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
     // Insert the dispatching flag + record the prompt under the
     // same lock so a concurrent `send_message` sees us as busy and
     // routes its message to the queue (the correct FIFO behaviour).
-    let (prompt, chat) = {
-        let mut reg = state.chats.write().await;
-        let chat = match reg.get(&chat_id) {
+    let chat = {
+        let reg = state.chats.read().await;
+        match reg.get(&chat_id) {
             Some(c) => c.clone(),
             None => return Err(StatusCode::NOT_FOUND),
-        };
-        let Some(p) = reg.add_prompt(&chat_id, item.body.clone()) else {
-            return Err(StatusCode::NOT_FOUND);
-        };
-        (p, chat)
+        }
+    };
+    let prompt = match crate::chats::persist_add_prompt(&state, &chat_id, &item.body)
+        .await
+    {
+        Ok(Some(p)) => p,
+        _ => return Err(StatusCode::INTERNAL_SERVER_ERROR),
     };
     dispatching.insert(chat_id.clone());
     drop(dispatching);
@@ -227,11 +295,9 @@ pub async fn run_next(
     // already been turned into a real prompt and will live on in
     // the timeline. The spawned task handles streaming + any
     // follow-up auto-drain.
-    state
-        .queues
-        .write()
-        .await
-        .mark_done(&chat_id, &item.id);
+    if let Err(e) = mark_done(&state, &item.id).await {
+        tracing::warn!(item_id = %item.id, error = %e, "queue mark_done failed");
+    }
     let topic = format!("chat:{chat_id}");
     state.logbus.publish(
         &topic,
@@ -250,11 +316,14 @@ pub async fn run_next(
 
 pub async fn cancel(
     State(state): State<AppState>,
-    Path((chat_id, item_id)): Path<(String, String)>,
+    Path((_chat_id, item_id)): Path<(String, String)>,
 ) -> Result<StatusCode, StatusCode> {
-    if state.queues.write().await.cancel(&chat_id, &item_id) {
-        Ok(StatusCode::NO_CONTENT)
-    } else {
-        Err(StatusCode::NOT_FOUND)
+    match cancel_item(&state, &item_id).await {
+        Ok(true) => Ok(StatusCode::NO_CONTENT),
+        Ok(false) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            tracing::warn!(item_id, error = %e, "queue cancel failed");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }

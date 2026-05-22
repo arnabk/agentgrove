@@ -54,8 +54,8 @@ pub struct PromptRecord {
 
 #[derive(Default, Debug)]
 pub struct ChatRegistry {
-    by_id: HashMap<String, ChatRecord>,
-    by_project: HashMap<String, Vec<String>>,
+    pub(crate) by_id: HashMap<String, ChatRecord>,
+    pub(crate) by_project: HashMap<String, Vec<String>>,
 }
 
 impl ChatRegistry {
@@ -226,6 +226,141 @@ impl ChatRegistry {
             false
         }
     }
+
+    /// Insert a pre-built chat (used by hydration to load rows from
+    /// the SQLite store at startup). Skips the usual id-generation
+    /// because the caller already has the persisted id.
+    pub fn ingest_chat(&mut self, rec: ChatRecord) {
+        self.by_project
+            .entry(rec.project_id.clone())
+            .or_default()
+            .push(rec.id.clone());
+        self.by_id.insert(rec.id.clone(), rec);
+    }
+
+    /// Replace the prompt vector of an existing chat. Used during
+    /// hydration to splice the persisted prompts back in after the
+    /// chat row has been ingested.
+    pub fn ingest_prompts(&mut self, chat_id: &str, prompts: Vec<PromptRecord>) {
+        if let Some(chat) = self.by_id.get_mut(chat_id) {
+            chat.prompts = prompts;
+        }
+    }
+
+    /// Append a pre-built prompt (with the store-issued id + seq).
+    /// Used by `persist_add_prompt` so the in-memory record matches
+    /// the persisted one exactly. Returns whether the chat existed.
+    pub fn ingest_prompt(&mut self, chat_id: &str, prompt: PromptRecord) -> bool {
+        if let Some(chat) = self.by_id.get_mut(chat_id) {
+            chat.prompts.push(prompt);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove a chat from the cache. The store-side cascade handles
+    /// the actual deletion; this just keeps the cache in sync.
+    pub fn evict(&mut self, chat_id: &str) {
+        if let Some(rec) = self.by_id.remove(chat_id) {
+            if let Some(ids) = self.by_project.get_mut(&rec.project_id) {
+                ids.retain(|i| i != chat_id);
+            }
+        }
+    }
+
+    /// Borrow a chat mutably so a store-roundtrip method can update
+    /// the cached events vec after a persist. The public callers
+    /// stay shielded behind the helpers below.
+    pub fn chat_mut(&mut self, chat_id: &str) -> Option<&mut ChatRecord> {
+        self.by_id.get_mut(chat_id)
+    }
+}
+
+/// Hydrate the in-memory chat registry from the persistent
+/// `ChatRepo` store. Called once on server startup. Without this,
+/// every restart wiped the user's session continuity — which broke
+/// the project's basic usability story. See
+/// `docs/architecture/chat-queue-routing.md` for the full
+/// persistence model.
+///
+/// Errors fetching individual prompts are logged + skipped so a
+/// single corrupt row doesn't block the whole boot.
+pub async fn hydrate_from_store(state: &AppState) {
+    let chats = match state.chat_store.list_all().await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to list chats from store; starting empty");
+            return;
+        }
+    };
+    let mut reg = state.chats.write().await;
+    for row in chats {
+        let prompts = match state
+            .chat_store
+            .list_prompts(&row.id, None, None)
+            .await
+        {
+            Ok(rows) => rows
+                .into_iter()
+                .filter_map(prompt_from_store_row)
+                .collect::<Vec<_>>(),
+            Err(e) => {
+                tracing::warn!(
+                    chat_id = %row.id,
+                    error = %e,
+                    "failed to load prompts; chat will appear empty",
+                );
+                vec![]
+            }
+        };
+        let chat = chat_from_store_row(row, prompts);
+        reg.ingest_chat(chat);
+    }
+}
+
+fn chat_from_store_row(
+    row: agentgrove_store::ChatRow,
+    prompts: Vec<PromptRecord>,
+) -> ChatRecord {
+    ChatRecord {
+        id: row.id,
+        project_id: row.project_id,
+        worktree_id: row.worktree_id,
+        title: row.title,
+        provider: row.provider,
+        model: row.model,
+        created_at: row.created_at,
+        prompts,
+        session_id: row.session_id,
+        effort: row.effort,
+    }
+}
+
+fn prompt_from_store_row(row: agentgrove_store::PromptRow) -> Option<PromptRecord> {
+    // The store keeps `events` + `touched_paths` as opaque JSON;
+    // we map them back into the strongly-typed in-memory form. A
+    // parse failure means the row was written by a future BE
+    // version — we keep the prompt but drop its events so the
+    // chat still renders.
+    let events: Vec<AgentEvent> = serde_json::from_value(row.events.clone())
+        .unwrap_or_else(|_| {
+            tracing::warn!(
+                prompt_id = %row.id,
+                "events_json failed to deserialise; dropping events for this prompt",
+            );
+            vec![]
+        });
+    let touched_paths: Vec<String> =
+        serde_json::from_value(row.touched_paths.clone()).unwrap_or_default();
+    Some(PromptRecord {
+        id: row.id,
+        seq: row.seq,
+        content: row.content,
+        events,
+        touched_paths,
+        created_at: row.created_at,
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -278,15 +413,17 @@ pub async fn create_for_project_handler(
         }
     }
 
-    let mut reg = state.chats.write().await;
-    Ok(Json(reg.create(
+    persist_create_chat(
+        &state,
         project_id,
         body.worktree_id,
         body.title,
         body.provider,
         body.model,
         body.effort,
-    )))
+    )
+    .await
+    .map(Json)
 }
 
 // ---- worktree-scoped routes (legacy, retained) -------------------------
@@ -308,15 +445,193 @@ pub async fn create(
         Err(_) => wt.clone(),
     };
 
-    let mut reg = state.chats.write().await;
-    Ok(Json(reg.create(
+    persist_create_chat(
+        &state,
         project_id,
         Some(wt),
         body.title,
         body.provider,
         body.model,
         body.effort,
-    )))
+    )
+    .await
+    .map(Json)
+}
+
+/// Persist a single prompt + ingest into the cache. The store
+/// owns the id + seq so the cached record can't ever diverge from
+/// disk.
+pub(crate) async fn persist_add_prompt(
+    state: &AppState,
+    chat_id: &str,
+    content: &str,
+) -> Result<Option<PromptRecord>, agentgrove_store::ChatError> {
+    let row = state.chat_store.add_prompt(chat_id, content).await?;
+    let prompt = PromptRecord {
+        id: row.id,
+        seq: row.seq,
+        content: row.content,
+        events: vec![],
+        touched_paths: vec![],
+        created_at: row.created_at,
+    };
+    let mut reg = state.chats.write().await;
+    let ok = reg.ingest_prompt(chat_id, prompt.clone());
+    Ok(if ok { Some(prompt) } else { None })
+}
+
+/// Flush the current in-memory `events` vec for a prompt to the
+/// store. Called on terminal events (`done` / `error`) so the high-
+/// frequency token deltas don't slam SQLite while still surviving
+/// restart. Fire-and-forget on the store side: errors are logged
+/// rather than propagated because the in-memory state is already
+/// correct — losing a flush just means the next restart shows the
+/// turn one step short.
+pub(crate) async fn persist_prompt_events(state: &AppState, prompt_id: &str) {
+    // Resolve the chat + prompt from the cache first so we can
+    // serialise the current events without holding the read lock
+    // across the SQLite call.
+    let events_json = {
+        let reg = state.chats.read().await;
+        let mut found = None;
+        for chat in reg.by_id.values() {
+            if let Some(p) = chat.prompts.iter().find(|p| p.id == prompt_id) {
+                found = Some(serde_json::to_value(&p.events));
+                break;
+            }
+        }
+        match found {
+            Some(Ok(v)) => v,
+            Some(Err(e)) => {
+                tracing::warn!(prompt_id, error = %e, "events serialise failed");
+                return;
+            }
+            None => return,
+        }
+    };
+    if let Err(e) = state.chat_store.write_events(prompt_id, &events_json).await {
+        tracing::warn!(prompt_id, error = %e, "events persist failed");
+    }
+}
+
+/// Persist a chat-level field update (rename / model / effort /
+/// session id) and update the cache. Setting a new model implicitly
+/// clears the session id since resume tokens are model-bound — we
+/// mirror that contract through the store too so a restart can't
+/// resurrect a stale token.
+pub(crate) async fn persist_chat_update(
+    state: &AppState,
+    chat_id: &str,
+    title: Option<&str>,
+    model: Option<&str>,
+    effort: Option<Option<&str>>,
+    session_id: Option<Option<&str>>,
+) -> Result<(), agentgrove_store::ChatError> {
+    // Resolve whether `model` is actually changing so we know
+    // whether to also clear session_id transparently.
+    let model_changes = if let Some(new_model) = model {
+        let reg = state.chats.read().await;
+        match reg.get(chat_id) {
+            Some(c) => c.model != new_model,
+            None => true,
+        }
+    } else {
+        false
+    };
+    // If the model is changing AND the caller didn't already pass
+    // session_id, force-clear it.
+    let effective_session: Option<Option<&str>> = if model_changes && session_id.is_none() {
+        Some(None)
+    } else {
+        session_id
+    };
+    state
+        .chat_store
+        .update(chat_id, title, model, effort, effective_session)
+        .await?;
+    let mut reg = state.chats.write().await;
+    if let Some(chat) = reg.chat_mut(chat_id) {
+        if let Some(t) = title {
+            chat.title = t.to_owned();
+        }
+        if let Some(m) = model {
+            if chat.model != m {
+                chat.model = m.to_owned();
+                chat.session_id = None;
+            }
+        }
+        if let Some(e) = effort {
+            chat.effort = e.map(str::to_owned);
+        }
+        if let Some(s) = effective_session {
+            chat.session_id = s.map(str::to_owned);
+        }
+    }
+    Ok(())
+}
+
+/// Delete a chat from BOTH the store and the cache.
+pub(crate) async fn persist_chat_delete(
+    state: &AppState,
+    chat_id: &str,
+) -> Result<bool, agentgrove_store::ChatError> {
+    let removed = state.chat_store.delete(chat_id).await?;
+    state.chats.write().await.evict(chat_id);
+    Ok(removed)
+}
+
+/// Create a chat in BOTH the persistent store and the in-memory
+/// registry, returning the canonical record. The store write happens
+/// first so the row's UUID is what we hand back to the caller — the
+/// in-memory registry uses the same id so future writes keep them in
+/// sync.
+///
+/// If the store insert fails (e.g. a project_id FK violation because
+/// the project was deleted between the validation above and the
+/// insert here) we return a 500 with the underlying error message;
+/// the FE surfaces it as an error toast.
+async fn persist_create_chat(
+    state: &AppState,
+    project_id: String,
+    worktree_id: Option<String>,
+    title: String,
+    provider: String,
+    model: String,
+    effort: Option<String>,
+) -> Result<ChatRecord, (StatusCode, String)> {
+    let trimmed = title.trim().to_owned();
+    if trimmed.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "title is empty".into()));
+    }
+    let row = state
+        .chat_store
+        .create(
+            &project_id,
+            worktree_id.as_deref(),
+            &trimmed,
+            &provider,
+            &model,
+            effort.as_deref(),
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("chat store: {e}")))?;
+
+    let rec = ChatRecord {
+        id: row.id,
+        project_id: row.project_id,
+        worktree_id: row.worktree_id,
+        title: row.title,
+        provider: row.provider,
+        model: row.model,
+        created_at: row.created_at,
+        prompts: vec![],
+        session_id: row.session_id,
+        effort: row.effort,
+    };
+
+    let mut reg = state.chats.write().await;
+    reg.ingest_chat(rec.clone());
+    Ok(rec)
 }
 
 // ---- prompt-level ------------------------------------------------------
@@ -432,34 +747,55 @@ pub async fn patch(
     Path(id): Path<String>,
     Json(body): Json<UpdateChatBody>,
 ) -> Result<Json<ChatView>, (StatusCode, String)> {
-    let mut reg = state.chats.write().await;
-    // Ensure the chat exists before mutating, so all field updates
-    // either all succeed or all roll back via early return.
-    if reg.get(&id).is_none() {
-        return Err((StatusCode::NOT_FOUND, format!("chat {id} not found")));
-    }
-    if let Some(raw) = body.title {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "title cannot be empty".into(),
-            ));
+    {
+        let reg = state.chats.read().await;
+        if reg.get(&id).is_none() {
+            return Err((StatusCode::NOT_FOUND, format!("chat {id} not found")));
         }
-        reg.rename(&id, trimmed.to_string());
     }
-    if let Some(raw) = body.model {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            return Err((StatusCode::BAD_REQUEST, "model cannot be empty".into()));
+    let title_owned: Option<String> = match body.title {
+        Some(raw) => {
+            let trimmed = raw.trim().to_owned();
+            if trimmed.is_empty() {
+                return Err((StatusCode::BAD_REQUEST, "title cannot be empty".into()));
+            }
+            Some(trimmed)
         }
-        reg.set_model(&id, trimmed.to_string());
-    }
-    if let Some(eff) = body.effort {
-        // Inner `None` clears; inner `Some(_)` sets.
-        let normalized = eff.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        reg.set_effort(&id, normalized);
-    }
+        None => None,
+    };
+    let model_owned: Option<String> = match body.model {
+        Some(raw) => {
+            let trimmed = raw.trim().to_owned();
+            if trimmed.is_empty() {
+                return Err((StatusCode::BAD_REQUEST, "model cannot be empty".into()));
+            }
+            Some(trimmed)
+        }
+        None => None,
+    };
+    let effort_owned: Option<Option<String>> = body.effort.map(|inner| {
+        inner.and_then(|s| {
+            let trimmed = s.trim().to_owned();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        })
+    });
+
+    persist_chat_update(
+        &state,
+        &id,
+        title_owned.as_deref(),
+        model_owned.as_deref(),
+        effort_owned.as_ref().map(|o| o.as_deref()),
+        None,
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("chat store: {e}")))?;
+
+    let reg = state.chats.read().await;
     let rec = reg
         .get(&id)
         .ok_or((StatusCode::NOT_FOUND, format!("chat {id} not found")))?;
@@ -549,14 +885,14 @@ pub async fn add_prompt(
     // id + seq) BEFORE the agent starts streaming is what lets the
     // FE optimistic placeholder get swapped in time for the first
     // WS event.
-    let (prompt, chat) = {
-        let mut reg = state.chats.write().await;
-        let chat = reg.get(&id).ok_or(StatusCode::NOT_FOUND)?.clone();
-        let p = reg
-            .add_prompt(&id, body.content.clone())
-            .ok_or(StatusCode::NOT_FOUND)?;
-        (p, chat)
+    let chat = {
+        let reg = state.chats.read().await;
+        reg.get(&id).ok_or(StatusCode::NOT_FOUND)?.clone()
     };
+    let prompt = persist_add_prompt(&state, &id, &body.content)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     dispatching.insert(id.clone());
     drop(dispatching);
@@ -632,25 +968,50 @@ pub async fn send_message(
     // dispatching lock so a parallel send_message that just
     // enqueued can't slip its item in between our queue-read and
     // our decision.
-    let pending_in_queue = {
-        let reg = state.queues.read().await;
-        reg.state(&id)
-            .items
-            .iter()
-            .filter(|i| i.status == crate::queue::Status::Pending)
-            .count()
-    };
+    let pending_in_queue = crate::queue::read_state(&state, &id)
+        .await
+        .items
+        .iter()
+        .filter(|i| i.status == crate::queue::Status::Pending)
+        .count();
 
     if is_dispatching || pending_in_queue > 0 {
-        // Enqueue under the same lock so the resulting "queue
-        // non-empty" state is observable to any next request that
-        // takes the lock after us.
-        let item = state
-            .queues
-            .write()
+        // Enqueue. Three cases:
+        //
+        //   (a) is_dispatching=true → an active drain loop is
+        //       running and will pick this up.
+        //   (b) is_dispatching=false, mode=auto, pending>0 → the
+        //       previous drain finished before our enqueue landed;
+        //       we need to kick a fresh drain so this + the older
+        //       pending items get processed. We claim the
+        //       dispatching flag while still holding the routing
+        //       lock so a concurrent smart-send cannot also kick
+        //       (which would double-dispatch).
+        //   (c) is_dispatching=false, mode=manual → user is
+        //       explicitly running things manually; leave the item
+        //       parked.
+        //
+        // Case (b) was the bug: without it, fast successive
+        // smart-sends could outrun the drain, leaving items
+        // permanently stuck.
+        let item = crate::queue::enqueue_item(&state, &id, &body.content)
             .await
-            .enqueue(&id, body.content.clone());
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let need_kick = if !is_dispatching {
+            let auto = crate::queue::is_auto(&state, &id).await;
+            if auto {
+                dispatching.insert(id.clone());
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
         drop(dispatching);
+        if need_kick {
+            spawn_drain_task(state.clone(), id.clone());
+        }
         return Ok(Json(SendMessageResponse::Queued { item_id: item.id }));
     }
 
@@ -665,14 +1026,14 @@ pub async fn send_message(
     // lock is held — that way the spawned task is purely
     // self-contained and doesn't need to re-resolve the chat under
     // contention.
-    let (prompt, chat) = {
-        let mut reg = state.chats.write().await;
-        let chat = reg.get(&id).ok_or(StatusCode::NOT_FOUND)?.clone();
-        let p = reg
-            .add_prompt(&id, body.content.clone())
-            .ok_or(StatusCode::NOT_FOUND)?;
-        (p, chat)
+    let chat = {
+        let reg = state.chats.read().await;
+        reg.get(&id).ok_or(StatusCode::NOT_FOUND)?.clone()
     };
+    let prompt = persist_add_prompt(&state, &id, &body.content)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
     drop(dispatching);
 
     spawn_dispatch_task(state.clone(), id, chat, prompt.clone(), body.content);
@@ -733,6 +1094,133 @@ impl Drop for DispatchGuard {
     }
 }
 
+/// Spawn a drain-only task for `chat_id`. The dispatching flag is
+/// assumed to already be set by the caller (so concurrent smart-
+/// sends route correctly); this task only pops + dispatches queue
+/// items and clears the flag on exit.
+pub(crate) fn spawn_drain_task(state: AppState, chat_id: String) {
+    tokio::spawn(async move {
+        let _guard = DispatchGuard {
+            state: state.clone(),
+            chat_id: chat_id.clone(),
+        };
+        drain_until_idle(&state, &chat_id).await;
+        drop(_guard);
+    });
+}
+
+/// Drain loop body with re-check: keeps draining + tries to clear
+/// the dispatching flag, looping if a concurrent enqueue arrived
+/// during our drain. This is the only safe way to release the
+/// flag under the rapid-fire enqueue pattern; see `clear_dispatching`.
+async fn drain_until_idle(state: &AppState, chat_id: &str) {
+    loop {
+        drain_loop(state, chat_id).await;
+        if clear_dispatching(state, chat_id).await {
+            return;
+        }
+        // Items arrived; loop and drain again.
+    }
+}
+
+/// Drain loop body. Extracted from `spawn_dispatch_task` so the
+/// initial-dispatch path and the "kicked" drain-only path share
+/// the same code.
+async fn drain_loop(state: &AppState, chat_id: &str) {
+    while crate::queue::is_auto(state, chat_id).await {
+        let next_item = match crate::queue::pop_next_pending(state, chat_id).await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(chat_id, error = %e, "queue pop failed; ending drain");
+                break;
+            }
+        };
+        let Some(item) = next_item else {
+            break;
+        };
+        let chat_opt = {
+            let reg = state.chats.read().await;
+            reg.get(chat_id).cloned()
+        };
+        let Some(drain_chat) = chat_opt else {
+            let _ = crate::queue::reset_to_pending(state, &item.id).await;
+            break;
+        };
+        let drain_prompt = match persist_add_prompt(state, chat_id, &item.body).await {
+            Ok(Some(p)) => p,
+            _ => {
+                let _ = crate::queue::reset_to_pending(state, &item.id).await;
+                break;
+            }
+        };
+        let drain_topic = format!("chat:{chat_id}");
+        let drain_cwd = resolve_cwd(state, &drain_chat).await;
+        let drain_provider = state.providers.get(&drain_chat.provider);
+        if let Some(p) = drain_provider {
+            dispatch_via_provider(
+                state,
+                chat_id,
+                &drain_prompt,
+                &drain_topic,
+                p,
+                &item.body,
+                &drain_chat.model,
+                drain_chat.session_id.clone(),
+                drain_chat.effort.clone(),
+                drain_cwd,
+            )
+            .await;
+        } else {
+            dispatch_echo(state, chat_id, &drain_prompt, &drain_topic, &item.body).await;
+        }
+        if let Err(e) = crate::queue::mark_done(state, &item.id).await {
+            tracing::warn!(item_id = %item.id, error = %e, "queue mark_done failed");
+        }
+        state.logbus.publish(
+            &drain_topic,
+            serde_json::json!({ "queue_dispatched": item.id }).to_string(),
+        );
+    }
+}
+
+/// Clear the dispatching flag + publish `chat_idle`. Pulled out so
+/// both `spawn_dispatch_task` and `spawn_drain_task` share it.
+///
+/// Returns `true` if we successfully released the flag, `false` if
+/// we observed a pending queue item under the lock and therefore
+/// kept the flag held (the caller must continue draining). This
+/// "double-check under lock" closes a race where a smart-send
+/// could enqueue between our last `pop_next_pending` and the flag
+/// clear, leaving the item stranded with no drainer.
+async fn clear_dispatching(state: &AppState, chat_id: &str) -> bool {
+    let mut set = state.dispatching.lock().await;
+    // Check the queue UNDER the dispatching lock so any concurrent
+    // smart-send is either:
+    //   (a) already finished (item visible to us → don't clear), OR
+    //   (b) waiting on the lock (it'll see us as still-dispatching
+    //       once it enters, route to enqueue, and trigger a kick
+    //       OR rely on our caller to keep draining).
+    let pending = crate::queue::read_state(state, chat_id)
+        .await
+        .items
+        .iter()
+        .filter(|i| i.status == crate::queue::Status::Pending)
+        .count();
+    if pending > 0 && crate::queue::is_auto(state, chat_id).await {
+        // Items arrived between our last drain pass and now. Keep
+        // the flag held; caller will loop again.
+        return false;
+    }
+    set.remove(chat_id);
+    drop(set);
+    let topic = format!("chat:{chat_id}");
+    state.logbus.publish(
+        &topic,
+        serde_json::json!({ "chat_idle": true }).to_string(),
+    );
+    true
+}
+
 /// Spawn the agent-turn + auto-drain task for a freshly-dispatched
 /// prompt. Extracted out so both `send_message` and the legacy
 /// `add_prompt` handler share the same code path; the `dispatching`
@@ -775,83 +1263,8 @@ pub(crate) fn spawn_dispatch_task(
         } else {
             dispatch_echo(&state, &chat_id, &prompt, &topic, &body).await;
         }
-
-        // Auto-drain: while the chat is in auto mode and the queue
-        // has pending items, pop them one at a time. The drain runs
-        // in this same task so per-chat ordering is preserved and
-        // the `dispatching` flag stays set until the very end.
-        while state.queues.read().await.is_auto(&chat_id) {
-            let next_item = state.queues.write().await.pop_next_pending(&chat_id);
-            let Some(item) = next_item else { break };
-
-            // Resolve the chat record + insert a prompt placeholder.
-            // If EITHER step fails (chat deleted, prompt insert
-            // race), we must NOT leave the item we just popped
-            // sitting in the queue as Running — that's the orphan
-            // bug. Roll it back to Pending so a subsequent
-            // run_next (or the user re-enabling auto mode) can pick
-            // it up again.
-            let drain = {
-                let mut reg = state.chats.write().await;
-                let chat_opt = reg.get(&chat_id).cloned();
-                match chat_opt {
-                    None => None,
-                    Some(c) => reg
-                        .add_prompt(&chat_id, item.body.clone())
-                        .map(|p| (p, c)),
-                }
-            };
-            let Some((drain_prompt, drain_chat)) = drain else {
-                state.queues.write().await.reset_to_pending(&chat_id, &item.id);
-                break;
-            };
-            let drain_topic = format!("chat:{chat_id}");
-            let drain_cwd = resolve_cwd(&state, &drain_chat).await;
-            let drain_provider = state.providers.get(&drain_chat.provider);
-            if let Some(p) = drain_provider {
-                dispatch_via_provider(
-                    &state,
-                    &chat_id,
-                    &drain_prompt,
-                    &drain_topic,
-                    p,
-                    &item.body,
-                    &drain_chat.model,
-                    drain_chat.session_id.clone(),
-                    drain_chat.effort.clone(),
-                    drain_cwd,
-                )
-                .await;
-            } else {
-                dispatch_echo(&state, &chat_id, &drain_prompt, &drain_topic, &item.body).await;
-            }
-            state.queues.write().await.mark_done(&chat_id, &item.id);
-            state.logbus.publish(
-                &drain_topic,
-                serde_json::json!({ "queue_dispatched": item.id }).to_string(),
-            );
-        }
-
-        // Happy-path clear: release the dispatching flag + publish
-        // chat_idle SYNCHRONOUSLY before this task ends so a
-        // follow-up run_next or smart-send sees the cleared flag
-        // immediately. Without this we'd rely on the `_guard`'s
-        // Drop, which spawns a fresh task to clear (Drop can't
-        // .await) and opens a small race window where run_next
-        // returns 409 even though the agent is actually idle.
-        //
-        // The guard still runs at end-of-scope as panic-safety; in
-        // the happy path its spawn just no-ops because the flag is
-        // already gone.
-        {
-            let mut set = state.dispatching.lock().await;
-            set.remove(&chat_id);
-        }
-        let idle_topic = format!("chat:{chat_id}");
-        state.logbus.publish(
-            &idle_topic,
-            serde_json::json!({ "chat_idle": true }).to_string(),
-        );
+        // Auto-drain (loops until queue + clear are both atomic).
+        drain_until_idle(&state, &chat_id).await;
         drop(_guard);
     });
 }
@@ -1046,8 +1459,21 @@ async fn dispatch_via_provider(
                     .await;
 
                     if let AgentEvent::SessionStart { session_id } = &other {
-                        let mut reg = state.chats.write().await;
-                        reg.set_session_id(chat_id, session_id.clone());
+                        // Persist + cache in one helper so a restart
+                        // remembers the provider's resume token.
+                        let sid = session_id.clone();
+                        if let Err(e) = persist_chat_update(
+                            state,
+                            chat_id,
+                            None,
+                            None,
+                            None,
+                            Some(Some(&sid)),
+                        )
+                        .await
+                        {
+                            tracing::warn!(chat_id, error = %e, "persist session_id failed");
+                        }
                     }
                     let payload = serde_json::json!({
                         "prompt_id": prompt.id,
@@ -1109,6 +1535,10 @@ async fn dispatch_via_provider(
             reg.append_event(chat_id, &prompt.id, ev);
         }
     }
+    // Persist the prompt's final events array so the turn survives
+    // a restart. We deliberately wait until the spawn task ends —
+    // mid-stream token deltas would slam SQLite at ~20 writes/sec.
+    persist_prompt_events(state, &prompt.id).await;
 }
 
 /// Fallback echo dispatcher for chats whose provider is not in the
@@ -1139,6 +1569,10 @@ async fn dispatch_echo(
         let mut reg = state.chats.write().await;
         reg.append_event(chat_id, &prompt.id, ev);
     }
+    // Persist the now-complete events array so a restart preserves
+    // the turn. dispatch_via_provider has its own flush at the
+    // bottom; echo is the simpler test path.
+    persist_prompt_events(state, &prompt.id).await;
 }
 
 pub async fn revert_prompt(

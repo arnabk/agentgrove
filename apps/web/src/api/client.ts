@@ -502,7 +502,43 @@ export const api = {
     }),
   // Diagnostics
   getMemory: () => req<MemoryReport>("/api/diag/memory"),
+  // Layout (per-scope + global UI state) — see
+  // `docs/architecture/chat-queue-routing.md` for the session-state
+  // model.
+  getLayout: () => req<LayoutSnapshot>("/api/layout"),
+  putGlobalLayout: (blob: unknown) =>
+    req<void>("/api/layout/global", {
+      method: "PUT",
+      body: JSON.stringify({ blob }),
+    }),
+  putScopeLayout: (
+    projectId: string,
+    worktreeId: string,
+    blob: unknown,
+  ) => {
+    const qs = new URLSearchParams({ project: projectId });
+    if (worktreeId) qs.set("worktree", worktreeId);
+    return req<void>(`/api/layout/scope?${qs.toString()}`, {
+      method: "PUT",
+      body: JSON.stringify({ blob }),
+    });
+  },
 };
+
+/** Wire shape returned by `GET /api/layout`. */
+export interface LayoutSnapshot {
+  /** Opaque global layout blob. Empty `{}` when nothing is persisted. */
+  global: Record<string, unknown>;
+  /** Per-scope blobs. `worktree_id` is "" for project-root scopes. */
+  scopes: ScopeLayout[];
+}
+
+/** Wire shape for a single scope row in the layout snapshot. */
+export interface ScopeLayout {
+  project_id: string;
+  worktree_id: string;
+  blob: Record<string, unknown>;
+}
 
 /** Memory readout: backend RSS + each live PTY child's RSS. */
 export interface ProcessMemory {

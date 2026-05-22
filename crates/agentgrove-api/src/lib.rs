@@ -9,6 +9,7 @@ pub mod editor;
 pub mod fs;
 pub mod git;
 pub mod health;
+pub mod layout;
 pub mod logbus;
 pub mod notes;
 pub mod projects;

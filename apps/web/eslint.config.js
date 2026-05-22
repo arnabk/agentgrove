@@ -47,6 +47,7 @@ export default [
         PointerEvent: "readonly",
         self: "readonly",
         queueMicrotask: "readonly",
+        navigator: "readonly",
         FormData: "readonly",
         File: "readonly",
         Blob: "readonly",

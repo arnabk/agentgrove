@@ -6,11 +6,17 @@
 #![warn(missing_docs)]
 
 pub mod blob;
+pub mod chat;
 pub mod db;
+pub mod layout;
 pub mod project;
+pub mod queue;
 pub mod worktree;
 
 pub use blob::{BlobStore, Sha256};
+pub use chat::{ChatError, ChatRepo, ChatRow, PromptRow};
 pub use db::{open_pool, run_migrations, DbPool};
+pub use layout::{LayoutError, LayoutRepo};
 pub use project::{NewProject, ProjectError, ProjectRecord, ProjectRepo};
+pub use queue::{QueueError, QueueItemRow, QueueMode, QueueRepo, QueueStatus};
 pub use worktree::{NewWorktree, WorktreeError, WorktreeRecord, WorktreeRepo, WorktreeStatus};
