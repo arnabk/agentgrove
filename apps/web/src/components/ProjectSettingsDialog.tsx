@@ -100,13 +100,20 @@ export default function ProjectSettingsDialog(props: Props) {
           Runs inside every NEW worktree of this project after{" "}
           <code class="font-mono">git worktree add</code>. Use it for
           dependency installs, code-gen, or anything else a fresh
-          checkout needs. Leave blank to clear.
+          checkout needs. Leave blank to clear. Two env vars are
+          available:{" "}
+          <code class="font-mono">$AGENTGROVE_PROJECT_ROOT</code>{" "}
+          (this project's source folder) and{" "}
+          <code class="font-mono">$AGENTGROVE_WORKTREE_PATH</code>{" "}
+          (the new worktree dir, also the script's cwd).
         </p>
         <textarea
           ref={(el) => (scriptEl = el)}
           rows="6"
           class="ag-input font-mono text-[12.5px] resize-y w-full"
-          placeholder={"pnpm install\nbundle install\n# anything else…"}
+          placeholder={
+            'pnpm install\ncp "$AGENTGROVE_PROJECT_ROOT/.env.local" .\n# anything else…'
+          }
           value={script()}
           onInput={(e) => setScript(e.currentTarget.value)}
           disabled={busy()}

@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { produce } from "solid-js/store";
-import type { PromptTemplate } from "../api/client";
+import { api, type PromptTemplate } from "../api/client";
 import {
   FONT_FAMILY_PRESETS,
   FONT_SIZES,
@@ -24,10 +24,11 @@ import Select from "./Select";
  * `Tab` entry below.
  */
 
-type TabId = "appearance" | "prompts";
+type TabId = "appearance" | "prompts" | "providers";
 const TABS: { id: TabId; label: string }[] = [
   { id: "appearance", label: "Appearance" },
   { id: "prompts", label: "Prompts" },
+  { id: "providers", label: "Providers" },
 ];
 
 export default function SettingsModal() {
@@ -90,6 +91,9 @@ export default function SettingsModal() {
             </Show>
             <Show when={tab() === "prompts"}>
               <PromptsTab />
+            </Show>
+            <Show when={tab() === "providers"}>
+              <ProvidersTab />
             </Show>
           </div>
 
@@ -380,6 +384,207 @@ function PromptsTab() {
         + Add prompt
       </button>
     </div>
+  );
+}
+
+/**
+ * Providers tab — per-provider config for HTTP-API providers.
+ *
+ * Today only 9router uses this surface. The form lets the user
+ * paste a base URL + (optionally) an API key + a default model;
+ * the key is sent to the BE which encrypts at rest. The key is
+ * never echoed back, so the form starts with the key field empty
+ * even when one is already stored — `has_api_key` shows whether
+ * one is present.
+ *
+ * When more HTTP-API providers land (OpenAI direct, Anthropic
+ * direct, etc.) duplicate the `ProviderForm` block for each id —
+ * the wire shape is identical.
+ */
+function ProvidersTab() {
+  return (
+    <div class="space-y-6" data-testid="settings-providers-tab">
+      <ProviderForm
+        providerId="9router"
+        label="9router"
+        installHint="Install with `npm install -g 9router`, run `9router`, then copy the API key from http://localhost:3000."
+        defaultBaseUrl="http://localhost:20128/v1"
+        defaultModelPlaceholder="free-combo"
+      />
+    </div>
+  );
+}
+
+function ProviderForm(props: {
+  providerId: string;
+  label: string;
+  installHint: string;
+  defaultBaseUrl: string;
+  defaultModelPlaceholder: string;
+}) {
+  const [baseUrl, setBaseUrl] = createSignal(props.defaultBaseUrl);
+  const [defaultModel, setDefaultModel] = createSignal("");
+  const [apiKey, setApiKey] = createSignal("");
+  const [hasKey, setHasKey] = createSignal(false);
+  const [busy, setBusy] = createSignal(false);
+  const [err, setErr] = createSignal<string | null>(null);
+  const [savedTick, setSavedTick] = createSignal(0);
+
+  // Hydrate from BE on mount. 404 means no config yet — leave the
+  // defaults in place so the user just has to paste a key.
+  onMount(() => {
+    void (async () => {
+      try {
+        const cfg = await api.getProviderConfig(props.providerId);
+        setBaseUrl(cfg.base_url);
+        setDefaultModel(cfg.default_model ?? "");
+        setHasKey(cfg.has_api_key);
+      } catch {
+        // 404 / network — keep defaults.
+      }
+    })();
+  });
+
+  async function save() {
+    if (!baseUrl().trim()) {
+      setErr("Base URL is required.");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      const body: {
+        base_url: string;
+        default_model?: string;
+        api_key?: string;
+      } = { base_url: baseUrl().trim() };
+      if (defaultModel().trim()) body.default_model = defaultModel().trim();
+      // Only send api_key if the user typed something. Empty +
+      // not-touched should leave the existing key untouched. The
+      // user clears the key explicitly via the "Forget" button.
+      if (apiKey().length > 0) body.api_key = apiKey();
+      const cfg = await api.putProviderConfig(props.providerId, body);
+      setHasKey(cfg.has_api_key);
+      setApiKey(""); // never keep the plaintext in the form
+      setSavedTick((t) => t + 1);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function forget() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.putProviderConfig(props.providerId, {
+        base_url: baseUrl().trim() || props.defaultBaseUrl,
+        api_key: "", // empty = clear
+      });
+      setHasKey(false);
+      setApiKey("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section
+      class="rounded-lg border border-border bg-bg-2 p-4 space-y-3"
+      data-testid={`provider-form-${props.providerId}`}
+    >
+      <header class="flex items-center justify-between">
+        <h3 class="text-[13.5px] font-semibold">{props.label}</h3>
+        <Show
+          when={hasKey()}
+          fallback={
+            <span class="ag-chip text-[11px]">no key</span>
+          }
+        >
+          <span class="ag-chip ag-chip-accent text-[11px]">configured</span>
+        </Show>
+      </header>
+      <p class="text-[11.5px] text-fg-subtle">{props.installHint}</p>
+
+      <label class="block text-[12px] font-medium text-fg-muted">
+        Base URL
+      </label>
+      <input
+        class="ag-input font-mono text-[12.5px]"
+        placeholder={props.defaultBaseUrl}
+        value={baseUrl()}
+        onInput={(e) => setBaseUrl(e.currentTarget.value)}
+        disabled={busy()}
+        data-testid={`provider-${props.providerId}-base-url`}
+      />
+
+      <label class="block text-[12px] font-medium text-fg-muted">
+        Default model
+      </label>
+      <input
+        class="ag-input font-mono text-[12.5px]"
+        placeholder={props.defaultModelPlaceholder}
+        value={defaultModel()}
+        onInput={(e) => setDefaultModel(e.currentTarget.value)}
+        disabled={busy()}
+        data-testid={`provider-${props.providerId}-default-model`}
+      />
+
+      <label class="block text-[12px] font-medium text-fg-muted">
+        API key
+      </label>
+      <input
+        type="password"
+        autocomplete="off"
+        class="ag-input font-mono text-[12.5px]"
+        placeholder={hasKey() ? "•••••••• (leave blank to keep)" : "sk-..."}
+        value={apiKey()}
+        onInput={(e) => setApiKey(e.currentTarget.value)}
+        disabled={busy()}
+        data-testid={`provider-${props.providerId}-api-key`}
+      />
+      <p class="text-[11px] text-fg-subtle">
+        Stored encrypted at rest under{" "}
+        <code class="font-mono">&lt;state_dir&gt;/agentgrove.sqlite</code>{" "}
+        with a machine-bound key at{" "}
+        <code class="font-mono">&lt;state_dir&gt;/secrets.key</code>.
+      </p>
+
+      <Show when={err()}>
+        <p class="text-[12px] text-danger" data-testid={`provider-${props.providerId}-error`}>
+          {err()}
+        </p>
+      </Show>
+
+      <div class="flex items-center gap-2 pt-1">
+        <button
+          type="button"
+          class="ag-btn ag-btn-primary"
+          onClick={() => void save()}
+          disabled={busy()}
+          data-testid={`provider-${props.providerId}-save`}
+        >
+          {busy() ? "Saving…" : "Save"}
+        </button>
+        <Show when={hasKey()}>
+          <button
+            type="button"
+            class="ag-btn ag-btn-ghost"
+            onClick={() => void forget()}
+            disabled={busy()}
+            data-testid={`provider-${props.providerId}-forget`}
+          >
+            Forget key
+          </button>
+        </Show>
+        <Show when={savedTick() > 0}>
+          <span class="text-[11.5px] text-accent">Saved.</span>
+        </Show>
+      </div>
+    </section>
   );
 }
 

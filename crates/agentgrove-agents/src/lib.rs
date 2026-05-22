@@ -26,6 +26,7 @@ use tokio::sync::mpsc;
 
 pub mod claude;
 pub mod fake;
+pub mod nine_router;
 
 /// Streaming event emitted by an agent provider.
 ///
@@ -105,6 +106,13 @@ pub enum ProviderId {
     Claude,
     /// Test-only deterministic provider.
     Fake,
+    /// 9router HTTP API — OpenAI-compatible aggregator. User pastes
+    /// API key + base URL in Settings → Providers; the BE encrypts
+    /// the key at rest with the machine-bound keyring.
+    #[serde(rename = "9router")]
+    NineRouter,
+    /// opencode CLI subprocess (paired with its own auth chain).
+    Opencode,
 }
 
 impl ProviderId {
@@ -113,6 +121,8 @@ impl ProviderId {
         match self {
             ProviderId::Claude => "claude",
             ProviderId::Fake => "fake",
+            ProviderId::NineRouter => "9router",
+            ProviderId::Opencode => "opencode",
         }
     }
 }

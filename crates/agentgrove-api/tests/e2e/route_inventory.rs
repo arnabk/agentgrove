@@ -28,6 +28,7 @@ fn expected_routes() -> BTreeSet<&'static str> {
         "GET /api/chats/{id}/prompts",
         "POST /api/chats/{id}/prompts",
         "POST /api/chats/{id}/messages",
+        "POST /api/chats/{id}/stop",
         "POST /api/chats/{chat_id}/prompts/{prompt_id}/revert",
         "GET /api/chats/{id}/queue",
         "POST /api/chats/{id}/queue",
@@ -67,6 +68,9 @@ fn expected_routes() -> BTreeSet<&'static str> {
         "POST /api/themes",
         "GET /api/providers",
         "GET /api/providers/{id}/commands",
+        "GET /api/providers/{id}/config",
+        "PUT /api/providers/{id}/config",
+        "DELETE /api/providers/{id}/config",
         "POST /api/uploads",
         "GET /api/uploads/{id}/raw",
     ]

@@ -60,6 +60,10 @@ pub fn build_router(state: AppState) -> Router {
         // FE callers should prefer this over POST .../prompts +
         // POST .../queue to avoid racing on busy / pending counts.
         .route("/api/chats/:id/messages", post(chats::send_message))
+        // Cancel the in-flight agent turn (kills the provider
+        // subprocess, appends a synthetic `cancelled by user`
+        // error event, frees the chat for the next message).
+        .route("/api/chats/:id/stop", post(chats::stop_turn))
         .route(
             "/api/chats/:chat_id/prompts/:prompt_id/revert",
             post(chats::revert_prompt),
@@ -131,6 +135,17 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/providers/:id/commands",
             get(providers::commands),
+        )
+        // Per-provider config — base URL + (optional) encrypted API
+        // key for HTTP providers. Stored under
+        // `<state_dir>/agentgrove.sqlite` (encrypted) + the key file
+        // at `<state_dir>/secrets.key`. The GET response never echoes
+        // the plaintext key; only the `has_api_key` flag.
+        .route(
+            "/api/providers/:id/config",
+            get(providers::get_config)
+                .put(providers::put_config)
+                .delete(providers::delete_config),
         )
         // Uploads (drag-drop + image paste in chat input). The body
         // limit is lifted just for these routes via a per-route layer

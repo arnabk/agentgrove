@@ -2,7 +2,7 @@
 
 use crate::state::AppState;
 use agentgrove_git as git;
-use agentgrove_scripts::{run_script, ScriptEvent, Shell};
+use agentgrove_scripts::{run_script, run_script_with_env, ScriptEvent, Shell};
 use agentgrove_store::{NewWorktree, WorktreeError, WorktreeRecord, WorktreeStatus};
 use axum::{
     extract::{Path, Query, State},
@@ -225,11 +225,20 @@ pub async fn create(
                     bus.publish(&topic_relay, serde_json::to_string(&ev).unwrap_or_default());
                 }
             });
-            let res = run_script(
+            // Inject context envs so scripts can reference the
+            // user's project root without guessing where the worktree
+            // dir lives on disk. `cp $AGENTGROVE_PROJECT_ROOT/.env.local .`
+            // is the canonical idiom.
+            let envs: &[(&str, &std::path::Path)] = &[
+                ("AGENTGROVE_PROJECT_ROOT", project_root.as_path()),
+                ("AGENTGROVE_WORKTREE_PATH", wt_path_for_task.as_path()),
+            ];
+            let res = run_script_with_env(
                 &script,
                 &wt_path_for_task,
                 &Shell::Auto,
                 Duration::from_secs(120),
+                envs,
                 tx,
             )
             .await;

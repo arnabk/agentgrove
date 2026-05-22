@@ -103,10 +103,25 @@ export default function ChatPane() {
   //   - anything else → token / thinking / tool_use stream is mid-
   //     flight → busy.
   //
-  // Note: there's no FE-side `busy` signal anymore — the BE's
-  // smart-send endpoint (POST /api/chats/:id/messages) makes the
-  // authoritative dispatch-vs-queue decision and returns a tagged
-  // response. See `docs/architecture/chat-queue-routing.md`.
+  // Note: the BE's smart-send endpoint (POST /api/chats/:id/messages)
+  // makes the authoritative dispatch-vs-queue decision so the FE
+  // doesn't need a `busy` signal for routing. We do compute one
+  // here for *UI* purposes only — driving the Send/Stop button
+  // toggle. "Streaming" means the tail prompt has at least one
+  // non-terminal event flowing.
+  const isStreaming = (): boolean => {
+    const tail = chatStore.prompts[chatStore.prompts.length - 1];
+    if (!tail) return false;
+    const evs = tail.events;
+    if (evs.length === 0) {
+      // Newly accepted prompt — events haven't started flowing yet.
+      // Treat as "streaming" so the Stop button is reachable
+      // even during the brief pre-token window.
+      return true;
+    }
+    const last = evs[evs.length - 1]!;
+    return last.type !== "done" && last.type !== "error";
+  };
   const [err, setErr] = createSignal<string | null>(null);
   // Pending uploads attached to the next prompt. Chips render below
   // the textarea; on send we tack their absolute paths onto the
@@ -333,8 +348,18 @@ export default function ChatPane() {
       // reload would discard partial tokens between WS deliveries.
       try {
         if (typeof ev.data === "string") {
-          const parsed = JSON.parse(ev.data) as { queue_dispatched?: string };
+          const parsed = JSON.parse(ev.data) as {
+            queue_dispatched?: string;
+            chat_idle?: boolean;
+          };
           if (parsed.queue_dispatched) {
+            void reconcileChat();
+            return;
+          }
+          if (parsed.chat_idle) {
+            // BE finished the turn (and any auto-drain). Reconcile
+            // so the FE picks up the canonical persisted events
+            // even if a streaming frame got lost.
             void reconcileChat();
             return;
           }
@@ -358,6 +383,31 @@ export default function ChatPane() {
         // ignore
       }
     });
+  });
+
+  // Belt-and-suspenders: while a prompt is in flight (no `done` /
+  // `error` event on the tail) poll the chat view every 3 s as a
+  // fallback for lost WS frames. The user reported one case where
+  // the assistant bubble stayed at "working..." until a refresh
+  // even though the BE had streamed + persisted the answer; this
+  // ensures the FE catches up within at most 3 s.
+  createEffect(() => {
+    const id = activeId();
+    if (!id) return;
+    const tail = chatStore.prompts[chatStore.prompts.length - 1];
+    if (!tail) return;
+    const evs = tail.events;
+    const last = evs[evs.length - 1];
+    const isInFlight =
+      evs.length === 0 ||
+      (last && last.type !== "done" && last.type !== "error");
+    if (!isInFlight) return;
+    const handle = setInterval(() => {
+      // `reconcileChat` is soft: it preserves liveTokens for any
+      // still-streaming prompts. Safe to call repeatedly.
+      void reconcileChat();
+    }, 3000);
+    onCleanup(() => clearInterval(handle));
   });
 
   // Refresh tab list whenever the active scope changes.
@@ -608,6 +658,25 @@ export default function ChatPane() {
       setInput(snapshot.body);
       setUploads(snapshot.uploads);
       setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** Cancel the in-flight agent turn. BE kills the provider
+   *  subprocess + appends a synthetic `cancelled by user` error
+   *  event so the prompt's history shows why the turn ended early.
+   *  The chat stays put — the next message picks up the same
+   *  thread (and may resume the session if the provider supports
+   *  it). */
+  async function stopChat() {
+    const id = activeId();
+    if (!id) return;
+    try {
+      await api.stopChat(id);
+    } catch (e) {
+      // 404 is benign — race between user click and the turn
+      // ending on its own. Anything else gets surfaced.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!msg.includes("404")) setErr(msg);
     }
   }
 
@@ -1217,28 +1286,42 @@ export default function ChatPane() {
               </div>
             </Show>
 
-            <button
-              type="submit"
-              class="ag-btn ag-btn-primary ml-auto !py-1 !px-2.5 text-[12px]"
-              disabled={
-                !activeId() ||
-                (!input().trim() && uploads().length === 0)
+            <Show
+              when={isStreaming()}
+              fallback={
+                <button
+                  type="submit"
+                  class="ag-btn ag-btn-primary ml-auto !py-1 !px-2.5 text-[12px]"
+                  disabled={
+                    !activeId() ||
+                    (!input().trim() && uploads().length === 0)
+                  }
+                  // Always "Send" while idle. The send handler routes
+                  // idle messages to the dispatch path and busy ones
+                  // to the queue path automatically; queue mode
+                  // defaults to auto, so the BE drains messages
+                  // back-to-back. We swap to a Stop button (below)
+                  // while the agent is mid-turn.
+                  title="Send to the agent"
+                  data-testid="chat-send"
+                >
+                  Send
+                  <span class="ag-kbd !bg-transparent !border-transparent text-[var(--ag-accent-fg)] opacity-80 ml-1">
+                    ⏎
+                  </span>
+                </button>
               }
-              // Always "Send" from the user's perspective. The
-              // send handler routes idle messages to the dispatch
-              // path and busy ones to the queue path automatically;
-              // queue mode defaults to auto, so the BE drains
-              // messages back-to-back without manual intervention.
-              // Surfacing "Enqueue" mid-turn used to confuse users
-              // into thinking they had to press Send a second time.
-              title="Send to the agent"
-              data-testid="chat-send"
             >
-              Send
-              <span class="ag-kbd !bg-transparent !border-transparent text-[var(--ag-accent-fg)] opacity-80 ml-1">
-                ⏎
-              </span>
-            </button>
+              <button
+                type="button"
+                class="ag-btn ag-btn-danger ml-auto !py-1 !px-2.5 text-[12px]"
+                onClick={() => void stopChat()}
+                title="Stop the agent. The chat keeps its history; you can send the next message right after."
+                data-testid="chat-stop"
+              >
+                ✕ Stop
+              </button>
+            </Show>
           </div>
         </div>
       </form>

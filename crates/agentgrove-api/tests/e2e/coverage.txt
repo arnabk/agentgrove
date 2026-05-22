@@ -23,6 +23,7 @@ PATCH /api/chats/{id}
 GET /api/chats/{id}/prompts
 POST /api/chats/{id}/prompts
 POST /api/chats/{id}/messages
+POST /api/chats/{id}/stop
 POST /api/chats/{chat_id}/prompts/{prompt_id}/revert
 GET /api/chats/{id}/queue
 POST /api/chats/{id}/queue
@@ -62,5 +63,8 @@ GET /api/themes
 POST /api/themes
 GET /api/providers
 GET /api/providers/{id}/commands
+GET /api/providers/{id}/config
+PUT /api/providers/{id}/config
+DELETE /api/providers/{id}/config
 POST /api/uploads
 GET /api/uploads/{id}/raw

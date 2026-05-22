@@ -1040,6 +1040,40 @@ pub async fn send_message(
     Ok(Json(SendMessageResponse::Dispatched { prompt }))
 }
 
+/// `POST /api/chats/:id/stop` — cancel the chat's in-flight turn.
+///
+/// Looks up the per-chat `CancellationToken` installed by the
+/// dispatch task and trips it. The token's `cancelled()` future
+/// wins the `tokio::select!` inside `dispatch_via_provider`, which
+/// drops the provider's spawn future — and with it the
+/// `tokio::process::Child` (created with `kill_on_drop`), which
+/// terminates the CLI subprocess. The dispatch task then appends a
+/// synthetic `error: cancelled by user` event so the prompt's
+/// history shows why the turn ended, and the dispatching flag is
+/// released via `DispatchGuard` so the user can send the next
+/// message immediately.
+///
+/// Returns:
+///   - 204 if we successfully tripped a running turn.
+///   - 404 if there's no in-flight turn for the chat (idle, or
+///     already cancelled).
+pub async fn stop_turn(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> StatusCode {
+    let token = {
+        let map = state.cancel_tokens.lock().await;
+        map.get(&id).cloned()
+    };
+    match token {
+        Some(t) => {
+            t.cancel();
+            StatusCode::NO_CONTENT
+        }
+        None => StatusCode::NOT_FOUND,
+    }
+}
+
 /// RAII guard that clears the chat's `dispatching` flag on drop.
 ///
 /// This is the single source of truth for "this chat is no longer
@@ -1155,7 +1189,7 @@ async fn drain_loop(state: &AppState, chat_id: &str) {
         };
         let drain_topic = format!("chat:{chat_id}");
         let drain_cwd = resolve_cwd(state, &drain_chat).await;
-        let drain_provider = state.providers.get(&drain_chat.provider);
+        let drain_provider = crate::providers::resolve(state, &drain_chat.provider).await;
         if let Some(p) = drain_provider {
             dispatch_via_provider(
                 state,
@@ -1245,7 +1279,7 @@ pub(crate) fn spawn_dispatch_task(
 
         let topic = format!("chat:{chat_id}");
         let cwd = resolve_cwd(&state, &chat).await;
-        let provider = state.providers.get(&chat.provider);
+        let provider = crate::providers::resolve(&state, &chat.provider).await;
         if let Some(p) = provider {
             dispatch_via_provider(
                 &state,
@@ -1309,8 +1343,25 @@ async fn dispatch_via_provider(
     };
     let prompt_text = user_text.to_string();
     let provider_for_task = provider.clone();
+    // Install a per-chat cancellation token so the caller can
+    // abort this turn via `POST /api/chats/:id/cancel`. The token
+    // is dropped on exit so subsequent turns get a fresh one.
+    let cancel_token = tokio_util::sync::CancellationToken::new();
+    {
+        let mut map = state.cancel_tokens.lock().await;
+        map.insert(chat_id.to_string(), cancel_token.clone());
+    }
+    let cancel_for_task = cancel_token.clone();
     let spawn_task = tokio::spawn(async move {
-        provider_for_task.spawn(&prompt_text, opts, tx).await
+        // Race the provider against the cancellation token. On
+        // cancel we return Ok(()) so the outer flow treats it as
+        // a clean shutdown — the synthetic "cancelled" event is
+        // appended below.
+        tokio::select! {
+            biased;
+            _ = cancel_for_task.cancelled() => Ok(()),
+            res = provider_for_task.spawn(&prompt_text, opts, tx) => res,
+        }
     });
 
     // Coalescing state. Providers (Claude in particular) emit one
@@ -1508,7 +1559,24 @@ async fn dispatch_via_provider(
 
     // Surface spawn errors as a synthetic Error event so the FE can
     // render them inline instead of just observing a silent close.
+    // Special-case cancellation: if the user cancelled the turn,
+    // emit a friendlier "cancelled by user" error so the FE can
+    // style it differently (and the persisted history shows why
+    // the turn ended early).
+    let was_cancelled = cancel_token.is_cancelled();
     match spawn_task.await {
+        Ok(Ok(())) if was_cancelled => {
+            let ev = AgentEvent::Error {
+                message: "cancelled by user".to_string(),
+            };
+            let payload = serde_json::json!({
+                "prompt_id": prompt.id,
+                "event": ev,
+            });
+            state.logbus.publish(topic, payload.to_string());
+            let mut reg = state.chats.write().await;
+            reg.append_event(chat_id, &prompt.id, ev);
+        }
         Ok(Ok(())) => {}
         Ok(Err(e)) => {
             let ev = AgentEvent::Error {
@@ -1534,6 +1602,13 @@ async fn dispatch_via_provider(
             let mut reg = state.chats.write().await;
             reg.append_event(chat_id, &prompt.id, ev);
         }
+    }
+    // Drop the cancel token from the map — subsequent turns get a
+    // fresh one. Doing this *before* the persist guarantees a
+    // race-free state.cancel_tokens map.
+    {
+        let mut map = state.cancel_tokens.lock().await;
+        map.remove(chat_id);
     }
     // Persist the prompt's final events array so the turn survives
     // a restart. We deliberately wait until the spawn task ends —

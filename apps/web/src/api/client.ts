@@ -129,6 +129,15 @@ export interface SlashCommand {
   description: string;
 }
 
+/** Wire shape for `GET /api/providers/:id/config`. The plaintext
+ *  API key is never returned — only the `has_api_key` flag. */
+export interface ProviderConfig {
+  provider_id: string;
+  base_url: string;
+  default_model: string | null;
+  has_api_key: boolean;
+}
+
 /** Upload metadata returned by `POST /api/uploads`. */
 export interface UploadDto {
   id: string;
@@ -338,6 +347,14 @@ export const api = {
         body: JSON.stringify({ content }),
       },
     ),
+  /** Cancel the in-flight agent turn for this chat. Kills the
+   *  provider subprocess + appends a synthetic `cancelled by user`
+   *  error event. Returns 204 on success, 404 when the chat is
+   *  already idle. */
+  stopChat: (chatId: string) =>
+    req<void>(`/api/chats/${encodeURIComponent(chatId)}/stop`, {
+      method: "POST",
+    }),
   revertPrompt: (chatId: string, promptId: string) =>
     req<Prompt>(
       `/api/chats/${encodeURIComponent(chatId)}/prompts/${encodeURIComponent(promptId)}/revert`,
@@ -373,6 +390,30 @@ export const api = {
   listProviderCommands: (providerId: string) =>
     req<SlashCommand[]>(
       `/api/providers/${encodeURIComponent(providerId)}/commands`,
+    ),
+  /** Read a per-provider config (base URL + has_api_key). The
+   *  plaintext API key is never returned over HTTP. */
+  getProviderConfig: (providerId: string) =>
+    req<ProviderConfig>(
+      `/api/providers/${encodeURIComponent(providerId)}/config`,
+    ),
+  /** Upsert a per-provider config. `api_key` semantics:
+   *    - omitted/null → leave existing key untouched
+   *    - empty string → clear stored key
+   *    - non-empty    → encrypt + persist on the BE */
+  putProviderConfig: (
+    providerId: string,
+    body: { base_url: string; default_model?: string; api_key?: string | null },
+  ) =>
+    req<ProviderConfig>(
+      `/api/providers/${encodeURIComponent(providerId)}/config`,
+      { method: "PUT", body: JSON.stringify(body) },
+    ),
+  /** Delete the per-provider config row. */
+  deleteProviderConfig: (providerId: string) =>
+    req<void>(
+      `/api/providers/${encodeURIComponent(providerId)}/config`,
+      { method: "DELETE" },
     ),
   /** Upload one or more files. The FormData should carry parts under
    *  the field name `file`. Returns metadata (including the absolute

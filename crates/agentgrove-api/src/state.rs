@@ -2,9 +2,10 @@
 
 use crate::logbus::LogBus;
 use agentgrove_store::{
-    ChatRepo, DbPool, LayoutRepo, ProjectRepo, QueueRepo, WorktreeRepo,
+    ChatRepo, DbPool, LayoutRepo, ProjectRepo, ProviderSecretRepo, QueueRepo, SecretKeyring,
+    WorktreeRepo,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -31,6 +32,11 @@ pub struct AppState {
     /// scope mutation so the layout follows the user across
     /// machines.
     pub layouts: LayoutRepo,
+    /// Encrypted per-provider API key + base URL. Used by
+    /// HTTP-API providers (9router and future OpenAI-compatible
+    /// aggregators). The store decrypts via a machine-bound key at
+    /// `<state_dir>/secrets.key`.
+    pub provider_secrets: ProviderSecretRepo,
     /// Log broadcast bus for streaming script / terminal / chat output.
     pub logbus: Arc<LogBus>,
     /// In-memory chat aggregate registry.
@@ -57,6 +63,12 @@ pub struct AppState {
     /// happy-path callers clear the flag synchronously themselves
     /// (the guard is just an insurance policy for panics).
     pub dispatching: Arc<Mutex<HashSet<String>>>,
+    /// Per-chat cancellation tokens. The dispatch task installs
+    /// one before spawning the provider; `POST /api/chats/:id/cancel`
+    /// flips it, which causes the `tokio::select!` wrapping the
+    /// provider call to bail out — dropping the child `Command`
+    /// (spawned with `kill_on_drop`) and ending the turn.
+    pub cancel_tokens: Arc<Mutex<HashMap<String, tokio_util::sync::CancellationToken>>>,
 }
 
 impl AppState {
@@ -69,6 +81,15 @@ impl AppState {
         let chat_store = ChatRepo::new(db.clone());
         let queue_store = QueueRepo::new(db.clone());
         let layouts = LayoutRepo::new(db.clone());
+        // Open (or create on first run) the at-rest encryption key.
+        // We deliberately panic on failure here — a server that
+        // can't manage its own secrets keyring shouldn't pretend to
+        // be usable. The error message points the operator at the
+        // file so they can fix it (e.g. delete a corrupt key file
+        // and let us regenerate).
+        let keyring = SecretKeyring::open(&state_dir)
+            .expect("open secrets keyring");
+        let provider_secrets = ProviderSecretRepo::new(db.clone(), keyring);
         Self {
             state_dir: Arc::new(state_dir),
             db,
@@ -77,6 +98,7 @@ impl AppState {
             chat_store,
             queue_store,
             layouts,
+            provider_secrets,
             logbus: Arc::new(LogBus::default()),
             chats: Arc::new(RwLock::new(crate::chats::ChatRegistry::default())),
             notes: Arc::new(RwLock::new(crate::notes::NoteRegistry::default())),
@@ -85,6 +107,7 @@ impl AppState {
             terminals: Arc::new(crate::terminal::TerminalManager::default()),
             providers: crate::providers::ProviderRegistry::default(),
             dispatching: Arc::new(Mutex::new(HashSet::new())),
+            cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }

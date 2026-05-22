@@ -106,15 +106,45 @@ pub async fn run_script(
     timeout: Duration,
     tx: mpsc::UnboundedSender<ScriptEvent>,
 ) -> Result<i32, ScriptError> {
+    run_script_with_env(script, cwd, shell, timeout, &[], tx).await
+}
+
+/// Like [`run_script`] but with extra environment variables. Use
+/// this when the script needs context the cwd doesn't carry — e.g.
+/// the project root for pre-worktree hooks, where the script's
+/// `cwd` is the *new worktree* (under `<state_dir>/worktrees/...`)
+/// rather than the source project root the user typically wants to
+/// reference paths against.
+///
+/// Each `(key, value)` pair is forwarded into the child via
+/// `Command::env`. Reserved keys (`GIT_TERMINAL_PROMPT`) are not
+/// overwritten.
+///
+/// # Errors
+/// Same as [`run_script`].
+pub async fn run_script_with_env(
+    script: &str,
+    cwd: &Path,
+    shell: &Shell,
+    timeout: Duration,
+    envs: &[(&str, &Path)],
+    tx: mpsc::UnboundedSender<ScriptEvent>,
+) -> Result<i32, ScriptError> {
     let (program, flag) = resolve_shell(shell)?;
-    let mut child = Command::new(&program)
-        .arg(&flag)
+    let mut cmd = Command::new(&program);
+    cmd.arg(&flag)
         .arg(script)
         .current_dir(cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .spawn()?;
+        .env("GIT_TERMINAL_PROMPT", "0");
+    for (k, v) in envs {
+        if *k == "GIT_TERMINAL_PROMPT" {
+            continue;
+        }
+        cmd.env(k, v);
+    }
+    let mut child = cmd.spawn()?;
 
     let stdout = child.stdout.take().expect("stdout piped");
     let stderr = child.stderr.take().expect("stderr piped");
