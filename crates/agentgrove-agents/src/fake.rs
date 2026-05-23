@@ -1,7 +1,9 @@
 //! Deterministic in-process provider used by tests. Emits a scripted
 //! sequence of [`AgentEvent`]s and ignores the prompt and cwd.
 
-use crate::{AgentEvent, AgentProvider, ProviderDescriptor, ProviderError, ProviderId, SpawnOptions};
+use crate::{
+    AgentEvent, AgentProvider, ProviderDescriptor, ProviderError, ProviderId, SpawnOptions,
+};
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -36,8 +38,8 @@ impl AgentProvider for FakeProvider {
             available: true,
             path: None,
             version: Some("test".into()),
-            default_model: "echo",
-            models: &["echo"],
+            default_model: "echo".to_string(),
+            models: vec!["echo".to_string()],
             supports_resume: false,
         }
     }
@@ -77,7 +79,9 @@ mod tests {
         ];
         let p = FakeProvider::with_script(script.clone());
         let (tx, mut rx) = mpsc::unbounded_channel();
-        p.spawn("ignored", SpawnOptions::default(), tx).await.unwrap();
+        p.spawn("ignored", SpawnOptions::default(), tx)
+            .await
+            .unwrap();
         let mut got = Vec::new();
         while let Some(ev) = rx.recv().await {
             got.push(ev);

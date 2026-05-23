@@ -1,0 +1,13 @@
+-- Drop `default_model` from provider_secrets.
+--
+-- Rationale: model selection belongs at chat-creation time, sourced
+-- from the provider's static descriptor (`ProviderDescriptor.models`
+-- + `default_model`). Storing a separate user-preferred default on
+-- the provider config row added a second source of truth that the
+-- FE never used consistently and that confused the Settings →
+-- Providers form (extra field for no benefit).
+--
+-- Per `docs/architecture/chat-queue-routing.md` and the broader
+-- migration discipline rule: we never edit applied migrations; this
+-- forward-only drop superseded the column from 0008.
+ALTER TABLE provider_secrets DROP COLUMN default_model;

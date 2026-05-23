@@ -125,8 +125,8 @@ impl AgentProvider for ClaudeProvider {
             available: path.is_some(),
             path,
             version,
-            default_model: DEFAULT_MODEL,
-            models: MODELS,
+            default_model: DEFAULT_MODEL.to_string(),
+            models: MODELS.iter().map(|s| (*s).to_string()).collect(),
             supports_resume: true,
         }
     }
@@ -144,8 +144,15 @@ impl AgentProvider for ClaudeProvider {
 
         let model = opts.model.as_deref().unwrap_or(DEFAULT_MODEL);
         let mut cmd = Command::new(&path);
-        cmd.arg("-p")
-            .arg(prompt)
+        // Build every option flag first; the prompt itself is passed
+        // as the positional `[prompt]` argument AFTER a `--`
+        // separator. Without `--` the CLI's option parser will
+        // happily consume a markdown bullet-list prompt like
+        // `- one\n- two` as if `-` were a short flag and bail with
+        // `unknown option`. `--print` selects non-interactive mode
+        // (equivalent to the `-p` short flag) without burning the
+        // `-p` token on the prompt itself.
+        cmd.arg("--print")
             .arg("--output-format")
             .arg("stream-json")
             .arg("--verbose")
@@ -160,6 +167,17 @@ impl AgentProvider for ClaudeProvider {
             // Unlocks extended-thinking output on capable models.
             cmd.arg("--effort").arg(effort);
         }
+        if opts.auto_approve_tools {
+            // Bypass every permission prompt. The CLI normally
+            // expects a TTY for these dialogs; AgentGrove doesn't
+            // give it one (we drive stdin closed), so without this
+            // the agent would block forever the first time it tried
+            // to run a Bash / Write / Edit tool.
+            cmd.arg("--dangerously-skip-permissions");
+        }
+        // `--` ends flag parsing; the prompt that follows is taken
+        // verbatim regardless of leading dashes.
+        cmd.arg("--").arg(prompt);
         cmd.current_dir(&opts.cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -256,7 +274,10 @@ impl AgentProvider for ClaudeProvider {
             ("context", "Show current context window usage."),
             ("init", "Initialise a CLAUDE.md for this project."),
             ("review", "Ask Claude to review the staged diff."),
-            ("security-review", "Ask Claude for a security-focused review."),
+            (
+                "security-review",
+                "Ask Claude for a security-focused review.",
+            ),
             ("usage", "Show today's cost/usage summary."),
             ("extra-usage", "Show detailed model-level usage."),
             ("insights", "Surface project insights Claude has gathered."),
@@ -421,7 +442,10 @@ fn translate_user(v: &serde_json::Value) -> Vec<AgentEvent> {
             .get("tool_use_id")
             .and_then(|x| x.as_str())
             .map(String::from);
-        let result = block.get("content").cloned().unwrap_or(serde_json::Value::Null);
+        let result = block
+            .get("content")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         // The provider doesn't repeat the tool name on results; leave
         // empty so the FE can match by id.
         out.push(AgentEvent::ToolResult {

@@ -47,8 +47,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/api/projects/:id/chats",
-            get(chats::list_for_project_handler)
-                .post(chats::create_for_project_handler),
+            get(chats::list_for_project_handler).post(chats::create_for_project_handler),
         )
         .route("/api/chats/:id", get(chats::get_one).patch(chats::patch))
         .route(
@@ -132,10 +131,7 @@ pub fn build_router(state: AppState) -> Router {
         // GET returns the detection status of every provider this
         // build knows about (installed? path? version?).
         .route("/api/providers", get(providers::list))
-        .route(
-            "/api/providers/:id/commands",
-            get(providers::commands),
-        )
+        .route("/api/providers/:id/commands", get(providers::commands))
         // Per-provider config — base URL + (optional) encrypted API
         // key for HTTP providers. Stored under
         // `<state_dir>/agentgrove.sqlite` (encrypted) + the key file
@@ -146,6 +142,14 @@ pub fn build_router(state: AppState) -> Router {
             get(providers::get_config)
                 .put(providers::put_config)
                 .delete(providers::delete_config),
+        )
+        // Manual refresh hook: invalidates the in-memory model
+        // cache for `:id` and returns the freshly-detected
+        // descriptor. The FE wires this to a refresh icon on the
+        // Settings → Providers card + the new-chat model picker.
+        .route(
+            "/api/providers/:id/refresh",
+            axum::routing::post(providers::refresh),
         )
         // Uploads (drag-drop + image paste in chat input). The body
         // limit is lifted just for these routes via a per-route layer

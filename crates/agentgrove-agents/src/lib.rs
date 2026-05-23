@@ -26,7 +26,7 @@ use tokio::sync::mpsc;
 
 pub mod claude;
 pub mod fake;
-pub mod nine_router;
+pub mod models_cache;
 pub mod opencode;
 
 /// Streaming event emitted by an agent provider.
@@ -107,11 +107,6 @@ pub enum ProviderId {
     Claude,
     /// Test-only deterministic provider.
     Fake,
-    /// 9router HTTP API — OpenAI-compatible aggregator. User pastes
-    /// API key + base URL in Settings → Providers; the BE encrypts
-    /// the key at rest with the machine-bound keyring.
-    #[serde(rename = "9router")]
-    NineRouter,
     /// opencode CLI subprocess (paired with its own auth chain).
     Opencode,
 }
@@ -122,7 +117,6 @@ impl ProviderId {
         match self {
             ProviderId::Claude => "claude",
             ProviderId::Fake => "fake",
-            ProviderId::NineRouter => "9router",
             ProviderId::Opencode => "opencode",
         }
     }
@@ -149,14 +143,14 @@ pub struct ProviderDescriptor {
     pub version: Option<String>,
     /// Default model alias (e.g. "sonnet"). FE seeds new chats with
     /// this if the user doesn't pick one.
-    pub default_model: &'static str,
-    /// Curated set of model aliases / ids this provider's CLI accepts
-    /// today, in display order. The FE renders this as a dropdown on
-    /// chat creation so users don't have to remember exact names
-    /// (Anthropic's full model ids are unwieldy). The list is
-    /// intentionally short — power users with custom models can still
-    /// type the id in the per-chat settings dialog.
-    pub models: &'static [&'static str],
+    pub default_model: String,
+    /// Model aliases / ids this provider's CLI accepts, in display
+    /// order. Providers that can interrogate their CLI for the live
+    /// list (opencode: `opencode models`) populate it dynamically;
+    /// providers without a stable discovery surface (Claude) ship a
+    /// curated static list. Power users can still type a free-form
+    /// id in the per-chat settings dialog.
+    pub models: Vec<String>,
     /// Whether the provider supports session resume across turns
     /// (Claude: yes via `--resume`; FakeProvider: no).
     pub supports_resume: bool,
@@ -187,6 +181,15 @@ pub struct SpawnOptions {
     /// to unlock extended thinking on Claude. Providers map this to
     /// their native flag (Claude: `--effort`).
     pub effort: Option<String>,
+    /// When `true`, ask the provider to bypass all permission prompts
+    /// (Claude / opencode: `--dangerously-skip-permissions`). The
+    /// CLIs surface permission prompts on a TTY, which AgentGrove
+    /// doesn't allocate — so without this flag the agent stalls
+    /// silently the first time it wants to run a tool. The API
+    /// layer derives the effective value from
+    /// `settings.auto_approve_tools` (global default) with the
+    /// per-chat override applied on top.
+    pub auto_approve_tools: bool,
 }
 
 /// Errors surfaced by the provider layer.
@@ -276,9 +279,7 @@ mod tests {
 
     #[test]
     fn agent_event_token_serializes_with_type_tag() {
-        let ev = AgentEvent::Token {
-            text: "hi".into(),
-        };
+        let ev = AgentEvent::Token { text: "hi".into() };
         let s = serde_json::to_string(&ev).unwrap();
         assert_eq!(s, "{\"type\":\"token\",\"text\":\"hi\"}");
     }

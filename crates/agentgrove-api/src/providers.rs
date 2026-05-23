@@ -53,9 +53,6 @@ impl ProviderDto {
                 "https://docs.claude.com/en/docs/claude-code/quickstart"
             }
             agentgrove_agents::ProviderId::Fake => "",
-            agentgrove_agents::ProviderId::NineRouter => {
-                "https://github.com/decolua/9router#install"
-            }
             agentgrove_agents::ProviderId::Opencode => {
                 "https://github.com/opencode-ai/opencode#install"
             }
@@ -66,8 +63,8 @@ impl ProviderDto {
             available: d.available,
             path: d.path.map(|p| p.to_string_lossy().into_owned()),
             version: d.version,
-            default_model: d.default_model.to_string(),
-            models: d.models.iter().map(|s| (*s).to_string()).collect(),
+            default_model: d.default_model,
+            models: d.models,
             supports_resume: d.supports_resume,
             install_hint,
         }
@@ -85,9 +82,10 @@ pub struct ProviderRegistry {
 impl Default for ProviderRegistry {
     fn default() -> Self {
         // Order matters: the first available provider is what the FE
-        // pre-selects in the new-chat dialog. We register CLI-style
-        // providers here; HTTP-API providers (9router) come in via
-        // `providers::resolve` because they need runtime config.
+        // pre-selects in the new-chat dialog. Today every shipping
+        // provider is a CLI subprocess (Claude, opencode); future
+        // HTTP-API providers (OpenAI-compat aggregators) would
+        // resolve dynamically via `provider_secrets` + `resolve`.
         Self {
             providers: vec![
                 Arc::new(agentgrove_agents::claude::ClaudeProvider::new()),
@@ -99,12 +97,9 @@ impl Default for ProviderRegistry {
 
 impl ProviderRegistry {
     /// Look up a built-in provider by its stable id (e.g. "claude").
-    ///
-    /// HTTP-API providers like 9router are NOT in the built-in
-    /// list — they require runtime config (base URL + API key)
-    /// from `ProviderSecretRepo`. Use [`resolve`] when you need
-    /// any kind of provider; this method is for internal lookups
-    /// where the answer is guaranteed to be a CLI/subprocess one.
+    /// All shipping providers are CLI-backed today; future HTTP-API
+    /// providers will register here too once we (re-)add an
+    /// aggregator integration.
     pub fn get_builtin(&self, id: &str) -> Option<Arc<dyn AgentProvider>> {
         self.providers
             .iter()
@@ -113,32 +108,15 @@ impl ProviderRegistry {
     }
 }
 
-/// Resolve any provider (built-in or HTTP-config-backed) by id.
+/// Resolve any provider by id.
 ///
-/// Built-ins (Claude, the test fake, future opencode CLI) come from
-/// the static `ProviderRegistry`. HTTP-API providers (9router) are
-/// constructed on demand from
-/// `state.provider_secrets.get(id)` — when the user hasn't
-/// configured them yet we return `None` so the dispatch flow falls
-/// back to the echo path (which surfaces an error the user sees).
-pub async fn resolve(
-    state: &AppState,
-    id: &str,
-) -> Option<Arc<dyn AgentProvider>> {
-    // Fast path: built-in.
+/// Today this is just the built-in CLI registry — Claude + opencode.
+/// The `provider_secrets` infrastructure (encrypted key storage) is
+/// kept for future HTTP-API providers but is currently unused by the
+/// resolve path.
+pub async fn resolve(state: &AppState, id: &str) -> Option<Arc<dyn AgentProvider>> {
     if let Some(p) = state.providers.get_builtin(id) {
         return Some(p);
-    }
-    // HTTP-API providers — currently only 9router.
-    if id == "9router" {
-        let cfg = state.provider_secrets.get(id).await.ok().flatten()?;
-        let api_key = cfg.api_key?;
-        return Some(Arc::new(
-            agentgrove_agents::nine_router::NineRouterProvider::new(
-                cfg.base_url,
-                api_key,
-            ),
-        ));
     }
     None
 }
@@ -146,33 +124,12 @@ pub async fn resolve(
 /// `GET /api/providers` handler.
 ///
 /// Returns one entry per known provider — built-ins (Claude, fake)
-/// AND any HTTP-API providers we have an integration for, even when
-/// they're not yet configured. The unconfigured ones report
-/// `available=false` so the FE can render them as "configure to use"
-/// rather than hiding them entirely.
+/// Returns one entry per registered CLI provider (Claude, opencode).
 pub async fn list(State(state): State<AppState>) -> Json<Vec<ProviderDto>> {
-    let mut out = Vec::with_capacity(state.providers.providers.len() + 1);
+    let mut out = Vec::with_capacity(state.providers.providers.len());
     for p in state.providers.providers.iter() {
         out.push(ProviderDto::from_descriptor(p.detect().await));
     }
-    // HTTP-API providers — surface even when unconfigured. The
-    // detect() call probes their endpoint, so when the key is set
-    // we get the real liveness signal; when it's not we report a
-    // placeholder descriptor with `available=false`.
-    let nine = match resolve(&state, "9router").await {
-        Some(p) => p.detect().await,
-        None => ProviderDescriptor {
-            id: agentgrove_agents::ProviderId::NineRouter,
-            label: "9router".to_string(),
-            available: false,
-            path: None,
-            version: None,
-            default_model: "free-combo",
-            models: &[],
-            supports_resume: false,
-        },
-    };
-    out.push(ProviderDto::from_descriptor(nine));
     Json(out)
 }
 
@@ -186,21 +143,35 @@ pub async fn commands(
     Ok(Json(p.slash_commands()))
 }
 
+/// `POST /api/providers/:id/refresh` — drop the cached model list for
+/// `:id` and return a freshly-detected descriptor. Used by the FE
+/// refresh icon on the Providers tab and the new-chat model picker
+/// when the user wants to pick up newly-installed models without
+/// waiting for the TTL.
+pub async fn refresh(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<ProviderDto>, StatusCode> {
+    let p = resolve(&state, &id).await.ok_or(StatusCode::NOT_FOUND)?;
+    agentgrove_agents::models_cache::invalidate(p.id());
+    Ok(Json(ProviderDto::from_descriptor(p.detect().await)))
+}
+
 /// Body for `PUT /api/providers/:id/config`. Encrypts + stores the
 /// API key at rest; never echoes it back over HTTP.
 ///
 /// `api_key` semantics:
 ///   - omitted / `null` → leave the existing key untouched (use this
-///     to update base_url / default_model only).
+///     to update base_url only).
 ///   - empty string → clear the stored key.
 ///   - non-empty → encrypt + persist.
+///
+/// Model selection is intentionally NOT part of this body — it
+/// belongs at chat creation, sourced from `ProviderDescriptor`.
 #[derive(Debug, Deserialize)]
 pub struct PutProviderConfigBody {
     /// Base URL the provider lives at, e.g. `http://localhost:20128/v1`.
     pub base_url: String,
-    /// Optional default model the FE seeds new chats with.
-    #[serde(default)]
-    pub default_model: Option<String>,
     /// API key — see body-level doc for the semantics.
     #[serde(default)]
     pub api_key: Option<String>,
@@ -236,12 +207,7 @@ pub async fn put_config(
     }
     state
         .provider_secrets
-        .put(
-            &id,
-            &body.base_url,
-            body.default_model.as_deref(),
-            body.api_key.as_deref(),
-        )
+        .put(&id, &body.base_url, body.api_key.as_deref())
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let row = state
