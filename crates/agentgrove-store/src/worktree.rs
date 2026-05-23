@@ -374,14 +374,12 @@ impl WorktreeRepo {
             return Err(WorktreeError::EmptyBranch);
         }
         let now_ms = Utc::now().timestamp_millis();
-        let res = sqlx::query(
-            "UPDATE worktrees SET branch = ?1, updated_at = ?2 WHERE id = ?3",
-        )
-        .bind(new_branch)
-        .bind(now_ms)
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
+        let res = sqlx::query("UPDATE worktrees SET branch = ?1, updated_at = ?2 WHERE id = ?3")
+            .bind(new_branch)
+            .bind(now_ms)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         if res.rows_affected() == 0 {
             return Err(WorktreeError::NotFound(id.to_owned()));
         }

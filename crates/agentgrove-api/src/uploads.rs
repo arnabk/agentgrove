@@ -164,10 +164,7 @@ pub async fn raw(
     let mime = mime_guess::from_path(&path)
         .first_or_octet_stream()
         .to_string();
-    Ok((
-        [(header::CONTENT_TYPE, mime)],
-        bytes,
-    ))
+    Ok(([(header::CONTENT_TYPE, mime)], bytes))
 }
 
 /// Strip path separators and force a portable filename. We keep the
@@ -201,11 +198,7 @@ fn sanitize_filename(raw: &str) -> String {
 /// no path separators). Defensive guard against `..` traversal in the
 /// `/raw` endpoint.
 fn is_safe_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() < 64
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    !id.is_empty() && id.len() < 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// Hook called from the router builder to lift the default body limit

@@ -157,7 +157,11 @@ pub async fn enqueue_item(
     chat_id: &str,
     body: &str,
 ) -> Result<QueueItem, agentgrove_store::QueueError> {
-    state.queue_store.enqueue(chat_id, body).await.map(Into::into)
+    state
+        .queue_store
+        .enqueue(chat_id, body)
+        .await
+        .map(Into::into)
 }
 
 /// Set the queue mode (auto or manual).
@@ -282,9 +286,7 @@ pub async fn run_next(
             None => return Err(StatusCode::NOT_FOUND),
         }
     };
-    let prompt = match crate::chats::persist_add_prompt(&state, &chat_id, &item.body)
-        .await
-    {
+    let prompt = match crate::chats::persist_add_prompt(&state, &chat_id, &item.body).await {
         Ok(Some(p)) => p,
         _ => return Err(StatusCode::INTERNAL_SERVER_ERROR),
     };
@@ -304,13 +306,7 @@ pub async fn run_next(
         serde_json::json!({ "queue_dispatched": item.id }).to_string(),
     );
 
-    crate::chats::spawn_dispatch_task(
-        state.clone(),
-        chat_id,
-        chat,
-        prompt,
-        item.body.clone(),
-    );
+    crate::chats::spawn_dispatch_task(state.clone(), chat_id, chat, prompt, item.body.clone());
     Ok(Json(item))
 }
 

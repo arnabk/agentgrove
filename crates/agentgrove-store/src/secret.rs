@@ -109,11 +109,7 @@ impl SecretKeyring {
 
     /// Inverse of [`encrypt`]. Verifies the auth tag; tampering or
     /// wrong key both surface as [`SecretError::DecryptFailed`].
-    pub fn decrypt(
-        &self,
-        ciphertext_b64: &str,
-        nonce_b64: &str,
-    ) -> Result<Vec<u8>, SecretError> {
+    pub fn decrypt(&self, ciphertext_b64: &str, nonce_b64: &str) -> Result<Vec<u8>, SecretError> {
         let ciphertext = B64.decode(ciphertext_b64)?;
         let nonce_bytes = B64.decode(nonce_b64)?;
         if nonce_bytes.len() != 24 {
@@ -183,7 +179,10 @@ mod tests {
         let replacement = if first == 'A' { 'B' } else { 'A' };
         ct.replace_range(..1, &replacement.to_string());
         let err = kr.decrypt(&ct, &nonce).unwrap_err();
-        assert!(matches!(err, SecretError::DecryptFailed | SecretError::Base64(_)));
+        assert!(matches!(
+            err,
+            SecretError::DecryptFailed | SecretError::Base64(_)
+        ));
     }
 
     #[test]

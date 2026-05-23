@@ -142,7 +142,10 @@ async fn terminal_status_reports_exited_after_shell_exit() {
             }
         }
     }
-    assert!(exited, "expected terminal to report exited=true after shell exit");
+    assert!(
+        exited,
+        "expected terminal to report exited=true after shell exit"
+    );
 
     // Status for unknown id is 404.
     let nf = h

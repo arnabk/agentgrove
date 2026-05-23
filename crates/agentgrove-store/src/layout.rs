@@ -95,9 +95,7 @@ impl LayoutRepo {
     /// List every persisted scope's blob. Used by the FE on boot to
     /// hydrate all scopes at once instead of one round-trip per
     /// scope.
-    pub async fn list_scopes(
-        &self,
-    ) -> Result<Vec<(String, String, JsonValue)>, LayoutError> {
+    pub async fn list_scopes(&self) -> Result<Vec<(String, String, JsonValue)>, LayoutError> {
         let rows: Vec<(String, String, String)> = sqlx::query_as(
             "SELECT project_id, worktree_id, blob_json FROM layout_scope \
              ORDER BY project_id ASC, worktree_id ASC",

@@ -91,17 +91,16 @@ impl ChatRegistry {
     }
 
     pub fn count_for_project(&self, project_id: &str) -> usize {
-        self.by_project.get(project_id).map(|v| v.len()).unwrap_or(0)
+        self.by_project
+            .get(project_id)
+            .map(|v| v.len())
+            .unwrap_or(0)
     }
 
     /// List all chats for a project. If `worktree_id` is `Some(_)`,
     /// returns only chats scoped to that worktree (plus chats that match
     /// the supplied id). If `None`, returns all chats in the project.
-    pub fn list_for_project(
-        &self,
-        project_id: &str,
-        worktree_id: Option<&str>,
-    ) -> Vec<ChatRecord> {
+    pub fn list_for_project(&self, project_id: &str, worktree_id: Option<&str>) -> Vec<ChatRecord> {
         let ids = match self.by_project.get(project_id) {
             Some(v) => v,
             None => return vec![],
@@ -155,8 +154,7 @@ impl ChatRegistry {
     pub fn append_event(&mut self, chat_id: &str, prompt_id: &str, ev: AgentEvent) {
         if let Some(chat) = self.by_id.get_mut(chat_id) {
             if let Some(p) = chat.prompts.iter_mut().find(|p| p.id == prompt_id) {
-                let has_sentinel =
-                    matches!(p.events.first(), Some(AgentEvent::Truncated { .. }));
+                let has_sentinel = matches!(p.events.first(), Some(AgentEvent::Truncated { .. }));
                 let cap = if has_sentinel {
                     Self::SLOTS_WITH_SENTINEL
                 } else {
@@ -296,11 +294,7 @@ pub async fn hydrate_from_store(state: &AppState) {
     };
     let mut reg = state.chats.write().await;
     for row in chats {
-        let prompts = match state
-            .chat_store
-            .list_prompts(&row.id, None, None)
-            .await
-        {
+        let prompts = match state.chat_store.list_prompts(&row.id, None, None).await {
             Ok(rows) => rows
                 .into_iter()
                 .filter_map(prompt_from_store_row)
@@ -319,10 +313,7 @@ pub async fn hydrate_from_store(state: &AppState) {
     }
 }
 
-fn chat_from_store_row(
-    row: agentgrove_store::ChatRow,
-    prompts: Vec<PromptRecord>,
-) -> ChatRecord {
+fn chat_from_store_row(row: agentgrove_store::ChatRow, prompts: Vec<PromptRecord>) -> ChatRecord {
     ChatRecord {
         id: row.id,
         project_id: row.project_id,
@@ -343,14 +334,13 @@ fn prompt_from_store_row(row: agentgrove_store::PromptRow) -> Option<PromptRecor
     // parse failure means the row was written by a future BE
     // version — we keep the prompt but drop its events so the
     // chat still renders.
-    let events: Vec<AgentEvent> = serde_json::from_value(row.events.clone())
-        .unwrap_or_else(|_| {
-            tracing::warn!(
-                prompt_id = %row.id,
-                "events_json failed to deserialise; dropping events for this prompt",
-            );
-            vec![]
-        });
+    let events: Vec<AgentEvent> = serde_json::from_value(row.events.clone()).unwrap_or_else(|_| {
+        tracing::warn!(
+            prompt_id = %row.id,
+            "events_json failed to deserialise; dropping events for this prompt",
+        );
+        vec![]
+    });
     let touched_paths: Vec<String> =
         serde_json::from_value(row.touched_paths.clone()).unwrap_or_default();
     Some(PromptRecord {
@@ -614,7 +604,12 @@ async fn persist_create_chat(
             effort.as_deref(),
         )
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("chat store: {e}")))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("chat store: {e}"),
+            )
+        })?;
 
     let rec = ChatRecord {
         id: row.id,
@@ -793,7 +788,12 @@ pub async fn patch(
         None,
     )
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("chat store: {e}")))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("chat store: {e}"),
+        )
+    })?;
 
     let reg = state.chats.read().await;
     let rec = reg
@@ -1057,10 +1057,7 @@ pub async fn send_message(
 ///   - 204 if we successfully tripped a running turn.
 ///   - 404 if there's no in-flight turn for the chat (idle, or
 ///     already cancelled).
-pub async fn stop_turn(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> StatusCode {
+pub async fn stop_turn(State(state): State<AppState>, Path(id): Path<String>) -> StatusCode {
     let token = {
         let map = state.cancel_tokens.lock().await;
         map.get(&id).cloned()
@@ -1120,10 +1117,9 @@ impl Drop for DispatchGuard {
                 set.remove(&chat_id);
             }
             let topic = format!("chat:{chat_id}");
-            state.logbus.publish(
-                &topic,
-                serde_json::json!({ "chat_idle": true }).to_string(),
-            );
+            state
+                .logbus
+                .publish(&topic, serde_json::json!({ "chat_idle": true }).to_string());
         });
     }
 }
@@ -1248,10 +1244,9 @@ async fn clear_dispatching(state: &AppState, chat_id: &str) -> bool {
     set.remove(chat_id);
     drop(set);
     let topic = format!("chat:{chat_id}");
-    state.logbus.publish(
-        &topic,
-        serde_json::json!({ "chat_idle": true }).to_string(),
-    );
+    state
+        .logbus
+        .publish(&topic, serde_json::json!({ "chat_idle": true }).to_string());
     true
 }
 
@@ -1308,14 +1303,46 @@ pub(crate) fn spawn_dispatch_task(
 /// resort (which only happens if the chat is orphaned).
 async fn resolve_cwd(state: &AppState, chat: &ChatRecord) -> std::path::PathBuf {
     if let Some(wt_id) = chat.worktree_id.as_deref() {
-        if let Ok(wt) = state.worktrees.get(wt_id).await {
-            return wt.path;
+        match state.worktrees.get(wt_id).await {
+            Ok(wt) => {
+                tracing::info!(
+                    chat_id = %chat.id,
+                    worktree_id = %wt_id,
+                    cwd = %wt.path.display(),
+                    "resolve_cwd: using worktree path"
+                );
+                return wt.path;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    chat_id = %chat.id,
+                    worktree_id = %wt_id,
+                    error = %e,
+                    "resolve_cwd: worktree lookup failed; falling back to project root"
+                );
+            }
         }
     }
-    if let Ok(p) = state.projects.get(&chat.project_id).await {
-        return p.root;
+    match state.projects.get(&chat.project_id).await {
+        Ok(p) => {
+            tracing::info!(
+                chat_id = %chat.id,
+                project_id = %chat.project_id,
+                cwd = %p.root.display(),
+                "resolve_cwd: using project root"
+            );
+            p.root
+        }
+        Err(e) => {
+            tracing::warn!(
+                chat_id = %chat.id,
+                project_id = %chat.project_id,
+                error = %e,
+                "resolve_cwd: project lookup failed; using /tmp"
+            );
+            std::path::PathBuf::from("/tmp")
+        }
     }
-    std::path::PathBuf::from("/tmp")
 }
 
 /// Stream a provider's events into both the per-chat registry (for
@@ -1335,11 +1362,20 @@ async fn dispatch_via_provider(
 ) {
     use agentgrove_agents::SpawnOptions;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
+    // Effective auto-approve = global default from settings.json
+    // (defaulting to `true`) until the per-chat override lands in
+    // migration 0010 + ChatRecord. Reading the file per turn is
+    // fine: it's a few hundred bytes on local disk and dispatch is
+    // already an I/O-heavy moment.
+    let auto_approve_tools = crate::settings::load(&state.state_dir)
+        .await
+        .is_auto_approve_default();
     let opts = SpawnOptions {
         cwd,
         model: Some(model.to_string()),
         resume_session_id,
         effort,
+        auto_approve_tools,
     };
     let prompt_text = user_text.to_string();
     let provider_for_task = provider.clone();
@@ -1513,15 +1549,9 @@ async fn dispatch_via_provider(
                         // Persist + cache in one helper so a restart
                         // remembers the provider's resume token.
                         let sid = session_id.clone();
-                        if let Err(e) = persist_chat_update(
-                            state,
-                            chat_id,
-                            None,
-                            None,
-                            None,
-                            Some(Some(&sid)),
-                        )
-                        .await
+                        if let Err(e) =
+                            persist_chat_update(state, chat_id, None, None, None, Some(Some(&sid)))
+                                .await
                         {
                             tracing::warn!(chat_id, error = %e, "persist session_id failed");
                         }

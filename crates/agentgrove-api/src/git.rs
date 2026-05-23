@@ -125,10 +125,11 @@ pub async fn git_discard(
         // rel_path, `..` traversal) are reported as `NonZero { code: -1 }`.
         // Treat those as 400; everything else is a server error.
         match &e {
-            GitError::NonZero { code: -1, stderr } => {
-                (StatusCode::BAD_REQUEST, stderr.clone())
-            }
-            _ => (StatusCode::INTERNAL_SERVER_ERROR, format!("discard failed: {e}")),
+            GitError::NonZero { code: -1, stderr } => (StatusCode::BAD_REQUEST, stderr.clone()),
+            _ => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("discard failed: {e}"),
+            ),
         }
     })?;
     let label = match outcome {

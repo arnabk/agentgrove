@@ -287,7 +287,9 @@ async fn list_prompts_clamps_limit_and_returns_empty_for_seq_one() {
     // Limit=99999 is clamped to 200 server-side; we get all 2 prompts
     // older than seq=3 in one shot.
     let page: Value = h
-        .get_auth(&format!("/api/chats/{chat_id}/prompts?before=3&limit=99999"))
+        .get_auth(&format!(
+            "/api/chats/{chat_id}/prompts?before=3&limit=99999"
+        ))
         .send()
         .await
         .unwrap()
@@ -519,8 +521,12 @@ async fn queue_auto_drains_pending_items_after_send() {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
     let prompts = view["prompts"].as_array().unwrap();
-    assert_eq!(prompts.len(), 3, "expected first + 2 drained, got {:?}",
-        prompts.iter().map(|p| &p["content"]).collect::<Vec<_>>());
+    assert_eq!(
+        prompts.len(),
+        3,
+        "expected first + 2 drained, got {:?}",
+        prompts.iter().map(|p| &p["content"]).collect::<Vec<_>>()
+    );
     assert_eq!(prompts[0]["content"], "first");
     assert_eq!(prompts[1]["content"], "alpha");
     assert_eq!(prompts[2]["content"], "beta");
@@ -545,7 +551,11 @@ async fn queue_auto_drains_pending_items_after_send() {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
     let items = q["items"].as_array().unwrap();
-    assert_eq!(items.len(), 0, "expected queue empty after drain, got {items:?}");
+    assert_eq!(
+        items.len(),
+        0,
+        "expected queue empty after drain, got {items:?}"
+    );
 }
 
 #[tokio::test]
@@ -838,7 +848,10 @@ async fn smart_send_no_loss_under_concurrent_fire() {
     let responses = futures::future::join_all(futs).await;
     for res in responses {
         let status = res.unwrap().status().as_u16();
-        assert_eq!(status, 200, "every smart-send must return 200, got {status}");
+        assert_eq!(
+            status, 200,
+            "every smart-send must return 200, got {status}"
+        );
     }
 
     // After auto-drain, all 10 should be in the timeline as prompts.
@@ -948,7 +961,10 @@ async fn run_next_rejects_when_already_dispatching() {
         // sanity-check that the count is bounded — no race-created
         // duplicates.
         let n = view["prompts"].as_array().unwrap().len();
-        assert!(n <= 21, "unexpected prompt count {n} suggests race-doubled inserts");
+        assert!(
+            n <= 21,
+            "unexpected prompt count {n} suggests race-doubled inserts"
+        );
     }
 }
 
@@ -1045,7 +1061,10 @@ async fn rapid_fire_then_manual_then_run_next_drains_every_item() {
             .await
             .unwrap();
         total_attempts += 1;
-        assert!(total_attempts <= 200, "too many run_next attempts — likely deadlock");
+        assert!(
+            total_attempts <= 200,
+            "too many run_next attempts — likely deadlock"
+        );
         match res.status().as_u16() {
             200 | 404 => {
                 run_next_calls += 1;
@@ -1122,7 +1141,10 @@ async fn rapid_fire_then_manual_then_run_next_drains_every_item() {
         .await
         .unwrap();
     let items = q["items"].as_array().unwrap();
-    assert!(items.is_empty(), "queue not empty after manual drain: {items:?}");
+    assert!(
+        items.is_empty(),
+        "queue not empty after manual drain: {items:?}"
+    );
 }
 
 /// Switching from auto to manual WHILE the agent is mid-turn must
@@ -1238,10 +1260,7 @@ async fn smart_send_publishes_chat_idle_after_dispatch_completes() {
 
     // Build the WS URL from the harness's base URL. Replace
     // `http://` → `ws://` and append the topic query string.
-    let ws_url = h
-        .base_url
-        .replace("http://", "ws://")
-        + &format!("/ws?topic=chat:{chat_id}");
+    let ws_url = h.base_url.replace("http://", "ws://") + &format!("/ws?topic=chat:{chat_id}");
     let (mut ws, _) = tokio_tungstenite::connect_async(&ws_url)
         .await
         .expect("connect ws");
@@ -1285,7 +1304,10 @@ async fn smart_send_publishes_chat_idle_after_dispatch_completes() {
         }
     }
     let _ = ws.send(Message::Close(None)).await;
-    assert!(saw_done, "never saw a `done` event for the dispatched prompt");
+    assert!(
+        saw_done,
+        "never saw a `done` event for the dispatched prompt"
+    );
     assert!(saw_idle, "never saw the `chat_idle` event after dispatch");
 }
 

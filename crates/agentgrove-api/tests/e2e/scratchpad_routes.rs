@@ -6,13 +6,13 @@ use serde_json::{json, Value};
 async fn make_project(h: &BeHarness) -> String {
     let dir = tempfile::tempdir().unwrap();
     let body = json!({ "name": "pad", "root": dir.path().to_string_lossy() });
-    let res = h
-        .post("/api/projects")
-        .json(&body)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200, "create project: {}", res.text().await.unwrap());
+    let res = h.post("/api/projects").json(&body).send().await.unwrap();
+    assert_eq!(
+        res.status(),
+        200,
+        "create project: {}",
+        res.text().await.unwrap()
+    );
     let p: Value = serde_json::from_str(
         &h.get(&format!("/api/projects"))
             .send()
@@ -53,7 +53,12 @@ async fn scratchpad_put_then_get_roundtrips_rich_text_html() {
         .send()
         .await
         .unwrap();
-    assert_eq!(put.status(), 200, "put scratchpad: {}", put.text().await.unwrap());
+    assert_eq!(
+        put.status(),
+        200,
+        "put scratchpad: {}",
+        put.text().await.unwrap()
+    );
 
     let got = h
         .get(&format!("/api/projects/{pid}/scratchpad"))

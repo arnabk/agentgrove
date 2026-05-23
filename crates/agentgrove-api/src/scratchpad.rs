@@ -24,7 +24,9 @@ pub struct Scratchpad {
 }
 
 fn pad_path(state_dir: &std::path::Path, project_id: &str) -> PathBuf {
-    state_dir.join("scratchpads").join(format!("{project_id}.json"))
+    state_dir
+        .join("scratchpads")
+        .join(format!("{project_id}.json"))
 }
 
 async fn read_one(state_dir: &std::path::Path, project_id: &str) -> Scratchpad {

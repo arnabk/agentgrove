@@ -178,9 +178,7 @@ impl ProjectRepo {
         let now_ms = Utc::now().timestamp_millis();
         // Treat whitespace-only as a clear so the UI's "leave blank to
         // unset" affordance round-trips cleanly through the JSON layer.
-        let normalised = script
-            .map(str::trim)
-            .filter(|s| !s.is_empty());
+        let normalised = script.map(str::trim).filter(|s| !s.is_empty());
         let res = sqlx::query(
             "UPDATE projects \
              SET pre_worktree_script = ?1, updated_at = ?2 \

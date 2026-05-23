@@ -59,6 +59,27 @@ pub struct TerminalStatusDto {
     pub exited: bool,
 }
 
+/// Wire shape for the delta-history endpoint. The FE keeps a
+/// running `lastBytes` counter and sends it as `?since=N`; the BE
+/// returns ONLY the bytes after that offset (or "" when no new
+/// data arrived since the last poll) plus the new total + exit
+/// flag. Combining history + status into one round-trip halves
+/// the per-tick HTTP cost.
+#[derive(Debug, Serialize)]
+pub struct HistoryDelta {
+    /// Bytes appended to the PTY ring since `since`. Empty string
+    /// when there's nothing new (common no-op path on idle shells).
+    pub bytes: String,
+    /// Current total byte count in the ring. FE adopts this as
+    /// its next `since` value. May be SMALLER than `since` if the
+    /// caller has stale state from a different session id, but
+    /// callers should not see that in practice.
+    pub total: usize,
+    /// Whether the shell has exited. Piggybacks on the history
+    /// poll so the FE can drop the separate status poll entirely.
+    pub exited: bool,
+}
+
 pub struct Session {
     cwd: String,
     cols: Mutex<u16>,
@@ -167,6 +188,39 @@ impl TerminalManager {
             sess_for_reader.exited.store(true, Ordering::SeqCst);
         });
 
+        // Independent child-waiter thread. The PTY master reader can
+        // sit blocked in `read()` long after the child has died (the
+        // OS may not signal EOF on the master fd until all writers
+        // are released, which depends on libc behaviour + the
+        // platform's pty driver). Polling `child.try_wait()` in a
+        // separate thread guarantees we flip `exited` as soon as the
+        // shell process is actually gone (Ctrl+D in zsh / `exit` /
+        // process killed externally), so the FE auto-close fires
+        // without relying on the reader to also unblock.
+        let sess_for_waiter = session.clone();
+        std::thread::spawn(move || {
+            loop {
+                {
+                    let mut child = sess_for_waiter.child.lock().unwrap();
+                    match child.try_wait() {
+                        Ok(Some(_)) => {
+                            sess_for_waiter.exited.store(true, Ordering::SeqCst);
+                            return;
+                        }
+                        Ok(None) => {} // still running
+                        Err(_) => {
+                            // Errors here usually mean the child handle
+                            // is unusable; treat as exited to avoid a
+                            // zombie session row.
+                            sess_for_waiter.exited.store(true, Ordering::SeqCst);
+                            return;
+                        }
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        });
+
         let dto = TerminalDto {
             id: id.clone(),
             cwd: session.cwd.clone(),
@@ -219,6 +273,41 @@ impl TerminalManager {
         Some(String::from_utf8_lossy(&h).into_owned())
     }
 
+    /// Delta-aware history fetch. Returns only the bytes appended
+    /// after `since` (the caller's last-known byte count) plus the
+    /// current total + exit flag. This is what every fast-tick FE
+    /// poll uses — without it we'd ship the entire scrollback over
+    /// HTTP every 200 ms, which made the terminal feel laggy on
+    /// long-running shells (200 KB cap × 5 polls/sec = 1 MB/s).
+    ///
+    /// `since` is interpreted as a byte offset into the ring
+    /// buffer's logical history. The ring drops oldest bytes once
+    /// it exceeds 200 KB, so an old `since` can fall off the
+    /// front; we handle that by returning the WHOLE current buffer
+    /// + a `total` the FE can adopt verbatim (the visual cost is a
+    /// one-time redraw, which is unavoidable when we've lost
+    /// scrollback anyway).
+    pub fn history_since(&self, id: &str, since: usize) -> Option<HistoryDelta> {
+        let map = self.sessions.lock().unwrap();
+        let sess = map.get(id)?.clone();
+        drop(map);
+        let h = sess.history.lock().unwrap();
+        let total = h.len();
+        let bytes = if since >= total {
+            // FE already has everything; common no-op path.
+            String::new()
+        } else {
+            // `since` is a byte offset, not a char boundary — slicing
+            // mid-UTF-8 is fine because we re-decode lossily.
+            String::from_utf8_lossy(&h[since..]).into_owned()
+        };
+        Some(HistoryDelta {
+            bytes,
+            total,
+            exited: sess.exited.load(Ordering::SeqCst),
+        })
+    }
+
     pub fn status(&self, id: &str) -> Option<TerminalStatusDto> {
         let map = self.sessions.lock().unwrap();
         let sess = map.get(id)?.clone();
@@ -269,11 +358,42 @@ pub async fn create(
     let cols = body.cols.unwrap_or(80);
     let rows = body.rows.unwrap_or(24);
 
+    // Resolve cwd from `worktree_id` > `project_id` > explicit `cwd` >
+    // server process dir (in that order). The FE relies on the BE for
+    // this because it doesn't know either path on disk — it only
+    // knows the ids. Without this, every terminal opened from the
+    // LeftRail would land in the agentgrove server's working
+    // directory, which is wrong for both project rows and worktree
+    // rows.
+    let resolved_cwd: Option<String> = if let Some(wt_id) = body.worktree_id.as_deref() {
+        match state.worktrees.get(wt_id).await {
+            Ok(wt) => Some(wt.path.to_string_lossy().into_owned()),
+            Err(e) => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    format!("worktree {wt_id} not found: {e}"),
+                ));
+            }
+        }
+    } else if let Some(pid) = body.project_id.as_deref() {
+        match state.projects.get(pid).await {
+            Ok(p) => Some(p.root.to_string_lossy().into_owned()),
+            Err(e) => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    format!("project {pid} not found: {e}"),
+                ));
+            }
+        }
+    } else {
+        body.cwd.clone()
+    };
+
     // No cap: users can open as many terminals as they want.
     state
         .terminals
         .spawn(
-            body.cwd.as_deref(),
+            resolved_cwd.as_deref(),
             cols,
             rows,
             body.project_id,
@@ -319,11 +439,28 @@ pub async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Query string for `GET /api/terminals/:id/history`. When `since`
+/// is omitted (or zero) the response carries the entire current
+/// ring buffer — same shape every poll, so the FE can always use
+/// the same code path.
+#[derive(Debug, Deserialize, Default)]
+pub struct HistoryQuery {
+    /// Byte offset the caller already has; only bytes after this
+    /// are returned in `bytes`. See [`HistoryDelta`].
+    #[serde(default)]
+    pub since: Option<usize>,
+}
+
 pub async fn history(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<String, StatusCode> {
-    state.terminals.history(&id).ok_or(StatusCode::NOT_FOUND)
+    axum::extract::Query(q): axum::extract::Query<HistoryQuery>,
+) -> Result<Json<HistoryDelta>, StatusCode> {
+    state
+        .terminals
+        .history_since(&id, q.since.unwrap_or(0))
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
 }
 
 pub async fn status(

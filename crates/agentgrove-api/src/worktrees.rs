@@ -179,8 +179,40 @@ pub async fn create(
     let wt_path_for_task = wt_path.clone();
     let topic_for_task = topic.clone();
     tokio::spawn(async move {
-        // Announce start so the FE renders the console with a header
-        // line.
+        // First pull the latest of `base_ref` from `origin` so the new
+        // worktree is rooted on the freshest commit instead of whatever
+        // happens to be cached locally. A fetch failure is downgraded
+        // to a warning event — we still proceed to the worktree-add so
+        // that offline / no-remote setups (e.g. a freshly-init'd repo
+        // with no `origin`) keep working. Network-related errors show
+        // up in the live console for visibility.
+        state_for_task.logbus.publish(
+            &topic_for_task,
+            serde_json::json!({"type":"stage","stage":"git_fetch"}).to_string(),
+        );
+        match git::fetch_ref(&project_root, &base_ref).await {
+            Ok(()) => {
+                state_for_task.logbus.publish(
+                    &topic_for_task,
+                    serde_json::json!({"type":"stage","stage":"git_fetch_done"}).to_string(),
+                );
+            }
+            Err(e) => {
+                // Soft-fail: surface stderr so the user can see if the
+                // remote was unreachable, but don't abort the create.
+                state_for_task.logbus.publish(
+                    &topic_for_task,
+                    serde_json::json!({
+                        "type":"stderr",
+                        "line": format!("git fetch origin {base_ref} failed (continuing with local ref): {e}")
+                    })
+                    .to_string(),
+                );
+            }
+        }
+
+        // Announce start of the worktree-add stage so the FE renders
+        // the console with a header line.
         state_for_task.logbus.publish(
             &topic_for_task,
             serde_json::json!({"type":"stage","stage":"git_add"}).to_string(),

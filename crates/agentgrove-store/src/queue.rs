@@ -123,11 +123,7 @@ impl QueueRepo {
     }
 
     /// Append a new pending item at the tail.
-    pub async fn enqueue(
-        &self,
-        chat_id: &str,
-        body: &str,
-    ) -> Result<QueueItemRow, QueueError> {
+    pub async fn enqueue(&self, chat_id: &str, body: &str) -> Result<QueueItemRow, QueueError> {
         let id = Uuid::now_v7().to_string();
         let now_ms = Utc::now().timestamp_millis();
         let now = ts_to_dt(now_ms);
@@ -183,13 +179,11 @@ impl QueueRepo {
         };
         let id = tuple.0.clone();
         let now_ms = Utc::now().timestamp_millis();
-        sqlx::query(
-            "UPDATE queue_items SET status = 'running', updated_at = ?1 WHERE id = ?2",
-        )
-        .bind(now_ms)
-        .bind(&id)
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query("UPDATE queue_items SET status = 'running', updated_at = ?1 WHERE id = ?2")
+            .bind(now_ms)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         let mut item = row_to_item(tuple);
         item.status = QueueStatus::Running;
@@ -201,12 +195,10 @@ impl QueueRepo {
     /// dispatch lands as a real prompt in the chat. Returns whether
     /// a row was removed. We don't preserve drained items.
     pub async fn mark_done(&self, item_id: &str) -> Result<bool, QueueError> {
-        let res = sqlx::query(
-            "DELETE FROM queue_items WHERE id = ?1 AND status = 'running'",
-        )
-        .bind(item_id)
-        .execute(&self.pool)
-        .await?;
+        let res = sqlx::query("DELETE FROM queue_items WHERE id = ?1 AND status = 'running'")
+            .bind(item_id)
+            .execute(&self.pool)
+            .await?;
         Ok(res.rows_affected() == 1)
     }
 
@@ -227,12 +219,10 @@ impl QueueRepo {
 
     /// Delete a Pending item — used by the FE's cancel button.
     pub async fn cancel(&self, item_id: &str) -> Result<bool, QueueError> {
-        let res = sqlx::query(
-            "DELETE FROM queue_items WHERE id = ?1 AND status = 'pending'",
-        )
-        .bind(item_id)
-        .execute(&self.pool)
-        .await?;
+        let res = sqlx::query("DELETE FROM queue_items WHERE id = ?1 AND status = 'pending'")
+            .bind(item_id)
+            .execute(&self.pool)
+            .await?;
         Ok(res.rows_affected() == 1)
     }
 
@@ -270,21 +260,18 @@ impl QueueRepo {
     /// row exists yet (the FE flips to manual only when the user
     /// explicitly toggles).
     pub async fn get_mode(&self, chat_id: &str) -> Result<QueueMode, QueueError> {
-        let row: Option<(String,)> = sqlx::query_as(
-            "SELECT mode FROM chat_queue_mode WHERE chat_id = ?1",
-        )
-        .bind(chat_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(row.map(|(m,)| QueueMode::parse(&m)).unwrap_or(QueueMode::Auto))
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT mode FROM chat_queue_mode WHERE chat_id = ?1")
+                .bind(chat_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row
+            .map(|(m,)| QueueMode::parse(&m))
+            .unwrap_or(QueueMode::Auto))
     }
 
     /// Upsert the queue mode for a chat.
-    pub async fn set_mode(
-        &self,
-        chat_id: &str,
-        mode: QueueMode,
-    ) -> Result<(), QueueError> {
+    pub async fn set_mode(&self, chat_id: &str, mode: QueueMode) -> Result<(), QueueError> {
         let now_ms = Utc::now().timestamp_millis();
         sqlx::query(
             "INSERT INTO chat_queue_mode (chat_id, mode, updated_at) \
@@ -318,5 +305,7 @@ fn row_to_item(r: QueueRowTuple) -> QueueItemRow {
 }
 
 fn ts_to_dt(ms: i64) -> DateTime<Utc> {
-    Utc.timestamp_millis_opt(ms).single().unwrap_or_else(Utc::now)
+    Utc.timestamp_millis_opt(ms)
+        .single()
+        .unwrap_or_else(Utc::now)
 }

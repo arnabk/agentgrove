@@ -161,10 +161,7 @@ impl ChatRepo {
 
     /// List all chats for a project (any worktree scope). Ordered by
     /// `created_at ASC, id ASC`.
-    pub async fn list_for_project(
-        &self,
-        project_id: &str,
-    ) -> Result<Vec<ChatRow>, ChatError> {
+    pub async fn list_for_project(&self, project_id: &str) -> Result<Vec<ChatRow>, ChatError> {
         let rows: Vec<ChatRowTuple> = sqlx::query_as(
             "SELECT id, project_id, worktree_id, title, provider, model, effort, \
              session_id, created_at, updated_at FROM chats \
@@ -177,10 +174,7 @@ impl ChatRepo {
     }
 
     /// List all chats for a specific worktree.
-    pub async fn list_for_worktree(
-        &self,
-        worktree_id: &str,
-    ) -> Result<Vec<ChatRow>, ChatError> {
+    pub async fn list_for_worktree(&self, worktree_id: &str) -> Result<Vec<ChatRow>, ChatError> {
         let rows: Vec<ChatRowTuple> = sqlx::query_as(
             "SELECT id, project_id, worktree_id, title, provider, model, effort, \
              session_id, created_at, updated_at FROM chats \
@@ -248,10 +242,7 @@ impl ChatRepo {
             return self.get(id).await;
         }
         sets.push("updated_at = ?");
-        let sql = format!(
-            "UPDATE chats SET {} WHERE id = ?",
-            sets.join(", ")
-        );
+        let sql = format!("UPDATE chats SET {} WHERE id = ?", sets.join(", "));
         let mut q = sqlx::query(&sql);
         if let Some(v) = &t {
             q = q.bind(v);
@@ -292,23 +283,18 @@ impl ChatRepo {
     ///
     /// # Errors
     /// - [`ChatError::NotFound`] when the chat doesn't exist.
-    pub async fn add_prompt(
-        &self,
-        chat_id: &str,
-        content: &str,
-    ) -> Result<PromptRow, ChatError> {
+    pub async fn add_prompt(&self, chat_id: &str, content: &str) -> Result<PromptRow, ChatError> {
         // Confirm the chat exists first so we don't insert a
         // dangling prompt (FK would catch this too but the error
         // message is clearer this way).
         let _ = self.get(chat_id).await?;
 
         // Compute next seq under a brief read.
-        let next_seq: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(seq), 0) + 1 FROM prompts WHERE chat_id = ?1",
-        )
-        .bind(chat_id)
-        .fetch_one(&self.pool)
-        .await?;
+        let next_seq: i64 =
+            sqlx::query_scalar("SELECT COALESCE(MAX(seq), 0) + 1 FROM prompts WHERE chat_id = ?1")
+                .bind(chat_id)
+                .fetch_one(&self.pool)
+                .await?;
 
         let id = Uuid::now_v7().to_string();
         let now_ms = Utc::now().timestamp_millis();
@@ -376,11 +362,7 @@ impl ChatRepo {
     /// Replace a prompt's `events` array. The caller is responsible
     /// for honouring the per-prompt event cap (the API layer does
     /// this via `ChatRegistry::MAX_EVENTS_PER_PROMPT`).
-    pub async fn write_events(
-        &self,
-        prompt_id: &str,
-        events: &JsonValue,
-    ) -> Result<(), ChatError> {
+    pub async fn write_events(&self, prompt_id: &str, events: &JsonValue) -> Result<(), ChatError> {
         let serialized = serde_json::to_string(events)?;
         sqlx::query("UPDATE prompts SET events_json = ?1 WHERE id = ?2")
             .bind(serialized)
@@ -461,15 +443,7 @@ fn row_to_chat(r: ChatRowTuple) -> ChatRow {
 }
 
 #[allow(clippy::type_complexity)]
-type PromptRowTuple = (
-    String,
-    String,
-    i64,
-    String,
-    String,
-    String,
-    i64,
-);
+type PromptRowTuple = (String, String, i64, String, String, String, i64);
 
 fn row_to_prompt(r: PromptRowTuple) -> Result<PromptRow, ChatError> {
     let (id, chat_id, seq, content, events_json, touched_paths_json, created_ms) = r;
@@ -487,5 +461,7 @@ fn row_to_prompt(r: PromptRowTuple) -> Result<PromptRow, ChatError> {
 }
 
 fn ts_to_dt(ms: i64) -> DateTime<Utc> {
-    Utc.timestamp_millis_opt(ms).single().unwrap_or_else(Utc::now)
+    Utc.timestamp_millis_opt(ms)
+        .single()
+        .unwrap_or_else(Utc::now)
 }

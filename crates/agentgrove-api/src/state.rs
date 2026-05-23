@@ -87,8 +87,7 @@ impl AppState {
         // be usable. The error message points the operator at the
         // file so they can fix it (e.g. delete a corrupt key file
         // and let us regenerate).
-        let keyring = SecretKeyring::open(&state_dir)
-            .expect("open secrets keyring");
+        let keyring = SecretKeyring::open(&state_dir).expect("open secrets keyring");
         let provider_secrets = ProviderSecretRepo::new(db.clone(), keyring);
         Self {
             state_dir: Arc::new(state_dir),

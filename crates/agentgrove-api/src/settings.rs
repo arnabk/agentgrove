@@ -58,6 +58,33 @@ pub struct Settings {
     /// gone from `prompts`.
     #[serde(default)]
     pub applied_prompt_seeds: Vec<String>,
+    /// Global default for whether to auto-approve agent tool
+    /// invocations. When `true` (the shipping default), every agent
+    /// spawn passes the CLI's bypass-permissions flag
+    /// (`--dangerously-skip-permissions` on Claude + opencode) so
+    /// the agent never blocks on an unanswerable confirm prompt.
+    /// Per-chat overrides take precedence (see `chats.auto_approve_tools`).
+    ///
+    /// Optional in the JSON so older files still deserialise; the
+    /// `is_auto_approve_default` accessor below treats `None` as
+    /// "use the shipping default" (currently `true`).
+    #[serde(default)]
+    pub auto_approve_tools: Option<bool>,
+}
+
+impl Settings {
+    /// Effective value of `auto_approve_tools` after applying the
+    /// shipping default. Keeps callers from having to repeat the
+    /// "None ⇒ true" rule.
+    #[must_use]
+    pub fn is_auto_approve_default(&self) -> bool {
+        // Default ON: AgentGrove targets solo-dev workflows on the
+        // user's own machine. Surfacing permission prompts we can't
+        // forward (the CLI expects a TTY) would just stall every
+        // turn; we'd rather have the user toggle this off per chat
+        // when they want a safer flow.
+        self.auto_approve_tools.unwrap_or(true)
+    }
 }
 
 /// Seed list of reusable prompt templates that ship out of the box.
@@ -201,6 +228,15 @@ const PROMPT_SEED_V1: &str = "v1";
 /// not already in `applied_prompt_seeds`.
 fn seed_batches() -> Vec<(&'static str, Vec<PromptTemplate>)> {
     vec![(PROMPT_SEED_V1, default_prompts())]
+}
+
+/// Public re-entrant accessor: reads `settings.json` from `state_dir`
+/// (running any pending seed-batch migrations in the process) and
+/// returns the parsed [`Settings`]. Returns `Settings::default()` on
+/// missing / unreadable files. Used by `chats.rs` to decide the
+/// effective `auto_approve_tools` flag per dispatch.
+pub async fn load(state_dir: &std::path::Path) -> Settings {
+    read_settings(state_dir).await
 }
 
 async fn read_settings(state_dir: &std::path::Path) -> Settings {

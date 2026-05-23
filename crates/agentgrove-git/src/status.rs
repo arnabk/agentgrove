@@ -46,12 +46,7 @@ impl StatusEntry {
 /// (so the FE can treat "no repo" as "no changes" gracefully).
 pub async fn status(cwd: &Path) -> Vec<StatusEntry> {
     let out = match Command::new("git")
-        .args([
-            "status",
-            "--porcelain=v1",
-            "-z",
-            "--untracked-files=normal",
-        ])
+        .args(["status", "--porcelain=v1", "-z", "--untracked-files=normal"])
         .current_dir(cwd)
         .output()
         .await

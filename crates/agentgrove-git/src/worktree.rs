@@ -61,6 +61,31 @@ pub async fn init_repo(path: &Path) -> Result<(), GitError> {
     Ok(())
 }
 
+/// Fetch the given ref from the default remote (`origin`) so the local
+/// repo is up to date before a worktree is forked off it.
+///
+/// Returns `Ok(())` on success and propagates [`GitError`] verbatim on
+/// failure. Common failures the caller may want to soft-handle:
+///   * no `origin` remote configured (`fatal: 'origin' does not appear …`)
+///   * network unreachable / auth required (we set `GIT_TERMINAL_PROMPT=0`
+///     so the call returns immediately rather than hanging on a prompt).
+///
+/// Callers typically forward the stderr to the live worktree log so the
+/// user sees why the fetch failed if they've gone offline.
+///
+/// # Errors
+///
+/// Returns [`GitError`] if git is missing, I/O fails, or git returns
+/// non-zero.
+pub async fn fetch_ref(repo_path: &Path, base_ref: &str) -> Result<(), GitError> {
+    // `git fetch origin <ref>` updates the corresponding remote-tracking
+    // branch (`refs/remotes/origin/<ref>`) without touching local
+    // branches. The worktree-add downstream will resolve `<ref>` against
+    // whichever is freshest at that point.
+    run_git(&["fetch", "origin", base_ref], repo_path).await?;
+    Ok(())
+}
+
 /// Create a new worktree at `worktree_path` rooted in `repo_path`, on a
 /// new branch `branch` based on `base_ref`.
 ///
@@ -107,11 +132,7 @@ pub async fn remove_worktree(repo_path: &Path, worktree_path: &Path) -> Result<(
 ///
 /// Returns [`GitError`] when git is missing, the rename collides, or
 /// any other non-zero exit from `git branch -m`.
-pub async fn rename_branch(
-    repo_path: &Path,
-    old: &str,
-    new: &str,
-) -> Result<(), GitError> {
+pub async fn rename_branch(repo_path: &Path, old: &str, new: &str) -> Result<(), GitError> {
     // `--` is not accepted by `git branch -m`; the two args are
     // positional. We pre-validate the inputs in the calling crate so
     // shell-like values (e.g. starting with `-`) never reach git.
@@ -208,19 +229,23 @@ pub async fn discard_path(cwd: &Path, rel_path: &str) -> Result<DiscardOutcome, 
     // errors from "not tracked" here — git stamps the difference into
     // the exit code (1 = not in index) and we treat anything non-zero
     // as untracked. If git is missing the call below will surface that.
-    let tracked = run_git(
-        &["ls-files", "--error-unmatch", "--", rel_path],
-        cwd,
-    )
-    .await
-    .is_ok();
+    let tracked = run_git(&["ls-files", "--error-unmatch", "--", rel_path], cwd)
+        .await
+        .is_ok();
 
     if tracked {
         // `git restore` overwrites both staged and worktree copies
         // back to HEAD. `--worktree --staged` is the safest pair to
         // unify modified + staged + deleted cases.
         run_git(
-            &["restore", "--source=HEAD", "--staged", "--worktree", "--", rel_path],
+            &[
+                "restore",
+                "--source=HEAD",
+                "--staged",
+                "--worktree",
+                "--",
+                rel_path,
+            ],
             cwd,
         )
         .await?;
@@ -236,10 +261,23 @@ pub async fn discard_path(cwd: &Path, rel_path: &str) -> Result<DiscardOutcome, 
             tokio::fs::remove_file(&target).await?;
             Ok(DiscardOutcome::DeletedUntracked)
         }
-        Ok(meta) if meta.is_dir() => Err(GitError::NonZero {
-            code: -1,
-            stderr: format!("'{rel_path}' is a directory, refusing to delete"),
-        }),
+        Ok(meta) if meta.is_dir() => {
+            // Use `git clean -fd` so git's own ignore rules decide what
+            // to keep inside the directory. Without `-x` the call
+            // preserves anything matched by `.gitignore` (e.g. a
+            // freshly-untracked `node_modules` inside the dir stays put);
+            // with `-x` the dir is wiped including ignored entries. We
+            // pick the safer default (no `-x`). The git porcelain
+            // matches what `git status` shows as untracked, which is
+            // what the FE rendered when the user clicked Discard.
+            //
+            // `-d` lets clean recurse into the untracked directory at
+            // all; without it git refuses (same posture as our old
+            // 400 error). `-f` is required to actually delete (config
+            // gate). `--` ends flag parsing.
+            run_git(&["clean", "-fd", "--", rel_path], cwd).await?;
+            Ok(DiscardOutcome::DeletedUntracked)
+        }
         Ok(_) => Ok(DiscardOutcome::Noop),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(DiscardOutcome::Noop),
         Err(e) => Err(GitError::Io(e)),

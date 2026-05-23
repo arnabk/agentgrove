@@ -12,11 +12,7 @@ async fn make_repo() -> tempfile::TempDir {
 /// Poll the project's worktree list until the entry with `wt_id`
 /// reaches a terminal status (`ready` or `failed`). Times out after
 /// 5 s so tests fail fast if the BE is stuck.
-async fn wait_for_terminal_status(
-    h: &BeHarness,
-    project_id: &str,
-    wt_id: &str,
-) -> String {
+async fn wait_for_terminal_status(h: &BeHarness, project_id: &str, wt_id: &str) -> String {
     for _ in 0..50 {
         let arr: Value = h
             .get_auth(&format!("/api/projects/{project_id}/worktrees"))
@@ -192,11 +188,7 @@ async fn worktree_history_lists_and_filters_after_delete() {
     }
 
     // History without filter returns both.
-    let hist = h
-        .get_auth("/api/worktrees/history")
-        .send()
-        .await
-        .unwrap();
+    let hist = h.get_auth("/api/worktrees/history").send().await.unwrap();
     assert_eq!(hist.status(), 200);
     let arr: Value = hist.json().await.unwrap();
     let items = arr.as_array().unwrap();
@@ -334,14 +326,17 @@ async fn worktree_rename_succeeds() {
 
     // Rename via PATCH.
     let rename = h
-        .patch(&format!(
-            "/api/projects/{project_id}/worktrees/{wt_id}"
-        ))
+        .patch(&format!("/api/projects/{project_id}/worktrees/{wt_id}"))
         .json(&json!({"branch":"feature/renamed"}))
         .send()
         .await
         .unwrap();
-    assert_eq!(rename.status(), 200, "body={}", rename.text().await.unwrap());
+    assert_eq!(
+        rename.status(),
+        200,
+        "body={}",
+        rename.text().await.unwrap()
+    );
     let renamed: Value = rename.json().await.unwrap();
     assert_eq!(renamed["branch"], "feature/renamed");
     // Path is intentionally NOT moved — verifies the "rename branch
@@ -383,10 +378,7 @@ async fn worktree_rename_rejects_empty_branch() {
         .send()
         .await
         .unwrap();
-    let wt_id = res
-        .json::<Value>()
-        .await
-        .unwrap()["id"]
+    let wt_id = res.json::<Value>().await.unwrap()["id"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -396,9 +388,7 @@ async fn worktree_rename_rejects_empty_branch() {
     );
 
     let bad = h
-        .patch(&format!(
-            "/api/projects/{project_id}/worktrees/{wt_id}"
-        ))
+        .patch(&format!("/api/projects/{project_id}/worktrees/{wt_id}"))
         .json(&json!({"branch":"   "}))
         .send()
         .await
@@ -448,9 +438,7 @@ async fn worktree_rename_collision_returns_409() {
 
     // Try to rename B onto A's branch.
     let clash = h
-        .patch(&format!(
-            "/api/projects/{project_id}/worktrees/{id_b}"
-        ))
+        .patch(&format!("/api/projects/{project_id}/worktrees/{id_b}"))
         .json(&json!({"branch":"feature/a"}))
         .send()
         .await
@@ -647,9 +635,7 @@ async fn worktree_delete_without_flag_keeps_branch() {
     );
 
     let del = h
-        .delete_auth(&format!(
-            "/api/projects/{project_id}/worktrees/{wt_id}"
-        ))
+        .delete_auth(&format!("/api/projects/{project_id}/worktrees/{wt_id}"))
         .send()
         .await
         .unwrap();
