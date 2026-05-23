@@ -1,0 +1,93 @@
+// Regression spec for chat-composer draft persistence.
+//
+// The composer is a rich-text editor that owns its own ProseMirror
+// state; switching panes or reloading the page destroys the editor
+// instance and starts a new one. Without persistence the user's
+// in-flight text vanishes on every pane switch (a common workflow:
+// flip to terminal to copy something, paste back into the chat).
+//
+// We persist drafts as a string on the per-scope chat tab and
+// hydrate from the store on remount. The BE round-trips the layout
+// blob so drafts survive page reloads too.
+//
+// Coverage:
+//   1. Type → switch pane → return → draft is intact.
+//   2. Type → reload page → draft is intact.
+//   3. Submit empties the draft (so the next visit doesn't show the
+//      already-sent message in the input).
+
+import { test, expect } from "@playwright/test";
+import {
+  BE_URL,
+  bootstrapWithChat,
+  clearComposer,
+  readComposer,
+  submitComposer,
+  typeIntoComposer,
+} from "./helpers";
+
+// These tests mutate the shared per-scope draft state on the dev
+// BE; running them in parallel makes the assertions race. Serial
+// mode keeps them deterministic without forcing the whole suite
+// to single-thread.
+test.describe.serial("chat composer draft persistence", () => {
+  test("draft survives pane switch", async ({ page }) => {
+    await bootstrapWithChat(page);
+    // Tests share the dev DB + may reuse the same chat tab; clear
+    // any leftover draft from a prior test before we assert on a
+    // fresh value.
+    await clearComposer(page);
+    await typeIntoComposer(page, "scratch note in flight");
+
+    // Flip to the terminal pane + back to chat.
+    await page.getByTestId("tab-terminal").click();
+    await expect(page.getByTestId("term-stage")).toBeVisible();
+    await page.getByTestId("tab-chat").click();
+    await expect(page.getByTestId("chat-input")).toBeVisible();
+
+    await expect.poll(() => readComposer(page), { timeout: 5_000 }).toBe("scratch note in flight");
+  });
+
+  test("draft survives full page reload", async ({ page }) => {
+    const chatId = await bootstrapWithChat(page);
+    await clearComposer(page);
+    await typeIntoComposer(page, "draft after reload");
+    await page.waitForTimeout(1_200);
+    // Sanity: BE actually got the draft.
+    const layout = await (await fetch(`${BE_URL}/api/layout`)).json();
+    const found = JSON.stringify(layout).includes("draft after reload");
+    expect(found, "draft did not reach BE layout").toBe(true);
+
+    await page.reload({ waitUntil: "networkidle" });
+    await expect(page.getByTestId("chat-input")).toBeVisible({
+      timeout: 10_000,
+    });
+    // Allow chat hydration + reconcile + composer createEffect to
+    // chain through. The reconcile path (refreshScopeChats) walks
+    // the BE chats list, intersects with persisted tabs, and lands
+    // the result via `setScopeChats`; the createEffect on activeId
+    // then calls `getChatDraft` + setInput → composer setContent.
+    await page.waitForTimeout(1_000);
+    await expect.poll(() => readComposer(page), { timeout: 10_000 }).toBe("draft after reload");
+    void chatId;
+  });
+
+  test("successful submit clears the draft", async ({ page }) => {
+    await bootstrapWithChat(page);
+    await clearComposer(page);
+    await typeIntoComposer(page, "one-shot send");
+    await submitComposer(page);
+
+    // After send the composer empties optimistically; reading it
+    // should yield an empty string.
+    await expect.poll(() => readComposer(page), { timeout: 5_000 }).toBe("");
+
+    // Type something new, flip panes, and confirm the OLD draft
+    // didn't resurrect itself (would indicate a stale store entry).
+    await typeIntoComposer(page, "after send");
+    await page.getByTestId("tab-terminal").click();
+    await page.getByTestId("tab-chat").click();
+    await expect.poll(() => readComposer(page)).toBe("after send");
+    await clearComposer(page);
+  });
+});

@@ -26,6 +26,16 @@ test.describe("live app", () => {
   });
 
   test("welcome → add project → indicators", async ({ page }) => {
+    // This spec only runs against a fresh (empty) BE state — it
+    // walks the user-onboarding flow from the Welcome screen. The
+    // dev BE almost always has projects from prior interactive
+    // sessions; in that case we skip rather than fail. CI calls
+    // this on a scratch state dir where it's the canonical
+    // "first-run" smoke test.
+    const projects = await (await fetch(`${BE_URL}/api/projects`)).json();
+    if (Array.isArray(projects) && projects.length > 0) {
+      test.skip(true, "BE already has projects; first-run flow can't be tested");
+    }
     const visualDir = path.join(REPO_ROOT, ".data", "logs", "visuals");
     fs.mkdirSync(visualDir, { recursive: true });
     const shot = (name: string) =>
