@@ -176,18 +176,116 @@ test.describe("chat send routing", () => {
     expect(pending.map((i) => i.body)).toEqual(["rapid-1", "rapid-2", "rapid-3", "rapid-4"]);
   });
 
-  // Rule 4 + 5 exercise the auto-drain path which dispatches each
-  // queued message to the real provider CLI (Claude / opencode).
-  // Those calls take many seconds per turn and depend on network +
-  // local auth, so we skip them in the live FE Playwright suite —
-  // the equivalent BE e2e tests
-  // (crates/agentgrove-api/tests/e2e/chat_queue_notes_routes.rs)
-  // pin to the FakeProvider and run deterministically. Unskip
-  // here once we wire a fake-provider escape hatch into the FE
-  // (e.g. ?fake=1 URL param).
-  test.skip("rule 4: auto mode drains queue back into timeline", async () => {});
+  // Rule 4 + 5 exercise the auto-drain path. Each queued message
+  // dispatches through the active provider — by default Claude /
+  // opencode, which take seconds + network. We skip unless the
+  // BE was started with AGENTGROVE_ENABLE_FAKE=1, which registers
+  // the deterministic FakeProvider. CI does this; local dev runs
+  // need to opt in (see docs/CONTRIBUTING.md).
+  //
+  // When fake IS available, the tests create a fake-backed chat
+  // directly via the BE API (no FE provider picker integration
+  // yet) and assert the queue mechanics end-to-end.
+  async function fakeAvailable(): Promise<boolean> {
+    try {
+      const res = await fetch(`${BE_URL}/api/providers`);
+      if (!res.ok) return false;
+      const list = (await res.json()) as Array<{ id: string }>;
+      return list.some((p) => p.id === "fake");
+    } catch {
+      return false;
+    }
+  }
 
-  test.skip("rule 5 + bug repro: rapid-fire → flip manual → run_next drains everything", async () => {});
+  async function makeFakeChat(): Promise<string> {
+    // Ensure a project exists first.
+    const projects = (await (await fetch(`${BE_URL}/api/projects`)).json()) as Array<{
+      id: string;
+    }>;
+    if (projects.length === 0) {
+      throw new Error("no project; rule 4/5 require an existing project");
+    }
+    const pid = projects[0]!.id;
+    const res = await fetch(`${BE_URL}/api/projects/${pid}/chats`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "fake-routing-test",
+        provider: "fake",
+        model: "echo",
+      }),
+    });
+    if (!res.ok) throw new Error(`fake chat create failed: ${res.status}`);
+    const chat = (await res.json()) as { id: string };
+    return chat.id;
+  }
+
+  test("rule 4: auto mode drains queue back into timeline", async () => {
+    if (!(await fakeAvailable())) {
+      test.skip(true, "AGENTGROVE_ENABLE_FAKE=1 not set on the BE");
+    }
+    const chatId = await makeFakeChat();
+    // Auto mode is default; rapid-fire 4 prompts via the BE
+    // smart-send endpoint (simpler than driving the FE composer
+    // for a backend-only mechanism).
+    for (let i = 0; i < 4; i++) {
+      await fetch(`${BE_URL}/api/chats/${chatId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: `drain-${i}` }),
+      });
+    }
+    await expect
+      .poll(async () => (await getChat(chatId)).prompts?.length ?? 0, {
+        timeout: 10_000,
+      })
+      .toBeGreaterThanOrEqual(4);
+    const chat = await getChat(chatId);
+    const lastFour = (chat.prompts as { content: string }[]).slice(-4).map((p) => p.content);
+    expect(lastFour).toEqual(["drain-0", "drain-1", "drain-2", "drain-3"]);
+    expect((await getQueue(chatId)).items).toHaveLength(0);
+  });
+
+  test("rule 5 + bug repro: rapid-fire → flip manual → run_next drains everything", async () => {
+    if (!(await fakeAvailable())) {
+      test.skip(true, "AGENTGROVE_ENABLE_FAKE=1 not set on the BE");
+    }
+    const chatId = await makeFakeChat();
+    for (let i = 0; i < 4; i++) {
+      await fetch(`${BE_URL}/api/chats/${chatId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: `wedge-${i}` }),
+      });
+    }
+    await fetch(`${BE_URL}/api/chats/${chatId}/queue/mode`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "manual" }),
+    });
+    for (let i = 0; i < 30; i++) {
+      const q = await getQueue(chatId);
+      const pending = (q.items as { status: string }[]).filter(
+        (it) => it.status === "pending",
+      ).length;
+      if (pending === 0) break;
+      const r = await fetch(`${BE_URL}/api/chats/${chatId}/queue/next`, {
+        method: "POST",
+      });
+      if (r.status === 409) await new Promise((res) => setTimeout(res, 100));
+      await new Promise((res) => setTimeout(res, 150));
+    }
+    await expect
+      .poll(async () => (await getChat(chatId)).prompts?.length ?? 0, {
+        timeout: 10_000,
+      })
+      .toBeGreaterThanOrEqual(4);
+    const all = ((await getChat(chatId)).prompts as { content: string }[]).map((p) => p.content);
+    for (let i = 0; i < 4; i++) {
+      expect(all).toContain(`wedge-${i}`);
+    }
+    expect((await getQueue(chatId)).items).toHaveLength(0);
+  });
 
   test.afterAll(async () => {
     // Persist a visual artefact of the most-recent run for easy

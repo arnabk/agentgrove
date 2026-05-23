@@ -18,10 +18,21 @@ pub struct FakeProvider {
 impl FakeProvider {
     /// Construct a provider that will emit `events` (in order) the
     /// next time `spawn` is called.
+    #[must_use]
     pub fn with_script(events: Vec<AgentEvent>) -> Self {
         Self {
             script: Arc::new(Mutex::new(events)),
         }
+    }
+
+    /// Construct a provider with a sensible default script: echo
+    /// the prompt back as a Token event + a terminal Done. Useful
+    /// for live e2e suites where the BE registers FakeProvider
+    /// via AGENTGROVE_ENABLE_FAKE=1 and tests want a fast,
+    /// network-free agent turn.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
@@ -46,7 +57,7 @@ impl AgentProvider for FakeProvider {
 
     async fn spawn(
         &self,
-        _prompt: &str,
+        prompt: &str,
         _opts: SpawnOptions,
         events: mpsc::UnboundedSender<AgentEvent>,
     ) -> Result<(), ProviderError> {
@@ -54,8 +65,22 @@ impl AgentProvider for FakeProvider {
             let mut guard = self.script.lock().expect("fake provider mutex");
             std::mem::take(&mut *guard)
         };
-        for ev in script {
-            let _ = events.send(ev);
+        if script.is_empty() {
+            // Default behaviour for the env-gated production-FE
+            // fake provider: deterministic two-event response that
+            // echoes the prompt and immediately settles. Lets the
+            // FE auto-drain path complete without hanging.
+            let _ = events.send(AgentEvent::Token {
+                text: format!("[fake] {prompt}"),
+            });
+            let _ = events.send(AgentEvent::Done {
+                result: Some(format!("[fake] {prompt}")),
+                cost_usd: None,
+            });
+        } else {
+            for ev in script {
+                let _ = events.send(ev);
+            }
         }
         Ok(())
     }

@@ -86,12 +86,22 @@ impl Default for ProviderRegistry {
         // provider is a CLI subprocess (Claude, opencode); future
         // HTTP-API providers (OpenAI-compat aggregators) would
         // resolve dynamically via `provider_secrets` + `resolve`.
-        Self {
-            providers: vec![
-                Arc::new(agentgrove_agents::claude::ClaudeProvider::new()),
-                Arc::new(agentgrove_agents::opencode::OpencodeProvider::new()),
-            ],
+        let mut providers: Vec<Arc<dyn AgentProvider>> = vec![
+            Arc::new(agentgrove_agents::claude::ClaudeProvider::new()),
+            Arc::new(agentgrove_agents::opencode::OpencodeProvider::new()),
+        ];
+        // Opt-in test surface. Setting AGENTGROVE_ENABLE_FAKE=1
+        // registers the deterministic FakeProvider so e2e suites
+        // can dispatch instantly without spawning a real LLM CLI.
+        // The env-var gate keeps production builds free of a
+        // "test-only" choice in the new-chat dropdown.
+        if std::env::var("AGENTGROVE_ENABLE_FAKE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+        {
+            providers.push(Arc::new(agentgrove_agents::fake::FakeProvider::new()));
         }
+        Self { providers }
     }
 }
 

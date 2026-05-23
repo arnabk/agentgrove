@@ -38,6 +38,12 @@ browsers, on Linux/macOS/Windows alike.
 | Component tests   | `just test-component`    |
 | BE endpoint E2E   | `just test-be-e2e`       |
 | FE E2E (Playwright) | `just test-fe-e2e`     |
+
+The FE Playwright suite includes two chat-routing rules (4 + 5)
+that require the deterministic FakeProvider. Set
+`AGENTGROVE_ENABLE_FAKE=1` on the BE when running locally to
+register it; CI does this automatically. Without the env var the
+tests skip rather than spawning real LLM CLIs.
 | Full live run     | `just test-live`         |
 | Everything        | `just check`             |
 
