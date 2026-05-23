@@ -2,6 +2,7 @@
 
 mod support;
 
+mod backups_routes;
 mod branches_routes;
 mod chat_queue_notes_routes;
 mod diag_routes;

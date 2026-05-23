@@ -74,6 +74,9 @@ fn expected_routes() -> BTreeSet<&'static str> {
         "PUT /api/providers/{id}/config",
         "DELETE /api/providers/{id}/config",
         "POST /api/providers/{id}/refresh",
+        "GET /api/backups",
+        "POST /api/backups",
+        "POST /api/backups/{name}/restore",
         "POST /api/uploads",
         "GET /api/uploads/{id}/raw",
     ]

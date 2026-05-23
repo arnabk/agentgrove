@@ -539,6 +539,31 @@ export const api = {
   fsBrowse: (path: string) => req<FsBrowse>(`/api/fs/browse?path=${encodeURIComponent(path)}`),
   // Themes
   listThemes: () => req<Theme[]>("/api/themes"),
+  // Backups (Settings → Backups panel). The actual restore happens
+  // via the `just restore-db <name>` shell command — we DON'T
+  // overwrite live DB files from a running server because SQLite
+  // WAL is in flight; the restore endpoint returns the command
+  // the user runs after stopping the BE.
+  listBackups: () =>
+    req<{
+      backups: Array<{
+        name: string;
+        size_bytes: number;
+        created_at_secs: number;
+        tag?: string | null;
+      }>;
+      state_dir: string;
+    }>("/api/backups"),
+  createBackup: () => req<{ name: string }>("/api/backups", { method: "POST" }),
+  restoreBackup: (name: string) =>
+    req<{
+      snapshot: string;
+      snapshot_path: string;
+      shell_command: string;
+      note: string;
+    }>(`/api/backups/${encodeURIComponent(name)}/restore`, {
+      method: "POST",
+    }),
   // Settings
   getSettings: () => req<UserSettings>("/api/settings"),
   saveSettings: (s: UserSettings) =>

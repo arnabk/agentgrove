@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod backups;
 pub mod branches;
 pub mod chats;
 pub mod diag;

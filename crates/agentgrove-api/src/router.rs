@@ -1,9 +1,9 @@
 //! Axum router.
 
 use crate::{
-    branches, chats, diag, editor, files, fs as fsapi, git as gitapi, health::health, layout,
-    notes, projects, providers, queue, scratchpad, settings, state::AppState, terminal, themes,
-    uploads, worktrees, ws,
+    backups, branches, chats, diag, editor, files, fs as fsapi, git as gitapi, health::health,
+    layout, notes, projects, providers, queue, scratchpad, settings, state::AppState, terminal,
+    themes, uploads, worktrees, ws,
 };
 use axum::{
     http::Method,
@@ -124,6 +124,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/git/discard", post(gitapi::git_discard))
         // Diagnostics (memory)
         .route("/api/diag/memory", get(diag::memory))
+        // Backups (Settings -> Backups panel). The shell scripts
+        // (`just backups` / `just restore-db`) remain the path
+        // for offline recovery; this surface lets the FE list +
+        // snapshot from a running server.
+        .route("/api/backups", get(backups::list).post(backups::create))
+        .route("/api/backups/:name/restore", post(backups::restore))
         // Editor
         .route(
             "/api/editor/file",

@@ -24,12 +24,13 @@ import Select from "./Select";
  * `Tab` entry below.
  */
 
-type TabId = "appearance" | "prompts" | "providers" | "agents";
+type TabId = "appearance" | "prompts" | "providers" | "agents" | "backups";
 const TABS: { id: TabId; label: string }[] = [
   { id: "appearance", label: "Appearance" },
   { id: "agents", label: "Agents" },
   { id: "prompts", label: "Prompts" },
   { id: "providers", label: "Providers" },
+  { id: "backups", label: "Backups" },
 ];
 
 export default function SettingsModal() {
@@ -95,6 +96,9 @@ export default function SettingsModal() {
             </Show>
             <Show when={tab() === "providers"}>
               <ProvidersTab />
+            </Show>
+            <Show when={tab() === "backups"}>
+              <BackupsTab />
             </Show>
           </div>
 
@@ -279,6 +283,200 @@ function AgentsTab() {
           </label>
         </header>
       </section>
+    </div>
+  );
+}
+
+/** Per-snapshot DB backups. Lists snapshots taken by the BE on
+ *  startup + before every migration, plus any manual snapshots the
+ *  user has triggered from this tab. Restore is intentionally NOT a
+ *  click-to-restore action because SQLite WAL is in flight while
+ *  the server runs and overwriting live files would corrupt both
+ *  ends; instead we surface the exact shell command the operator
+ *  runs after stopping the BE. */
+function BackupsTab() {
+  type Backup = {
+    name: string;
+    size_bytes: number;
+    created_at_secs: number;
+    tag?: string | null;
+  };
+  const [backups, setBackups] = createSignal<Backup[]>([]);
+  const [stateDir, setStateDir] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+  const [err, setErr] = createSignal<string | null>(null);
+  const [restoreInfo, setRestoreInfo] = createSignal<{
+    snapshot: string;
+    shell_command: string;
+    note: string;
+  } | null>(null);
+
+  async function refresh() {
+    setErr(null);
+    try {
+      const res = await api.listBackups();
+      setBackups(res.backups);
+      setStateDir(res.state_dir);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function takeNow() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.createBackup();
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function showRestore(name: string) {
+    setBusy(true);
+    setErr(null);
+    try {
+      const info = await api.restoreBackup(name);
+      setRestoreInfo({
+        snapshot: info.snapshot,
+        shell_command: info.shell_command,
+        note: info.note,
+      });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function fmtSize(bytes: number): string {
+    if (bytes >= 1 << 30) return `${(bytes / (1 << 30)).toFixed(1)} GB`;
+    if (bytes >= 1 << 20) return `${(bytes / (1 << 20)).toFixed(1)} MB`;
+    if (bytes >= 1 << 10) return `${(bytes / (1 << 10)).toFixed(0)} KB`;
+    return `${bytes} B`;
+  }
+
+  function fmtAge(secs: number): string {
+    const ago = Math.max(0, Math.floor(Date.now() / 1000 - secs));
+    if (ago < 60) return `${ago}s ago`;
+    if (ago < 3600) return `${Math.floor(ago / 60)}m ago`;
+    if (ago < 86400) return `${Math.floor(ago / 3600)}h ago`;
+    return `${Math.floor(ago / 86400)}d ago`;
+  }
+
+  createEffect(() => {
+    if (!settingsOpen()) return;
+    void refresh();
+  });
+
+  return (
+    <div class="space-y-4" data-testid="settings-backups-tab">
+      <section class="space-y-2">
+        <header class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <h3 class="text-[13.5px] font-semibold tracking-tight">Database snapshots</h3>
+            <p class="text-[12px] text-fg-muted mt-1 max-w-prose">
+              The server takes a snapshot on every startup AND before every migration. Restore is
+              performed by the <code class="font-mono">just restore-db &lt;name&gt;</code> CLI
+              command after stopping the server — we never touch live DB files from a running
+              process. See{" "}
+              <a
+                class="text-accent hover:underline"
+                href="https://github.com/anomalyco/agentgrove/blob/main/docs/operations/data-safety.md"
+                target="_blank"
+                rel="noreferrer"
+              >
+                docs/operations/data-safety.md
+              </a>
+              .
+            </p>
+          </div>
+          <button
+            type="button"
+            class="ag-btn ag-btn-ghost ag-btn-sm shrink-0"
+            onClick={() => void takeNow()}
+            disabled={busy()}
+            data-testid="backups-take-now"
+          >
+            {busy() ? "…" : "📸 Snapshot now"}
+          </button>
+        </header>
+        <Show when={stateDir()}>
+          <p class="text-[11px] text-fg-subtle font-mono break-all">{stateDir()}/backups/</p>
+        </Show>
+        <Show when={err()}>
+          <p class="text-[12px] text-danger" data-testid="backups-error">
+            {err()}
+          </p>
+        </Show>
+      </section>
+
+      <ul
+        class="border border-border rounded-lg overflow-hidden divide-y divide-border"
+        data-testid="backups-list"
+      >
+        <Show
+          when={backups().length > 0}
+          fallback={
+            <li class="px-3 py-6 text-center text-[12.5px] text-fg-subtle">
+              No snapshots yet. Take one with the button above.
+            </li>
+          }
+        >
+          <For each={backups()}>
+            {(b) => (
+              <li
+                class="flex items-center gap-3 px-3 py-2 hover:bg-bg-2"
+                data-testid={`backup-row-${b.name}`}
+              >
+                <div class="flex-1 min-w-0">
+                  <div class="font-mono text-[12.5px] truncate">{b.name}</div>
+                  <div class="text-[11px] text-fg-subtle">
+                    {fmtSize(b.size_bytes)} · {fmtAge(b.created_at_secs)}
+                    <Show when={b.tag}>
+                      {" · "}
+                      <span class="ag-chip text-[10px]">{b.tag}</span>
+                    </Show>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  class="ag-btn ag-btn-ghost ag-btn-sm shrink-0"
+                  onClick={() => void showRestore(b.name)}
+                  disabled={busy()}
+                  data-testid={`backup-restore-${b.name}`}
+                  title="Show restore instructions"
+                >
+                  ↩ Restore
+                </button>
+              </li>
+            )}
+          </For>
+        </Show>
+      </ul>
+
+      <Show when={restoreInfo()}>
+        <div
+          class="rounded-lg border border-accent bg-accent-soft p-3 space-y-2"
+          data-testid="backups-restore-instructions"
+        >
+          <h4 class="text-[12.5px] font-semibold">Restore {restoreInfo()!.snapshot}</h4>
+          <p class="text-[12px] text-fg-muted max-w-prose">{restoreInfo()!.note}</p>
+          <pre class="font-mono text-[11.5px] bg-bg-1 border border-border rounded px-2 py-1.5 overflow-x-auto whitespace-pre">
+            {restoreInfo()!.shell_command}
+          </pre>
+          <button
+            type="button"
+            class="ag-btn ag-btn-ghost ag-btn-sm"
+            onClick={() => setRestoreInfo(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      </Show>
     </div>
   );
 }
