@@ -302,6 +302,23 @@ export const api = {
     }),
   listProjectChats: (projectId: string) =>
     req<Chat[]>(`/api/projects/${encodeURIComponent(projectId)}/chats`),
+  /** Cmd+P fuzzy file search across the active project's tree.
+   *  First call triggers the BE's lazy index scan (parallel walker,
+   *  ignores gitignored paths). Returns hits sorted best-score-first
+   *  + a total_indexed count for the palette footer. */
+  searchFiles: (projectId: string, query: string, limit = 50) =>
+    req<{
+      hits: Array<{ path: string; abs: string; score: number }>;
+      total_indexed: number;
+    }>(
+      `/api/projects/${encodeURIComponent(projectId)}/files/search?q=${encodeURIComponent(
+        query,
+      )}&limit=${limit}`,
+    ),
+  reindexFiles: (projectId: string) =>
+    req<{ indexed: number }>(`/api/projects/${encodeURIComponent(projectId)}/files/reindex`, {
+      method: "POST",
+    }),
   createProjectChat: (
     projectId: string,
     body: {

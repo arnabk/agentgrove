@@ -1,6 +1,7 @@
-import { For, Show, createEffect, onCleanup, onMount, type JSX } from "solid-js";
+import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import ChangesPanel from "./components/ChangesPanel";
+import CommandPalette from "./components/CommandPalette";
 import { DialogHost } from "./components/dialog";
 import LeftRail from "./components/LeftRail";
 import MemoryIndicator from "./components/MemoryIndicator";
@@ -62,11 +63,27 @@ export default function App() {
     recordMemoryUsage("rail.projects", bytes);
   });
 
-  // Global keybinding: ⌘+, / Ctrl+, opens Settings.
+  // Cmd+P palette state. The palette OWNS its own internal keys
+  // (arrows / Enter / Esc); we only handle the open keystroke here
+  // so the global binding works regardless of which pane has focus.
+  const [paletteOpen, setPaletteOpen] = createSignal(false);
+
+  // Global keybindings:
+  //   ⌘/Ctrl + ,  → Settings
+  //   ⌘/Ctrl + P  → Cmd+P fuzzy file finder (VSCode-style)
   function onKey(e: KeyboardEvent) {
     if (e.key === "," && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       setSettingsOpen(true);
+      return;
+    }
+    if ((e.key === "p" || e.key === "P") && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+      // Browser's default Cmd+P (Print) is the wrong instinct for a
+      // dev tool; we hijack it. Shift+Cmd+P stays available for the
+      // browser's standard print + the user can still hit File →
+      // Print from the menu bar if they need it.
+      e.preventDefault();
+      setPaletteOpen(true);
     }
   }
   onMount(() => document.addEventListener("keydown", onKey));
@@ -163,6 +180,7 @@ export default function App() {
       <Show when={changesScope()}>
         <ChangesPanel />
       </Show>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <DialogHost />
     </>
   );

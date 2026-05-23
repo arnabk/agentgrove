@@ -6,6 +6,7 @@ mod branches_routes;
 mod chat_queue_notes_routes;
 mod diag_routes;
 mod editor_terminal_routes;
+mod files_routes;
 mod fs_routes;
 mod git_status_routes;
 mod health_route;

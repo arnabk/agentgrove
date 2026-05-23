@@ -1,9 +1,9 @@
 //! Axum router.
 
 use crate::{
-    branches, chats, diag, editor, fs as fsapi, git as gitapi, health::health, layout, notes,
-    projects, providers, queue, scratchpad, settings, state::AppState, terminal, themes, uploads,
-    worktrees, ws,
+    branches, chats, diag, editor, files, fs as fsapi, git as gitapi, health::health, layout,
+    notes, projects, providers, queue, scratchpad, settings, state::AppState, terminal, themes,
+    uploads, worktrees, ws,
 };
 use axum::{
     http::Method,
@@ -28,6 +28,12 @@ pub fn build_router(state: AppState) -> Router {
         // Project branches (list + switch)
         .route("/api/projects/:id/branches", get(branches::list_branches))
         .route("/api/projects/:id/branch", post(branches::switch_handler))
+        // Cmd+P fuzzy file finder. The index is lazy: the first
+        // search call scans the project root with `ignore`
+        // (parallel, gitignore-aware), subsequent calls reuse the
+        // cached entries. /reindex forces a re-scan.
+        .route("/api/projects/:id/files/search", get(files::search))
+        .route("/api/projects/:id/files/reindex", post(files::reindex))
         // Worktrees
         .route(
             "/api/projects/:id/worktrees",

@@ -1391,6 +1391,12 @@ function VirtualizedTimeline(props: {
   let scrollRef!: HTMLDivElement;
   let prevLength = props.prompts.length;
   let prevFirstId: string | undefined = props.prompts[0]?.id;
+  // Set to true whenever we WANT to land on the bottom but the
+  // scroll element may not be ready yet (the pane is mounted but
+  // `display:none` after the App.tsx mount-strategy change). Once
+  // the ResizeObserver below sees a non-zero clientHeight, we
+  // settle the actual scrollToIndex(end) and clear the flag.
+  let pendingScrollToBottom = false;
 
   const virtualizer = createVirtualizer({
     get count() {
@@ -1436,6 +1442,24 @@ function VirtualizedTimeline(props: {
   // before the virtualizer recomputes offsets. `requestAnimationFrame`
   // would be more conservative but introduces a visible flash where
   // the user sees the top of the chat for one frame.
+  /** Settle a deferred "scroll to bottom" intent. If the scroll
+   *  element has no height yet (pane is `display:none` because the
+   *  user is on a different tab), bail; the ResizeObserver below
+   *  will re-fire this once the pane is revealed. */
+  function tryScrollToBottom() {
+    const len = props.prompts.length;
+    if (len === 0) {
+      pendingScrollToBottom = false;
+      return;
+    }
+    if (!scrollRef || scrollRef.clientHeight === 0) {
+      pendingScrollToBottom = true;
+      return;
+    }
+    virtualizer.scrollToIndex(len - 1, { align: "end" });
+    pendingScrollToBottom = false;
+  }
+
   createEffect(() => {
     const ps = props.prompts;
     const len = ps.length;
@@ -1443,22 +1467,36 @@ function VirtualizedTimeline(props: {
 
     // First non-empty load → scroll to bottom unconditionally.
     if (prevLength === 0 && len > 0) {
-      queueMicrotask(() => {
-        virtualizer.scrollToIndex(len - 1, { align: "end" });
-      });
+      queueMicrotask(tryScrollToBottom);
     } else if (len > prevLength && firstId === prevFirstId) {
       // Tail growth in an already-mounted chat.
-      virtualizer.scrollToIndex(len - 1, { align: "end" });
+      tryScrollToBottom();
     } else if (firstId !== prevFirstId && len > 0 && prevLength > 0) {
       // Chat switch (firstId changed while we already had prompts).
       // Reset prevLength so the "first load" branch above doesn't
       // also fire next tick.
-      queueMicrotask(() => {
-        virtualizer.scrollToIndex(len - 1, { align: "end" });
-      });
+      queueMicrotask(tryScrollToBottom);
     }
     prevLength = len;
     prevFirstId = firstId;
+  });
+
+  // ResizeObserver-based settler: when the pane was hidden during
+  // mount (user landed on terminal/editor and refreshed there), the
+  // virtualizer's scrollToIndex calls above no-op'd because the
+  // element had clientHeight === 0. Once the user flips to the
+  // chat pane, the host's display changes back to `block` and the
+  // browser reports a non-zero height — that's our signal to re-
+  // execute the pending scroll.
+  onMount(() => {
+    if (!scrollRef) return;
+    const ro = new ResizeObserver(() => {
+      if (pendingScrollToBottom && scrollRef.clientHeight > 0) {
+        tryScrollToBottom();
+      }
+    });
+    ro.observe(scrollRef);
+    onCleanup(() => ro.disconnect());
   });
 
   // Live token / thinking deltas grow the active prompt's bubble —
@@ -1473,22 +1511,79 @@ function VirtualizedTimeline(props: {
     virtualizer.measure();
   });
 
+  // Reverse lazy loading: when the user scrolls within
+  // SCROLL_TRIGGER_PX of the top AND there are older prompts the
+  // BE knows about, kick `onLoadOlder()` automatically. We snapshot
+  // the scroll height + offset BEFORE the backfill lands so we can
+  // restore the user's reading position once new rows prepend
+  // (otherwise the new rows would push everything down and the
+  // user would lose their place).
+  const SCROLL_TRIGGER_PX = 200;
+  let preserveAnchor: { scrollTop: number; scrollHeight: number } | null = null;
+
+  function onScroll() {
+    if (!scrollRef) return;
+    if (props.atStart || props.loadingOlder) return;
+    if (scrollRef.scrollTop < SCROLL_TRIGGER_PX) {
+      preserveAnchor = {
+        scrollTop: scrollRef.scrollTop,
+        scrollHeight: scrollRef.scrollHeight,
+      };
+      props.onLoadOlder();
+    }
+  }
+
+  // After a successful backfill the older prompts prepend at the
+  // top; restore the user's scroll position relative to the FIRST
+  // visible row by adding the delta-in-content-height to the prior
+  // scrollTop. Triggered by `prompts.length` growing while
+  // `firstId` changed.
+  createEffect(() => {
+    void props.prompts.length;
+    if (!preserveAnchor || !scrollRef) return;
+    queueMicrotask(() => {
+      if (!scrollRef || !preserveAnchor) return;
+      const delta = scrollRef.scrollHeight - preserveAnchor.scrollHeight;
+      if (delta > 0) {
+        scrollRef.scrollTop = preserveAnchor.scrollTop + delta;
+      }
+      preserveAnchor = null;
+    });
+  });
+
   return (
     <div
       ref={(el) => (scrollRef = el)}
       class="flex-1 overflow-y-auto px-6"
+      onScroll={onScroll}
       data-testid="chat-timeline"
     >
       <Show when={!props.atStart && props.prompts.length > 0}>
-        <div class="flex justify-center pt-4 pb-2">
-          <button
-            class="ag-btn ag-btn-ghost ag-btn-sm"
-            onClick={() => props.onLoadOlder()}
-            disabled={props.loadingOlder}
-            data-testid="chat-load-older"
+        <div class="flex justify-center pt-4 pb-2" data-testid="chat-older-indicator">
+          <Show
+            when={props.loadingOlder}
+            fallback={
+              <span class="text-[11.5px] text-fg-subtle">Scroll up to load older messages</span>
+            }
           >
-            {props.loadingOlder ? "Loading…" : "↑ Load older messages"}
-          </button>
+            <span class="text-[11.5px] text-fg-subtle inline-flex items-center gap-2">
+              <span class="inline-flex gap-0.5">
+                <span
+                  class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse"
+                  style="animation-delay:0ms"
+                />
+                <span
+                  class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse"
+                  style="animation-delay:150ms"
+                />
+                <span
+                  class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse"
+                  style="animation-delay:300ms"
+                />
+              </span>
+              Loading older…
+            </span>
+          </Show>
         </div>
       </Show>
       {/* Flow-layout windowed render.

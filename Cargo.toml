@@ -61,6 +61,11 @@ notify = "6"
 notify-debouncer-full = "0.3"
 portable-pty = "0.8"
 
+# File indexing (Cmd+P fuzzy file finder). Same parallel walker
+# ripgrep + helix use; same fuzzy matcher helix + zed use.
+ignore = "0.4"
+nucleo-matcher = "0.3"
+
 # Paths / dirs
 directories-next = "2"
 which = "6"

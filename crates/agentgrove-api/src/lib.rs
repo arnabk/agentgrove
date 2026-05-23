@@ -6,6 +6,8 @@ pub mod branches;
 pub mod chats;
 pub mod diag;
 pub mod editor;
+pub mod file_index;
+pub mod files;
 pub mod fs;
 pub mod git;
 pub mod health;

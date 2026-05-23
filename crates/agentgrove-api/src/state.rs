@@ -69,6 +69,10 @@ pub struct AppState {
     /// provider call to bail out — dropping the child `Command`
     /// (spawned with `kill_on_drop`) and ending the turn.
     pub cancel_tokens: Arc<Mutex<HashMap<String, tokio_util::sync::CancellationToken>>>,
+    /// Per-project in-memory file index (Cmd+P fuzzy finder).
+    /// Lazily populated on first search; the FE can also call
+    /// `POST /api/projects/:id/files/reindex` to force a re-scan.
+    pub file_index: crate::file_index::FileIndex,
 }
 
 impl AppState {
@@ -107,6 +111,7 @@ impl AppState {
             providers: crate::providers::ProviderRegistry::default(),
             dispatching: Arc::new(Mutex::new(HashSet::new())),
             cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
+            file_index: crate::file_index::FileIndex::new(),
         }
     }
 }

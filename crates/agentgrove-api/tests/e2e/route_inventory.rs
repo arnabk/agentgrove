@@ -23,6 +23,8 @@ fn expected_routes() -> BTreeSet<&'static str> {
         "POST /api/projects/{id}/chats",
         "GET /api/projects/{id}/branches",
         "POST /api/projects/{id}/branch",
+        "GET /api/projects/{id}/files/search",
+        "POST /api/projects/{id}/files/reindex",
         "GET /api/chats/{id}",
         "PATCH /api/chats/{id}",
         "GET /api/chats/{id}/prompts",

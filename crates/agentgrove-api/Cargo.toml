@@ -33,6 +33,10 @@ chrono = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 mime_guess = { workspace = true }
+ignore = { workspace = true }
+nucleo-matcher = { workspace = true }
+notify = { workspace = true }
+notify-debouncer-full = { workspace = true }
 
 [dev-dependencies]
 reqwest = { workspace = true }
