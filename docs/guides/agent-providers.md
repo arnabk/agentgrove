@@ -66,6 +66,11 @@ impl AgentProvider for MyProvider {
         opts: SpawnOptions,
         events: mpsc::UnboundedSender<AgentEvent>,
     ) -> Result<(), ProviderError> { … }
+
+    async fn slash_commands(
+        &self,
+        ctx: SlashCommandContext<'_>,
+    ) -> Vec<SlashCommand> { … }
 }
 ```
 
@@ -73,7 +78,11 @@ Key contracts:
 
 - `detect()` always returns a descriptor (with `available=false` if the
   CLI is missing). Never error out — the FE renders the picker
-  uniformly.
+  uniformly. `ProviderDescriptor.models` is `Vec<String>`; populate
+  with live-fetched data (cached via
+  `agentgrove_agents::models_cache::get_or_fetch`) when the CLI
+  exposes a `<binary> models` command, otherwise ship a curated
+  static set.
 - `spawn()` uses `current_dir(opts.cwd)`, `stdin(Stdio::null())`,
   `kill_on_drop(true)`. It must close the events channel exactly once
   per turn (the channel closes naturally when `tx` is dropped at the
@@ -82,9 +91,30 @@ Key contracts:
   provider's `default_model` when `None`.
 - Forward `opts.resume_session_id` when supported so multi-turn chats
   preserve context.
+- Honour `opts.auto_approve_tools` — when `true`, pass whatever
+  flag the CLI accepts to bypass interactive permission prompts
+  (Claude / opencode use `--dangerously-skip-permissions`). Without
+  this the agent stalls forever on the first tool call because we
+  never allocate a TTY for the child.
 - Drain stderr to a separate task so the CLI doesn't block on a full
   pipe; surface unparseable stderr lines as `AgentEvent::Error`
   events.
+- Pass the prompt as a positional argument AFTER a `--` separator
+  so markdown bullet-list prompts (`- item`) aren't parsed as
+  CLI flags.
+
+`slash_commands` is async. The default impl returns an empty list;
+override to surface the CLI's commands. The
+`agentgrove_agents::slash_files::scan_markdown_commands(root)`
+helper walks a directory of `.md` files (Claude / opencode
+convention) and reads the YAML front-matter's `description:`
+field. Implementations typically union:
+
+  1. **Built-in** commands the CLI always ships.
+  2. **User-level** commands from the CLI's per-user config dir
+     (`~/.claude/commands/`, `~/.config/opencode/command/`, …).
+  3. **Project-level** commands from `<ctx.cwd>/.claude/commands/`
+     or `<ctx.cwd>/.opencode/command/` when `ctx.cwd` is set.
 
 ### 4. Register the provider
 
@@ -92,6 +122,20 @@ Add an `Arc::new(<Provider>Provider::new())` to
 `crates/agentgrove-api/src/providers.rs::ProviderRegistry::default()`.
 Add the install hint to
 `ProviderDto::from_descriptor`'s match arm.
+
+### 4b. HTTP-API providers (OpenAI-compatible aggregators)
+
+If your provider lives behind an HTTP endpoint rather than a CLI:
+
+- Store its base URL + (optional) API key in the `provider_secrets`
+  table via `ProviderSecretRepo`. Keys are encrypted at rest with
+  the machine-bound XChaCha20-Poly1305 keyring at
+  `<state_dir>/secrets.key`; never round-trip them over HTTP.
+- The Settings → Providers tab's `ProviderForm` already wraps the
+  encryption + persistence; add an entry to `HTTP_PROVIDERS` in
+  `apps/web/src/components/SettingsModal.tsx`.
+- Construct the provider on-demand from `providers::resolve()` so
+  the runtime config is read at dispatch time, not boot.
 
 ### 5. Tests
 
