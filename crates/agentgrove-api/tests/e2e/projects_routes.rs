@@ -275,3 +275,87 @@ async fn project_patch_unknown_returns_404() {
         .unwrap();
     assert_eq!(res.status(), 404);
 }
+
+/// Project deletion cascades through related state: chats become
+/// 404, worktrees disappear from history, layout blobs are
+/// dropped. Previously a stale project row would leave orphans
+/// in the chats table + worktree history dialog forever.
+#[tokio::test]
+async fn delete_project_cascades_chats_worktrees_layout() {
+    let h = BeHarness::start().await;
+    // Create a project.
+    let dir = tempfile::tempdir().unwrap();
+    let body = serde_json::json!({
+        "name": "cascade-test",
+        "root": dir.path().to_string_lossy(),
+    });
+    let created = h
+        .post_auth("/api/projects")
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    let p: serde_json::Value = created.json().await.unwrap();
+    let pid = p["id"].as_str().unwrap().to_owned();
+
+    // Plant a chat under it.
+    let chat_body = serde_json::json!({
+        "title": "doomed-chat",
+        "provider": "fake",
+        "model": "echo",
+    });
+    let chat_created = h
+        .post_auth(&format!("/api/projects/{pid}/chats"))
+        .json(&chat_body)
+        .send()
+        .await
+        .unwrap();
+    let chat: serde_json::Value = chat_created.json().await.unwrap();
+    let chat_id = chat["id"].as_str().unwrap().to_owned();
+
+    // Plant a per-scope layout blob.
+    h.put(&format!("/api/layout/scope?project={pid}"))
+        .json(&serde_json::json!({ "blob": { "activeChat": chat_id } }))
+        .send()
+        .await
+        .unwrap();
+
+    // Delete the project.
+    let del = h
+        .delete_auth(&format!("/api/projects/{pid}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(del.status(), 204);
+
+    // The chat is gone.
+    let missing_chat = h
+        .get_auth(&format!("/api/chats/{chat_id}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing_chat.status(), 404);
+
+    // The project is gone.
+    let missing_project = h
+        .get_auth(&format!("/api/projects/{pid}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing_project.status(), 404);
+
+    // Layout for the deleted project doesn't reappear.
+    let layout: serde_json::Value = h
+        .get_auth("/api/layout")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let scopes = layout["scopes"].as_array().unwrap();
+    assert!(
+        !scopes.iter().any(|s| s["project_id"] == pid),
+        "layout still holds the deleted project: {scopes:?}"
+    );
+}

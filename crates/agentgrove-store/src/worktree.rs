@@ -266,6 +266,19 @@ impl WorktreeRepo {
         Ok(res.rows_affected() == 1)
     }
 
+    /// Hard-delete: remove the worktree row entirely, including from
+    /// history. Used by the project-delete cascade — keeping soft-
+    /// deleted worktrees pointing at a removed project would leave
+    /// orphans in `GET /api/worktrees/history` forever. Returns the
+    /// number of rows removed.
+    pub async fn hard_delete(&self, id: &str) -> Result<u64, WorktreeError> {
+        let res = sqlx::query("DELETE FROM worktrees WHERE id = ?1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(res.rows_affected())
+    }
+
     /// Restore a soft-deleted row by clearing `removed_at`. Returns
     /// whether a row was affected.
     pub async fn restore(&self, id: &str) -> Result<bool, WorktreeError> {

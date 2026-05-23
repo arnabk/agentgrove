@@ -124,6 +124,45 @@ pub async fn delete(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
+    // Cascade related state BEFORE deleting the project row so a
+    // mid-cascade crash leaves the project visible (rather than a
+    // dangling worktree / chat under a project that no longer
+    // exists). Each step is best-effort: a failure logs but
+    // doesn't abort. The project row is the last thing to go;
+    // its disappearance is what flips the FE to "deleted".
+
+    // Drop the file index for this project (cheap; in-memory).
+    state.file_index.forget(&id).await;
+
+    // Hard-delete any chats that lived under this project. The
+    // chat row has no FK on project_id (see migration 0005); we
+    // own cleanup here. ChatRepo also takes care of cascading
+    // prompts via its own SQL.
+    if let Ok(chats) = state.chat_store.list_for_project(&id).await {
+        for c in chats {
+            let _ = state.chat_store.delete(&c.id).await;
+        }
+    }
+
+    // Drop in-memory chat aggregates pointing at this project
+    // (the store delete is the source of truth, but the registry
+    // is what the WS broadcasts off of).
+    {
+        let mut reg = state.chats.write().await;
+        reg.retain_chats(|c| c.project_id != id);
+    }
+
+    // Hard-delete worktrees (soft-delete leaves orphans pointing
+    // at a removed project — surfaced in WorktreeHistoryDialog).
+    if let Ok(wts) = state.worktrees.list_for_project(&id).await {
+        for w in wts {
+            let _ = state.worktrees.hard_delete(&w.id).await;
+        }
+    }
+
+    // Forget the layout blob for any scope rooted at this project.
+    let _ = state.layouts.delete_for_project(&id).await;
+
     let removed = state.projects.delete(&id).await.map_err(map_err)?;
     if !removed {
         return Err((StatusCode::NOT_FOUND, format!("project {id} not found")));

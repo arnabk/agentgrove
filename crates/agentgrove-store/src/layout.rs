@@ -92,6 +92,18 @@ impl LayoutRepo {
         Ok(())
     }
 
+    /// Drop every scope row matching `project_id` (covers both the
+    /// project-root scope and every worktree-of-project scope).
+    /// Used by the project-delete cascade. Returns the number of
+    /// rows removed.
+    pub async fn delete_for_project(&self, project_id: &str) -> Result<u64, LayoutError> {
+        let res = sqlx::query("DELETE FROM layout_scope WHERE project_id = ?1")
+            .bind(project_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(res.rows_affected())
+    }
+
     /// List every persisted scope's blob. Used by the FE on boot to
     /// hydrate all scopes at once instead of one round-trip per
     /// scope.

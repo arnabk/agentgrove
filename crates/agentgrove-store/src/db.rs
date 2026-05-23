@@ -81,21 +81,44 @@ pub async fn run_migrations_safely(
 
     match sqlx::migrate!("./migrations").run(pool).await {
         Ok(()) => Ok(snapshot_taken),
-        Err(e) => {
-            // Classify sqlx errors into actionable shapes.
-            let msg = e.to_string().to_lowercase();
+        Err(e) => Err(classify_migrate_error(e, state_dir)),
+    }
+}
+
+/// Turn a `sqlx::migrate::MigrateError` into a typed
+/// [`MigrationError`] for the operator. We pattern-match the
+/// dedicated sqlx variants first (`VersionMismatch`,
+/// `VersionMissing`, `Dirty`) and fall back to the substring
+/// classifier for anything sqlx doesn't surface structurally —
+/// older sqlx releases stringified these and we still want
+/// to catch them. Keeping the fallback also future-proofs the
+/// classifier against new variants we haven't yet named.
+fn classify_migrate_error(e: sqlx::migrate::MigrateError, state_dir: &Path) -> MigrationError {
+    use sqlx::migrate::MigrateError as M;
+    let snapshot_hint = latest_snapshot_path(state_dir);
+    match e {
+        M::VersionMismatch(_) | M::Dirty(_) => MigrationError::ChecksumMismatch {
+            detail: e.to_string(),
+            snapshot_hint,
+        },
+        M::VersionMissing(_) => MigrationError::MissingMigration {
+            detail: e.to_string(),
+            snapshot_hint,
+        },
+        other => {
+            let msg = other.to_string().to_lowercase();
             if msg.contains("checksum") || msg.contains("dirty") {
-                Err(MigrationError::ChecksumMismatch {
-                    detail: e.to_string(),
-                    snapshot_hint: latest_snapshot_path(state_dir),
-                })
+                MigrationError::ChecksumMismatch {
+                    detail: other.to_string(),
+                    snapshot_hint,
+                }
             } else if msg.contains("missing") || msg.contains("version") {
-                Err(MigrationError::MissingMigration {
-                    detail: e.to_string(),
-                    snapshot_hint: latest_snapshot_path(state_dir),
-                })
+                MigrationError::MissingMigration {
+                    detail: other.to_string(),
+                    snapshot_hint,
+                }
             } else {
-                Err(MigrationError::Sqlx(Box::new(e)))
+                MigrationError::Sqlx(Box::new(other))
             }
         }
     }
@@ -313,4 +336,162 @@ fn prune_old_backups(backups_dir: &Path, keep: usize) -> std::io::Result<()> {
         let _ = std::fs::remove_dir_all(victim.path());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Happy path: running migrations on a fresh DB writes a
+    /// pre-migrate snapshot (because every embedded migration is
+    /// pending) and returns Ok.
+    #[tokio::test]
+    async fn safely_writes_pre_migrate_snapshot_on_first_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Touch the DB file so the snapshot helper has something
+        // to copy. open_pool would create it on demand but we
+        // need a concrete file BEFORE the snapshot call.
+        std::fs::write(tmp.path().join("agentgrove.sqlite"), b"").unwrap();
+        let pool = open_pool(tmp.path()).await.unwrap();
+        let snap_taken = run_migrations_safely(&pool, tmp.path()).await.unwrap();
+        assert!(snap_taken, "pre-migrate snapshot should fire on first run");
+        let backups = std::fs::read_dir(tmp.path().join("backups"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(
+            backups.iter().any(|b| b.contains("-pre-migrate")),
+            "expected db-<ts>-pre-migrate in {backups:?}"
+        );
+    }
+
+    /// Idempotent: running migrations a second time finds nothing
+    /// pending and skips the snapshot. This keeps the backups dir
+    /// from bloating on routine server restarts.
+    #[tokio::test]
+    async fn safely_skips_snapshot_when_nothing_pending() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("agentgrove.sqlite"), b"").unwrap();
+        let pool = open_pool(tmp.path()).await.unwrap();
+        run_migrations_safely(&pool, tmp.path()).await.unwrap();
+        // Count snapshots after the first run, then check the
+        // count doesn't grow on the second run.
+        let before = std::fs::read_dir(tmp.path().join("backups"))
+            .unwrap()
+            .count();
+        let snap_taken = run_migrations_safely(&pool, tmp.path()).await.unwrap();
+        assert!(!snap_taken, "no new snapshot expected on no-op run");
+        let after = std::fs::read_dir(tmp.path().join("backups"))
+            .unwrap()
+            .count();
+        assert_eq!(before, after, "backups dir unexpectedly grew");
+    }
+
+    /// Manual `snapshot_db_to_backups_tagged` reachable from a
+    /// pure-Rust caller (the FE Backups panel uses this via the
+    /// HTTP API).
+    #[test]
+    fn snapshot_tagged_creates_directory_with_tag_in_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("agentgrove.sqlite"), b"hello").unwrap();
+        let path = snapshot_db_to_backups_tagged(tmp.path(), "manual").unwrap();
+        assert!(path.is_dir());
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            name.starts_with("db-") && name.ends_with("-manual"),
+            "unexpected name: {name}"
+        );
+        // Sibling main.sqlite copied.
+        assert!(path.join("agentgrove.sqlite").is_file());
+    }
+
+    /// Tag-illegal characters get scrubbed.
+    #[test]
+    fn snapshot_tag_strips_unsafe_chars() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("agentgrove.sqlite"), b"x").unwrap();
+        let path = snapshot_db_to_backups_tagged(tmp.path(), "evil/../tag").unwrap();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        // No path separator survived.
+        assert!(!name.contains('/'));
+        assert!(!name.contains(".."));
+    }
+
+    /// Latest-snapshot lookup helper rolls forward when the dir
+    /// has multiple entries.
+    #[test]
+    fn latest_snapshot_path_picks_newest_by_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let backups = tmp.path().join("backups");
+        std::fs::create_dir_all(&backups).unwrap();
+        std::fs::create_dir_all(backups.join("db-20260520-000000")).unwrap();
+        std::fs::create_dir_all(backups.join("db-20260522-000000")).unwrap();
+        std::fs::create_dir_all(backups.join("db-20260521-000000-pre-migrate")).unwrap();
+        let latest = latest_snapshot_path(tmp.path()).unwrap();
+        let name = latest.file_name().unwrap().to_string_lossy().into_owned();
+        assert_eq!(name, "db-20260522-000000");
+    }
+}
+
+#[cfg(test)]
+mod migration_failure_tests {
+    use super::*;
+    use sqlx::Executor;
+
+    /// Simulate the "applied migration's checksum no longer matches
+    /// disk" scenario: run migrations once, then poison a row in
+    /// _sqlx_migrations so the next run sees a mismatch. The wrapper
+    /// must translate the failure into ChecksumMismatch with the
+    /// snapshot hint populated (so the operator knows how to recover).
+    #[tokio::test]
+    async fn checksum_mismatch_returns_structured_error_with_hint() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("agentgrove.sqlite"), b"").unwrap();
+        let pool = open_pool(tmp.path()).await.unwrap();
+        run_migrations_safely(&pool, tmp.path()).await.unwrap();
+
+        // Poison the first applied migration's checksum. sqlx
+        // stores BLOB checksums in `_sqlx_migrations.checksum` —
+        // overwriting with zeros guarantees a mismatch on the
+        // next migration run.
+        pool.execute("UPDATE _sqlx_migrations SET checksum = X'00' WHERE version = 1")
+            .await
+            .unwrap();
+
+        let err = run_migrations_safely(&pool, tmp.path()).await.unwrap_err();
+        match err {
+            MigrationError::ChecksumMismatch { snapshot_hint, .. } => {
+                assert!(
+                    snapshot_hint.is_some(),
+                    "ChecksumMismatch must carry a snapshot hint so the operator can roll back",
+                );
+            }
+            other => panic!("expected ChecksumMismatch, got {other:?}"),
+        }
+    }
+
+    /// Sanity: a snapshot is still written before the wrapper
+    /// detects the failure, so the pre-migrate copy of the
+    /// pre-corruption state is on disk.
+    #[tokio::test]
+    async fn pre_migrate_snapshot_exists_after_failed_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("agentgrove.sqlite"), b"").unwrap();
+        let pool = open_pool(tmp.path()).await.unwrap();
+        run_migrations_safely(&pool, tmp.path()).await.unwrap();
+        // The successful run already wrote a snapshot; capture
+        // the latest BEFORE we corrupt the DB so we can compare.
+        let before_corrupt = latest_snapshot_path(tmp.path()).unwrap();
+        // Corrupt the checksum + retry; failure should leave the
+        // snapshot directory untouched (we don't take a second
+        // snapshot when there are no pending migrations).
+        pool.execute("UPDATE _sqlx_migrations SET checksum = X'00' WHERE version = 1")
+            .await
+            .unwrap();
+        let _ = run_migrations_safely(&pool, tmp.path()).await;
+        // Same latest snapshot — checksum mismatch fires AFTER the
+        // pending check, and pending was empty.
+        let after = latest_snapshot_path(tmp.path()).unwrap();
+        assert_eq!(before_corrupt, after);
+    }
 }

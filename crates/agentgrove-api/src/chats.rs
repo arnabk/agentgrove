@@ -267,6 +267,23 @@ impl ChatRegistry {
         }
     }
 
+    /// Drop every cached chat for which `keep(&rec)` returns false.
+    /// Used by the project-delete cascade: we walk the by_id map
+    /// and evict any chat whose project_id matches the deleted
+    /// project so the FE doesn't keep showing orphans until the
+    /// next page reload.
+    pub fn retain_chats<F: FnMut(&ChatRecord) -> bool>(&mut self, mut keep: F) {
+        let drop_ids: Vec<String> = self
+            .by_id
+            .values()
+            .filter(|c| !keep(c))
+            .map(|c| c.id.clone())
+            .collect();
+        for id in drop_ids {
+            self.evict(&id);
+        }
+    }
+
     /// Borrow a chat mutably so a store-roundtrip method can update
     /// the cached events vec after a persist. The public callers
     /// stay shielded behind the helpers below.
