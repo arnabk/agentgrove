@@ -1,0 +1,65 @@
+name: migrations
+on:
+  pull_request:
+    paths:
+      - "crates/agentgrove-store/migrations/**"
+      - ".github/workflows/migrations.yml"
+  push:
+    branches: [main]
+    paths:
+      - "crates/agentgrove-store/migrations/**"
+
+# Migration safety guard. See ADR-0007.
+#
+# The forward-only rule for AgentGrove is: once a migration file
+# has been merged to `main`, it MUST NOT be edited. Future
+# changes go in a new file (`00NN_fix_thing.sql`). Editing a
+# committed migration in place silently breaks every developer's
+# local DB the moment they pull (sqlx detects the checksum
+# mismatch and refuses to boot; recovery historically meant
+# wiping the DB).
+#
+# This workflow enforces the rule by diffing the PR's migrations
+# directory against `main` and failing if any file that was
+# already on `main` has changed bytes. New files (with strictly
+# greater numeric prefix) are fine.
+jobs:
+  block-migration-edits:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fail if a previously-merged migration changed
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          DIR="crates/agentgrove-store/migrations"
+          echo "Comparing ${DIR} between ${BASE} and ${HEAD}"
+
+          # Files that existed on the base branch are "merged migrations"
+          # and must be byte-identical on the head.
+          base_files=$(git ls-tree -r --name-only "${BASE}" -- "${DIR}" | sort)
+          violations=()
+          while IFS= read -r f; do
+            [[ -z "${f}" ]] && continue
+            # Some files have CRLF; compare the raw blob hashes to
+            # sidestep that.
+            base_hash=$(git rev-parse "${BASE}:${f}")
+            head_hash=$(git rev-parse "${HEAD}:${f}" 2>/dev/null || echo "DELETED")
+            if [[ "${head_hash}" != "${base_hash}" ]]; then
+              violations+=("${f} (${base_hash:0:8} -> ${head_hash:0:8})")
+            fi
+          done <<< "${base_files}"
+
+          if [[ ${#violations[@]} -gt 0 ]]; then
+            echo
+            echo "::error::Migration files merged to main MUST NOT be edited. Add a new migration instead. See ADR-0007."
+            for v in "${violations[@]}"; do
+              echo "  - ${v}"
+            done
+            exit 1
+          fi
+          echo "OK — no edits to previously-merged migrations."

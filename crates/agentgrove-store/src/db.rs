@@ -45,6 +45,188 @@ pub async fn run_migrations(pool: &DbPool) -> Result<(), sqlx::migrate::MigrateE
     sqlx::migrate!("./migrations").run(pool).await
 }
 
+/// Run migrations defensively from a known state directory.
+///
+/// This is the user-facing entrypoint server bootstrap should use
+/// (rather than [`run_migrations`] directly). It:
+///
+///   1. Takes a SAFETY snapshot of the DB tagged
+///      `db-<ts>-pre-migrate` ONLY when there's pending work to
+///      do. This means routine restarts don't bloat the backups
+///      directory, but anything that's about to mutate schema gets
+///      a guaranteed rollback point.
+///   2. Runs migrations and translates the dreaded "applied
+///      migration has a different checksum" failure into a
+///      human-readable error that names the offending file + the
+///      snapshot the user can recover from.
+///
+/// Returns whether a snapshot was actually taken (so callers can
+/// log it).
+///
+/// # Errors
+///
+/// Returns a domain-specific [`MigrationError`] with actionable
+/// detail. Underlying sqlx errors are wrapped, not swallowed.
+pub async fn run_migrations_safely(
+    pool: &DbPool,
+    state_dir: impl AsRef<Path>,
+) -> Result<bool, MigrationError> {
+    let state_dir = state_dir.as_ref();
+    let need_snapshot = has_pending_migrations(pool).await?;
+    let snapshot_taken = if need_snapshot {
+        snapshot_db_to_backups_tagged(state_dir, "pre-migrate").is_some()
+    } else {
+        false
+    };
+
+    match sqlx::migrate!("./migrations").run(pool).await {
+        Ok(()) => Ok(snapshot_taken),
+        Err(e) => {
+            // Classify sqlx errors into actionable shapes.
+            let msg = e.to_string().to_lowercase();
+            if msg.contains("checksum") || msg.contains("dirty") {
+                Err(MigrationError::ChecksumMismatch {
+                    detail: e.to_string(),
+                    snapshot_hint: latest_snapshot_path(state_dir),
+                })
+            } else if msg.contains("missing") || msg.contains("version") {
+                Err(MigrationError::MissingMigration {
+                    detail: e.to_string(),
+                    snapshot_hint: latest_snapshot_path(state_dir),
+                })
+            } else {
+                Err(MigrationError::Sqlx(Box::new(e)))
+            }
+        }
+    }
+}
+
+/// Returns true iff there's at least one migration file the DB
+/// hasn't applied yet. Used to skip the pre-migrate snapshot on the
+/// common "nothing changed, just restarting" case.
+async fn has_pending_migrations(pool: &DbPool) -> Result<bool, MigrationError> {
+    let migrator = sqlx::migrate!("./migrations");
+    // `_sqlx_migrations` may not exist yet on a brand-new DB; in
+    // that case every embedded migration is pending by definition.
+    let applied: Vec<i64> = sqlx::query_scalar("SELECT version FROM _sqlx_migrations")
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+    let applied: std::collections::HashSet<i64> = applied.into_iter().collect();
+    Ok(migrator.iter().any(|m| !applied.contains(&(m.version))))
+}
+
+fn latest_snapshot_path(state_dir: &Path) -> Option<std::path::PathBuf> {
+    let backups_dir = state_dir.join("backups");
+    let mut entries: Vec<_> = std::fs::read_dir(&backups_dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().starts_with("db-"))
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+    entries.last().map(|e| e.path())
+}
+
+/// Migration failure surfaced by [`run_migrations_safely`]. Each
+/// variant carries enough detail for the operator to recover
+/// without re-reading the sqlx docs.
+#[derive(Debug, thiserror::Error)]
+pub enum MigrationError {
+    /// An applied migration file on disk has changed since it was
+    /// run. This is the #1 cause of dev-time data loss in this
+    /// project: editing `0008_*.sql` after it shipped meant sqlx
+    /// refused to boot, the operator wiped the DB to recover, and
+    /// every chat / queue / layout blob went with it.
+    ///
+    /// Recovery path the message points at: restore from the
+    /// latest snapshot (which is from BEFORE the bad edit), revert
+    /// the offending migration file, and create a NEW migration
+    /// (e.g. `0010_fix_thing.sql`) that does the change forward-
+    /// only.
+    #[error(
+        "applied migration's checksum no longer matches disk — \
+         you've edited a migration that's already been run.\n\n\
+         What to do:\n\
+           1. `cp <snapshot>/agentgrove.sqlite* .data/` to restore.\n\
+           2. `git checkout -- crates/agentgrove-store/migrations/` to revert your edit.\n\
+           3. Add a NEW migration with the change you wanted (e.g. `0010_foo.sql`).\n\n\
+         Latest snapshot: {snapshot_hint:?}\n\
+         sqlx detail: {detail}"
+    )]
+    ChecksumMismatch {
+        detail: String,
+        snapshot_hint: Option<std::path::PathBuf>,
+    },
+    /// The DB has applied a migration version that doesn't exist on
+    /// disk (someone deleted a migration file after applying it).
+    #[error(
+        "DB has applied a migration version that's missing on disk — \
+         you've deleted a migration file that was already run.\n\n\
+         Restore from the latest snapshot ({snapshot_hint:?}) or \
+         restore the deleted migration file from git.\n\n\
+         sqlx detail: {detail}"
+    )]
+    MissingMigration {
+        detail: String,
+        snapshot_hint: Option<std::path::PathBuf>,
+    },
+    /// Pass-through for everything else sqlx could throw at us.
+    #[error("sqlx migrate: {0}")]
+    Sqlx(Box<sqlx::migrate::MigrateError>),
+}
+
+/// Like [`snapshot_db_to_backups`] but lets the caller tag the
+/// snapshot with a reason suffix (`pre-migrate`, `manual`,
+/// `pre-restore`, ...) so a forensic walk of `backups/` shows what
+/// each one was taken for.
+pub fn snapshot_db_to_backups_tagged(
+    state_dir: impl AsRef<Path>,
+    tag: &str,
+) -> Option<std::path::PathBuf> {
+    let state_dir = state_dir.as_ref();
+    let main = state_dir.join("agentgrove.sqlite");
+    if !main.exists() {
+        return None;
+    }
+    let backups_dir = state_dir.join("backups");
+    if let Err(e) = std::fs::create_dir_all(&backups_dir) {
+        tracing::warn!(error = %e, "could not create backups dir; skipping snapshot");
+        return None;
+    }
+    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let safe_tag: String = tag
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    let dest_dir = if safe_tag.is_empty() {
+        backups_dir.join(format!("db-{stamp}"))
+    } else {
+        backups_dir.join(format!("db-{stamp}-{safe_tag}"))
+    };
+    if let Err(e) = std::fs::create_dir_all(&dest_dir) {
+        tracing::warn!(error = %e, "could not create snapshot dir");
+        return None;
+    }
+    for suffix in ["", "-wal", "-shm"] {
+        let src = state_dir.join(format!("agentgrove.sqlite{suffix}"));
+        if !src.exists() {
+            continue;
+        }
+        let dst = dest_dir.join(format!("agentgrove.sqlite{suffix}"));
+        if let Err(e) = std::fs::copy(&src, &dst) {
+            tracing::warn!(
+                src = %src.display(),
+                error = %e,
+                "snapshot copy failed; backup may be incomplete",
+            );
+        }
+    }
+    if let Err(e) = prune_old_backups(&backups_dir, MAX_DB_BACKUPS) {
+        tracing::warn!(error = %e, "could not prune old backups");
+    }
+    Some(dest_dir)
+}
+
 /// Maximum number of snapshot directories `snapshot_db_to_backups`
 /// keeps before pruning the oldest. Picked so a few weeks of daily
 /// dev iteration won't fill the disk while still leaving a long
@@ -123,11 +305,7 @@ pub fn snapshot_db_to_backups(state_dir: impl AsRef<Path>) -> Option<std::path::
 fn prune_old_backups(backups_dir: &Path, keep: usize) -> std::io::Result<()> {
     let mut entries: Vec<_> = std::fs::read_dir(backups_dir)?
         .filter_map(Result::ok)
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with("db-")
-        })
+        .filter(|e| e.file_name().to_string_lossy().starts_with("db-"))
         .collect();
     entries.sort_by_key(|e| e.file_name());
     while entries.len() > keep {

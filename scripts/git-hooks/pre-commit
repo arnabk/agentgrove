@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Refuses to commit changes that modify a migration file the user
+# has ALREADY applied to their local DB. This is the #1 cause of
+# dev-time data loss in AgentGrove: editing `0008_*.sql` after it
+# shipped means sqlx will refuse to boot, and the operator wipes
+# the DB to recover. The forward-only rule is: never edit applied
+# migrations; add a new one.
+#
+# We detect this by walking `.data/agentgrove.sqlite`'s
+# `_sqlx_migrations` table (when present) and cross-referencing
+# any STAGED .sql files in `crates/agentgrove-store/migrations/`.
+#
+# To bypass (e.g. truly removing an unapplied migration), pass
+# `--no-verify` to `git commit`. The CI guard
+# (.github/workflows/migrations.yml) catches it on push regardless.
+set -euo pipefail
+
+# Get list of staged migration files that already existed on disk
+# (filter `M`/modified). Brand-new migrations are filtered out — the
+# normal flow is "write new migration → run server → commit", which
+# means the new file IS in the local _sqlx_migrations table by commit
+# time. That's fine: the bytes haven't changed since they landed.
+# We only care about edits to files git already tracks.
+staged_migrations=$(git diff --cached --name-only --diff-filter=M \
+  -- 'crates/agentgrove-store/migrations/*.sql' || true)
+
+if [[ -z "${staged_migrations}" ]]; then
+  exit 0
+fi
+
+DB="$(git rev-parse --show-toplevel)/.data/agentgrove.sqlite"
+if [[ ! -f "${DB}" ]]; then
+  # No local DB yet — every migration is unapplied. Allow.
+  exit 0
+fi
+
+# Pull list of applied versions. The table may not exist on a fresh
+# DB; tolerate that.
+applied=$(sqlite3 "${DB}" \
+  "SELECT version FROM _sqlx_migrations" 2>/dev/null || true)
+if [[ -z "${applied}" ]]; then
+  exit 0
+fi
+
+violations=()
+for f in ${staged_migrations}; do
+  # Extract leading numeric version: `0008_foo.sql` -> `8`.
+  base=$(basename "${f}")
+  version=$(echo "${base}" | sed -E 's/^0*([0-9]+)_.*/\1/')
+  if [[ "${version}" =~ ^[0-9]+$ ]] && echo "${applied}" | grep -q "^${version}$"; then
+    violations+=("${f}")
+  fi
+done
+
+if [[ ${#violations[@]} -gt 0 ]]; then
+  cat <<EOF >&2
+
+ERROR: You're modifying migration files that have already been
+applied to your local DB. sqlx will refuse to boot when an
+applied migration's checksum no longer matches disk, and the
+common-but-wrong recovery is to wipe the DB — losing every chat /
+queue / layout the user has saved.
+
+Files in conflict:
+EOF
+  for v in "${violations[@]}"; do
+    echo "  - ${v}" >&2
+  done
+  cat <<EOF >&2
+
+Forward-only rule (see ADR-0007):
+  1. Revert your edit:  git checkout -- ${violations[*]}
+  2. Add a NEW migration file with the change:
+     touch crates/agentgrove-store/migrations/00NN_descriptive_name.sql
+
+If you genuinely want to edit an unapplied migration in your repo
+but it's been applied LOCALLY because you ran the server, the
+right move is still: revert + new migration. Editing in place is
+never safe.
+
+To bypass this guard (you really shouldn't): git commit --no-verify
+
+EOF
+  exit 1
+fi

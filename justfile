@@ -7,11 +7,14 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 default:
     @just --list
 
-# One-time setup: Rust components, FE deps, Playwright browsers.
+# One-time setup: Rust components, FE deps, Playwright browsers, git hooks.
 setup:
     rustup component add rustfmt clippy
     pnpm install
     pnpm -C apps/web exec playwright install chromium
+    @# Wire git pre-commit hook that blocks edits to applied migrations.
+    @# See ADR-0007 for the data-safety rationale.
+    git config core.hooksPath scripts/git-hooks
 
 # Formatting.
 fmt:
@@ -105,3 +108,23 @@ dev:
 [windows]
 dev:
     @pwsh {{justfile_directory()}}/scripts/dev.ps1
+
+# List every DB snapshot in <state_dir>/backups, newest first.
+[unix]
+backups:
+    @bash {{justfile_directory()}}/scripts/db-backups.sh
+
+[windows]
+backups:
+    @pwsh {{justfile_directory()}}/scripts/db-backups.ps1
+
+# Restore the DB from a snapshot directory. The current DB is
+# snapshotted first as `db-<ts>-pre-restore` so a wrong restore can
+# itself be undone. Usage: `just restore-db db-20260522-064556`.
+[unix]
+restore-db SNAPSHOT:
+    @bash {{justfile_directory()}}/scripts/db-restore.sh {{SNAPSHOT}}
+
+[windows]
+restore-db SNAPSHOT:
+    @pwsh {{justfile_directory()}}/scripts/db-restore.ps1 {{SNAPSHOT}}

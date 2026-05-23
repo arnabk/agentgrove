@@ -1,7 +1,7 @@
 //! AgentGrove server binary.
 
 use agentgrove_api::{build_router, AppState};
-use agentgrove_store::{open_pool, run_migrations, snapshot_db_to_backups};
+use agentgrove_store::{open_pool, run_migrations_safely, snapshot_db_to_backups};
 use anyhow::{Context, Result};
 use std::env;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -43,7 +43,24 @@ async fn main() -> Result<()> {
     }
 
     let pool = open_pool(&state_dir).await.context("open db")?;
-    run_migrations(&pool).await.context("run migrations")?;
+    // `run_migrations_safely` snapshots the DB into a
+    // `db-<ts>-pre-migrate` directory when there's pending work,
+    // and surfaces checksum mismatches as a human-readable error
+    // telling the operator how to restore from the snapshot. See
+    // ADR-0007.
+    match run_migrations_safely(&pool, &state_dir).await {
+        Ok(snap_taken) => {
+            if snap_taken {
+                tracing::info!("pre-migrate snapshot written");
+            }
+        }
+        Err(e) => {
+            // Print the full diagnostic to stderr so it's visible
+            // even when tracing isn't fully wired (early boot).
+            eprintln!("\n=== AgentGrove migration aborted ===\n{e}\n");
+            return Err(anyhow::anyhow!(e).context("run migrations"));
+        }
+    }
 
     if !bind_addr.is_loopback() {
         tracing::warn!(%bind_addr, "binding to non-loopback");
