@@ -7,6 +7,7 @@ import LeftRail from "./components/LeftRail";
 import MemoryIndicator from "./components/MemoryIndicator";
 import SettingsModal from "./components/SettingsModal";
 import Welcome from "./components/Welcome";
+import { installRouteSync } from "./lib/routeSync";
 import { declareMemorySource, estimateJsonBytes, recordMemoryUsage } from "./lib/memory";
 
 declareMemorySource("rail.projects", "Project + worktree state");
@@ -44,6 +45,11 @@ export default function App() {
   onMount(async () => {
     await bootstrap();
   });
+
+  // Bidirectional sync between the URL and the active workspace
+  // state. Refreshing keeps you on the same scope + pane + chat +
+  // file; copy-pasting the URL into another tab opens the same view.
+  installRouteSync();
 
   createEffect(() => {
     if (state.themes.length > 0) {
