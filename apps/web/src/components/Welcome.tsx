@@ -28,10 +28,7 @@ export default function Welcome() {
   }
 
   return (
-    <div
-      class="h-full flex items-center justify-center px-8 py-12"
-      data-testid="welcome"
-    >
+    <div class="h-full flex items-center justify-center px-8 py-12" data-testid="welcome">
       <div class="w-full max-w-2xl">
         {/* Hero */}
         <div class="flex items-center gap-3 mb-3">
@@ -39,10 +36,9 @@ export default function Welcome() {
           <h1 class="text-3xl font-semibold tracking-tight">AgentGrove</h1>
         </div>
         <p class="text-fg-muted mb-10 text-[15px]">
-          A local developer workspace built around your folders. Editor,
-          terminals, git diff, scratchpad, prompt queue, and optional AI
-          assistance — all per project. Start by adding a folder; git or
-          not, both work.
+          A local developer workspace built around your folders. Editor, terminals, git diff,
+          scratchpad, prompt queue, and optional AI assistance — all per project. Start by adding a
+          folder; git or not, both work.
         </p>
 
         {/* Action cards */}
@@ -82,8 +78,7 @@ export default function Welcome() {
               <h2 class="text-[15px] font-semibold">Read the docs</h2>
             </div>
             <p class="text-[13px] text-fg-muted">
-              How projects, the editor, terminals, diff, and (optional) AI
-              fit together.
+              How projects, the editor, terminals, diff, and (optional) AI fit together.
             </p>
             <p class="mt-3 text-[12px] text-fg-subtle group-hover:text-fg-muted">
               Open documentation →
@@ -110,19 +105,13 @@ export default function Welcome() {
         </div>
 
         <Show when={err()}>
-          <p
-            class="mt-6 text-[12px] text-danger"
-            data-testid="welcome-error"
-          >
+          <p class="mt-6 text-[12px] text-danger" data-testid="welcome-error">
             {err()}
           </p>
         </Show>
 
         <Show when={picking()}>
-          <FolderPicker
-            onSelect={(p) => void onSelect(p)}
-            onCancel={() => setPicking(false)}
-          />
+          <FolderPicker onSelect={(p) => void onSelect(p)} onCancel={() => setPicking(false)} />
         </Show>
       </div>
     </div>
@@ -131,13 +120,7 @@ export default function Welcome() {
 
 function Logo() {
   return (
-    <svg
-      width="32"
-      height="32"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-    >
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
         d="M12 2 4 7v10l8 5 8-5V7l-8-5Z"
         stroke="var(--ag-accent)"
@@ -156,13 +139,7 @@ function Logo() {
 
 function FolderIcon() {
   return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-    >
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
         d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"
         stroke="currentColor"
@@ -175,13 +152,7 @@ function FolderIcon() {
 
 function BookIcon() {
   return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-    >
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
         d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2V5Z"
         stroke="currentColor"

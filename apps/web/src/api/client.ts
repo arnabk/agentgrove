@@ -134,7 +134,6 @@ export interface SlashCommand {
 export interface ProviderConfig {
   provider_id: string;
   base_url: string;
-  default_model: string | null;
   has_api_key: boolean;
 }
 
@@ -242,10 +241,7 @@ export const api = {
   /** Partial-update a project. Today only `pre_worktree_script` is
    *  mutable; empty string OR `null` clears the field, omitted = no
    *  change. */
-  updateProject: (
-    id: string,
-    body: { pre_worktree_script?: string | null },
-  ) =>
+  updateProject: (id: string, body: { pre_worktree_script?: string | null }) =>
     req<Project>(`/api/projects/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify(body),
@@ -267,11 +263,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  deleteWorktree: (
-    projectId: string,
-    worktreeId: string,
-    opts?: { deleteBranch?: boolean },
-  ) => {
+  deleteWorktree: (projectId: string, worktreeId: string, opts?: { deleteBranch?: boolean }) => {
     // `delete_branch=true` extends the remove flow to also drop the
     // local branch in the same call (`git branch -D <branch>` after
     // `git worktree remove`). The BE intentionally returns 500 — with
@@ -340,13 +332,10 @@ export const api = {
    *  UI without having to read busy state. Use this instead of
    *  `addPrompt` + `enqueue` to avoid FE races on stale signals. */
   sendMessage: (chatId: string, content: string) =>
-    req<SendMessageResponse>(
-      `/api/chats/${encodeURIComponent(chatId)}/messages`,
-      {
-        method: "POST",
-        body: JSON.stringify({ content }),
-      },
-    ),
+    req<SendMessageResponse>(`/api/chats/${encodeURIComponent(chatId)}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    }),
   /** Cancel the in-flight agent turn for this chat. Kills the
    *  provider subprocess + appends a synthetic `cancelled by user`
    *  error event. Returns 204 on success, 404 when the chat is
@@ -362,6 +351,14 @@ export const api = {
     ),
   /** List every agent provider this build knows about (Claude, …). */
   listProviders: () => req<ProviderDescriptor[]>("/api/providers"),
+  /** Drop the BE's in-memory model cache for `providerId` and return
+   *  a fresh descriptor (re-runs `detect()` against the underlying
+   *  CLI / HTTP endpoint). Used by the refresh icon in Settings →
+   *  Providers and the new-chat model picker. */
+  refreshProvider: (providerId: string) =>
+    req<ProviderDescriptor>(`/api/providers/${encodeURIComponent(providerId)}/refresh`, {
+      method: "POST",
+    }),
   /** Update mutable chat fields. Each field is optional; unset
    *  fields leave the corresponding chat property unchanged.
    *
@@ -388,33 +385,23 @@ export const api = {
     }),
   /** Slash commands surfaced by a provider's CLI. */
   listProviderCommands: (providerId: string) =>
-    req<SlashCommand[]>(
-      `/api/providers/${encodeURIComponent(providerId)}/commands`,
-    ),
+    req<SlashCommand[]>(`/api/providers/${encodeURIComponent(providerId)}/commands`),
   /** Read a per-provider config (base URL + has_api_key). The
    *  plaintext API key is never returned over HTTP. */
   getProviderConfig: (providerId: string) =>
-    req<ProviderConfig>(
-      `/api/providers/${encodeURIComponent(providerId)}/config`,
-    ),
+    req<ProviderConfig>(`/api/providers/${encodeURIComponent(providerId)}/config`),
   /** Upsert a per-provider config. `api_key` semantics:
    *    - omitted/null → leave existing key untouched
    *    - empty string → clear stored key
    *    - non-empty    → encrypt + persist on the BE */
-  putProviderConfig: (
-    providerId: string,
-    body: { base_url: string; default_model?: string; api_key?: string | null },
-  ) =>
-    req<ProviderConfig>(
-      `/api/providers/${encodeURIComponent(providerId)}/config`,
-      { method: "PUT", body: JSON.stringify(body) },
-    ),
+  putProviderConfig: (providerId: string, body: { base_url: string; api_key?: string | null }) =>
+    req<ProviderConfig>(`/api/providers/${encodeURIComponent(providerId)}/config`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
   /** Delete the per-provider config row. */
   deleteProviderConfig: (providerId: string) =>
-    req<void>(
-      `/api/providers/${encodeURIComponent(providerId)}/config`,
-      { method: "DELETE" },
-    ),
+    req<void>(`/api/providers/${encodeURIComponent(providerId)}/config`, { method: "DELETE" }),
   /** Upload one or more files. The FormData should carry parts under
    *  the field name `file`. Returns metadata (including the absolute
    *  path the agent can read) for each upload. */
@@ -432,8 +419,7 @@ export const api = {
   },
   /** Build the URL that streams an upload's raw bytes (used for
    *  thumbnails / previews in the chat input). */
-  uploadRawUrl: (id: string) =>
-    `${baseUrl()}/api/uploads/${encodeURIComponent(id)}/raw`,
+  uploadRawUrl: (id: string) => `${baseUrl()}/api/uploads/${encodeURIComponent(id)}/raw`,
   // Queue
   getQueue: (chatId: string) => req<QueueState>(`/api/chats/${encodeURIComponent(chatId)}/queue`),
   enqueue: (chatId: string, body: string) =>
@@ -490,7 +476,14 @@ export const api = {
     }),
   killTerminal: (id: string) =>
     req<void>(`/api/terminals/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  terminalHistory: (id: string) => req<string>(`/api/terminals/${encodeURIComponent(id)}/history`),
+  /** Delta-aware history fetch. `since` is the byte offset the
+   *  caller already has; the response carries ONLY the new bytes
+   *  (or "" when nothing new), the current total, and the exit
+   *  flag — one round-trip instead of the old history+status pair. */
+  terminalHistoryDelta: (id: string, since: number) =>
+    req<{ bytes: string; total: number; exited: boolean }>(
+      `/api/terminals/${encodeURIComponent(id)}/history?since=${since}`,
+    ),
   terminalStatus: (id: string) =>
     req<TerminalStatus>(`/api/terminals/${encodeURIComponent(id)}/status`),
   // Editor
@@ -506,9 +499,7 @@ export const api = {
       `/api/editor/diff?path=${encodeURIComponent(path)}`,
     ),
   listTree: (path: string, showHidden = true) =>
-    req<TreeEntry[]>(
-      `/api/editor/tree?path=${encodeURIComponent(path)}&show_hidden=${showHidden}`,
-    ),
+    req<TreeEntry[]>(`/api/editor/tree?path=${encodeURIComponent(path)}&show_hidden=${showHidden}`),
   // Git status (changes view)
   gitStatus: (path: string) =>
     req<GitStatusResponse>(`/api/git/status?path=${encodeURIComponent(path)}`),
@@ -522,8 +513,7 @@ export const api = {
     }),
   // Filesystem browser (folder picker)
   fsHome: () => req<FsHome>("/api/fs/home"),
-  fsBrowse: (path: string) =>
-    req<FsBrowse>(`/api/fs/browse?path=${encodeURIComponent(path)}`),
+  fsBrowse: (path: string) => req<FsBrowse>(`/api/fs/browse?path=${encodeURIComponent(path)}`),
   // Themes
   listThemes: () => req<Theme[]>("/api/themes"),
   // Settings
@@ -552,11 +542,7 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ blob }),
     }),
-  putScopeLayout: (
-    projectId: string,
-    worktreeId: string,
-    blob: unknown,
-  ) => {
+  putScopeLayout: (projectId: string, worktreeId: string, blob: unknown) => {
     const qs = new URLSearchParams({ project: projectId });
     if (worktreeId) qs.set("worktree", worktreeId);
     return req<void>(`/api/layout/scope?${qs.toString()}`, {
@@ -618,6 +604,10 @@ export interface UserSettings {
   font_size?: number;
   /** User-defined reusable prompt templates. */
   prompts?: PromptTemplate[];
+  /** Global default: auto-approve every agent tool invocation
+   *  (Claude / opencode `--dangerously-skip-permissions`). `undefined`
+   *  ⇒ BE's shipping default (`true`). */
+  auto_approve_tools?: boolean;
 }
 
 export interface TreeEntry {

@@ -9,8 +9,8 @@ import { selectedFilePath, selectFile, state } from "../stores/app";
  * (including dotfiles); the BE was updated to honour `show_hidden=true`.
  */
 export default function ProjectFiles() {
-  const project = createMemo(() =>
-    state.projects.find((p) => p.id === state.selectedProjectId) ?? null,
+  const project = createMemo(
+    () => state.projects.find((p) => p.id === state.selectedProjectId) ?? null,
   );
 
   return (
@@ -25,10 +25,7 @@ export default function ProjectFiles() {
               <div class="text-[11px] font-semibold uppercase tracking-wider text-fg-subtle">
                 Files
               </div>
-              <div
-                class="text-[12.5px] font-mono text-fg-muted truncate"
-                title={p.root}
-              >
+              <div class="text-[12.5px] font-mono text-fg-muted truncate" title={p.root}>
                 {p.root}
               </div>
             </div>
@@ -65,9 +62,7 @@ function DirNode(props: DirNodeProps) {
         {(entry) => (
           <Show
             when={entry.is_dir}
-            fallback={
-              <FileRow path={entry.path} name={entry.name} depth={props.depth} />
-            }
+            fallback={<FileRow path={entry.path} name={entry.name} depth={props.depth} />}
           >
             <Folder path={entry.path} name={entry.name} depth={props.depth} />
           </Show>

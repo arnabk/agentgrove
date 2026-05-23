@@ -23,9 +23,7 @@ interface Props {
  *  field clears the project default; the worktree dialog still
  *  accepts an ad-hoc override for one-off branches. */
 export default function ProjectSettingsDialog(props: Props) {
-  const [script, setScript] = createSignal(
-    props.project.pre_worktree_script ?? "",
-  );
+  const [script, setScript] = createSignal(props.project.pre_worktree_script ?? "");
   const [busy, setBusy] = createSignal(false);
   const [err, setErr] = createSignal<string | null>(null);
 
@@ -79,18 +77,14 @@ export default function ProjectSettingsDialog(props: Props) {
       aria-label="Project settings"
       data-testid="project-settings-dialog"
     >
-      <div
-        class="absolute inset-0 bg-black/60"
-        onClick={() => !busy() && props.onCancel()}
-      />
+      <div class="absolute inset-0 bg-black/60" onClick={() => !busy() && props.onCancel()} />
       <div
         class="relative w-full max-w-xl rounded-xl border border-border bg-bg-1 p-6 shadow-2xl"
         onKeyDown={handleKeyDown}
       >
         <h3 class="text-[15px] font-semibold mb-1">Project settings</h3>
         <p class="text-[13px] text-fg-muted mb-5 font-mono break-all">
-          {props.project.name}{" "}
-          <span class="text-fg-subtle">· {props.project.root}</span>
+          {props.project.name} <span class="text-fg-subtle">· {props.project.root}</span>
         </p>
 
         <label class="block text-[12px] font-medium text-fg-muted mb-1.5">
@@ -98,22 +92,17 @@ export default function ProjectSettingsDialog(props: Props) {
         </label>
         <p class="text-[11.5px] text-fg-subtle mb-2">
           Runs inside every NEW worktree of this project after{" "}
-          <code class="font-mono">git worktree add</code>. Use it for
-          dependency installs, code-gen, or anything else a fresh
-          checkout needs. Leave blank to clear. Two env vars are
-          available:{" "}
-          <code class="font-mono">$AGENTGROVE_PROJECT_ROOT</code>{" "}
-          (this project's source folder) and{" "}
-          <code class="font-mono">$AGENTGROVE_WORKTREE_PATH</code>{" "}
-          (the new worktree dir, also the script's cwd).
+          <code class="font-mono">git worktree add</code>. Use it for dependency installs, code-gen,
+          or anything else a fresh checkout needs. Leave blank to clear. Two env vars are available:{" "}
+          <code class="font-mono">$AGENTGROVE_PROJECT_ROOT</code> (this project's source folder) and{" "}
+          <code class="font-mono">$AGENTGROVE_WORKTREE_PATH</code> (the new worktree dir, also the
+          script's cwd).
         </p>
         <textarea
           ref={(el) => (scriptEl = el)}
           rows="6"
           class="ag-input font-mono text-[12.5px] resize-y w-full"
-          placeholder={
-            'pnpm install\ncp "$AGENTGROVE_PROJECT_ROOT/.env.local" .\n# anything else…'
-          }
+          placeholder={'pnpm install\ncp "$AGENTGROVE_PROJECT_ROOT/.env.local" .\n# anything else…'}
           value={script()}
           onInput={(e) => setScript(e.currentTarget.value)}
           disabled={busy()}
@@ -126,10 +115,7 @@ export default function ProjectSettingsDialog(props: Props) {
         </p>
 
         <Show when={err()}>
-          <p
-            class="mt-4 text-[12px] text-danger"
-            data-testid="project-settings-error"
-          >
+          <p class="mt-4 text-[12px] text-danger" data-testid="project-settings-error">
             {err()}
           </p>
         </Show>

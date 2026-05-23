@@ -2,6 +2,7 @@ import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { foldGutter, foldKeymap, codeFolding, indentOnInput } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
@@ -96,6 +97,15 @@ export default function EditorPane() {
         doc: "",
         extensions: [
           lineNumbers(),
+          // Code folding: ▸/▾ markers in their own gutter next to the
+          // line numbers. Folding ranges are computed by the active
+          // language extension's syntax tree, so JS/TS/JSON/Markdown/
+          // Rust all "just work" — and the markers stay empty for
+          // plain-text files (no false positives). Mod-Alt-[/]/.
+          // shortcuts come from `foldKeymap`.
+          codeFolding(),
+          foldGutter(),
+          indentOnInput(),
           history(),
           keymap.of([
             // Force-flush save shortcut (no-op for autosave but
@@ -110,6 +120,7 @@ export default function EditorPane() {
             },
             ...defaultKeymap,
             ...historyKeymap,
+            ...foldKeymap,
           ]),
           oneDark,
           langComp.of([]),
@@ -288,9 +299,7 @@ export default function EditorPane() {
           >
             <div class="text-center text-fg-subtle text-[13px] max-w-sm px-6">
               <p class="font-medium text-fg-muted mb-1">No file open</p>
-              <p>
-                Pick a file in the project tree on the left to start editing.
-              </p>
+              <p>Pick a file in the project tree on the left to start editing.</p>
             </div>
           </div>
         </Show>

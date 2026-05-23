@@ -156,9 +156,7 @@ export default function FolderPicker(props: FolderPickerProps) {
 
           <Show
             when={!loading() && view()}
-            fallback={
-              <p class="text-[12.5px] text-fg-subtle px-3 py-3">Loading…</p>
-            }
+            fallback={<p class="text-[12.5px] text-fg-subtle px-3 py-3">Loading…</p>}
           >
             <For
               each={view()!.entries}
@@ -229,14 +227,26 @@ export default function FolderPicker(props: FolderPickerProps) {
 function XIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+      <path
+        d="M6 6l12 12M18 6L6 18"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+      />
     </svg>
   );
 }
 
 function ArrowUpIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" class="text-fg-subtle">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      class="text-fg-subtle"
+    >
       <path
         d="M12 19V5m0 0-6 6m6-6 6 6"
         stroke="currentColor"
@@ -250,7 +260,14 @@ function ArrowUpIcon() {
 
 function FolderIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" class="text-fg-subtle">
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      class="text-fg-subtle"
+    >
       <path
         d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"
         stroke="currentColor"

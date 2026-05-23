@@ -144,8 +144,7 @@ function suggestBranchName(taken: Set<string>): string {
  *  project's current branch (or `main`). Pre-script is optional. */
 export default function WorktreeDialog(props: Props) {
   // Branches taken by *live* worktrees for this project (from store).
-  const liveBranches = () =>
-    new Set((state.worktrees[props.projectId] ?? []).map((w) => w.branch));
+  const liveBranches = () => new Set((state.worktrees[props.projectId] ?? []).map((w) => w.branch));
 
   // Branches present in *history* (soft-deleted). Fetched lazily on
   // mount so we don't suggest a name that collides with a record we
@@ -353,9 +352,7 @@ export default function WorktreeDialog(props: Props) {
     statusPoll = setInterval(async () => {
       try {
         await refreshWorktreesForProject(props.projectId);
-        const me = (state.worktrees[props.projectId] ?? []).find(
-          (w) => w.id === wtId,
-        );
+        const me = (state.worktrees[props.projectId] ?? []).find((w) => w.id === wtId);
         if (!me) return;
         if (me.status === "ready") {
           if (statusPoll !== null) clearInterval(statusPoll);
@@ -431,9 +428,7 @@ export default function WorktreeDialog(props: Props) {
               <Show when={phase() === "ready"}>Worktree ready</Show>
               <Show when={phase() === "failed"}>Worktree failed</Show>
             </h3>
-            <p class="text-[13px] text-fg-muted mb-4 font-mono break-all">
-              {branch()}
-            </p>
+            <p class="text-[13px] text-fg-muted mb-4 font-mono break-all">{branch()}</p>
             <div
               ref={(el) => (consoleHost = el)}
               class="h-72 overflow-auto rounded-md border border-border bg-bg-0 p-3 font-mono text-[12px] leading-[1.5]"
@@ -441,15 +436,11 @@ export default function WorktreeDialog(props: Props) {
             >
               <Show
                 when={consoleLines().length > 0}
-                fallback={
-                  <span class="text-fg-subtle">Waiting for output…</span>
-                }
+                fallback={<span class="text-fg-subtle">Waiting for output…</span>}
               >
                 <For each={consoleLines()}>
                   {(line) => (
-                    <div class={`whitespace-pre-wrap ${lineClass(line.kind)}`}>
-                      {line.text}
-                    </div>
+                    <div class={`whitespace-pre-wrap ${lineClass(line.kind)}`}>{line.text}</div>
                   )}
                 </For>
               </Show>
@@ -514,15 +505,12 @@ export default function WorktreeDialog(props: Props) {
         >
           <h3 class="text-[15px] font-semibold mb-1">New worktree</h3>
           <p class="text-[13px] text-fg-muted mb-5">
-            AgentGrove will run <code class="font-mono">git worktree add</code>{" "}
-            for this branch and (optionally) execute a pre-script in the new
-            worktree before marking it ready.
+            AgentGrove will run <code class="font-mono">git worktree add</code> for this branch and
+            (optionally) execute a pre-script in the new worktree before marking it ready.
           </p>
 
           <div class="flex items-center justify-between mb-1.5">
-            <label class="block text-[12px] font-medium text-fg-muted">
-              Branch name
-            </label>
+            <label class="block text-[12px] font-medium text-fg-muted">Branch name</label>
             <button
               type="button"
               class="ag-btn ag-btn-ghost ag-btn-xs"
@@ -542,9 +530,7 @@ export default function WorktreeDialog(props: Props) {
             autofocus
           />
 
-          <label class="block text-[12px] font-medium text-fg-muted mb-1.5">
-            Base ref
-          </label>
+          <label class="block text-[12px] font-medium text-fg-muted mb-1.5">Base ref</label>
           <input
             class="ag-input font-mono mb-4"
             placeholder="main"
@@ -588,8 +574,8 @@ export default function WorktreeDialog(props: Props) {
                     {inherited()}
                   </pre>
                   <p class="text-[11px] text-fg-subtle mb-4">
-                    Inherited from project settings. Edit there to
-                    change the default for every new worktree.
+                    Inherited from project settings. Edit there to change the default for every new
+                    worktree.
                   </p>
                 </Show>
 
@@ -608,9 +594,7 @@ export default function WorktreeDialog(props: Props) {
 
                 <Show when={showOverride()}>
                   <label class="block text-[12px] font-medium text-fg-muted mb-1.5">
-                    {inherited()
-                      ? "Override (this worktree only)"
-                      : "One-off pre-script"}
+                    {inherited() ? "Override (this worktree only)" : "One-off pre-script"}
                   </label>
                   <textarea
                     rows="3"
@@ -621,8 +605,8 @@ export default function WorktreeDialog(props: Props) {
                     data-testid="worktree-pre-script"
                   />
                   <p class="text-[11px] text-fg-subtle mb-5">
-                    Runs inside the new worktree after creation. Leave
-                    blank to fall back to the project default
+                    Runs inside the new worktree after creation. Leave blank to fall back to the
+                    project default
                     {inherited() ? " above." : "."}
                   </p>
                 </Show>
@@ -631,10 +615,7 @@ export default function WorktreeDialog(props: Props) {
           })()}
 
           <Show when={err()}>
-            <p
-              class="mb-4 text-[12px] text-danger"
-              data-testid="worktree-error"
-            >
+            <p class="mb-4 text-[12px] text-danger" data-testid="worktree-error">
               {err()}
             </p>
           </Show>

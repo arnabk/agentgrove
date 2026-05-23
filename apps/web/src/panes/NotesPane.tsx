@@ -255,16 +255,8 @@ export default function NotesPane() {
         </ToolbarGroup>
         <Divider />
         <ToolbarGroup>
-          <ToolBtn
-            label={<UndoIcon />}
-            title="Undo (⌘Z)"
-            onClick={() => chain()?.undo().run()}
-          />
-          <ToolBtn
-            label={<RedoIcon />}
-            title="Redo (⌘⇧Z)"
-            onClick={() => chain()?.redo().run()}
-          />
+          <ToolBtn label={<UndoIcon />} title="Undo (⌘Z)" onClick={() => chain()?.undo().run()} />
+          <ToolBtn label={<RedoIcon />} title="Redo (⌘⇧Z)" onClick={() => chain()?.redo().run()} />
         </ToolbarGroup>
 
         <div class="ml-auto flex items-center gap-2 text-[11px] text-fg-subtle">
@@ -305,7 +297,11 @@ export default function NotesPane() {
             autofocus
             data-testid="notes-link-input"
           />
-          <button type="submit" class="ag-btn ag-btn-primary ag-btn-sm" data-testid="notes-link-apply">
+          <button
+            type="submit"
+            class="ag-btn ag-btn-primary ag-btn-sm"
+            data-testid="notes-link-apply"
+          >
             Apply
           </button>
           <button

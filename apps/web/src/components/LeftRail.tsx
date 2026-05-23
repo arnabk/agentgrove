@@ -1,4 +1,12 @@
-import { For, Show, createEffect, createResource, createSignal, onCleanup, onMount } from "solid-js";
+import {
+  For,
+  Show,
+  createEffect,
+  createResource,
+  createSignal,
+  onCleanup,
+  onMount,
+} from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import { api, type Project, type TreeEntry } from "../api/client";
 import {
@@ -127,9 +135,7 @@ export default function LeftRail() {
       title: "Remove worktree",
       body: (
         <div class="space-y-3">
-          <p>
-            Remove this worktree from disk and AgentGrove?
-          </p>
+          <p>Remove this worktree from disk and AgentGrove?</p>
           <label class="flex items-center gap-2 text-[12.5px] text-fg select-none">
             <input
               type="checkbox"
@@ -138,8 +144,7 @@ export default function LeftRail() {
               onChange={(e) => setAlsoDeleteBranch(e.currentTarget.checked)}
               data-testid="confirm-remove-worktree-also-delete-branch"
             />
-            Also delete the local branch (
-            <code class="font-mono">git branch -D</code>)
+            Also delete the local branch (<code class="font-mono">git branch -D</code>)
           </label>
         </div>
       ),
@@ -158,8 +163,7 @@ export default function LeftRail() {
     const optimistic = prevList.filter((w) => w.id !== wtId);
     setState("worktrees", projectId, optimistic);
     const wasActiveScope =
-      state.selectedProjectId === projectId &&
-      state.selectedWorktreeByProject[projectId] === wtId;
+      state.selectedProjectId === projectId && state.selectedWorktreeByProject[projectId] === wtId;
     if (wasActiveScope) {
       selectWorktree(projectId, null);
     }
@@ -178,20 +182,14 @@ export default function LeftRail() {
       // previous active scope — the user already navigated away and
       // unwinding that would be jarring.
       setState("worktrees", projectId, prevList);
-      setErr(
-        `Could not remove worktree: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      setErr(`Could not remove worktree: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   /** Open the new-chat dialog scoped to (projectId, optional worktreeId).
    *  The dialog handles provider / model selection; on success we
    *  switch to the new chat and add it to the tab strip. */
-  function openNewChatDialog(
-    projectId: string,
-    worktreeId: string | null,
-    parentName: string,
-  ) {
+  function openNewChatDialog(projectId: string, worktreeId: string | null, parentName: string) {
     setErr(null);
     // Focus the scope first so addChatTab on creation writes into it.
     selectWorktree(projectId, worktreeId);
@@ -217,11 +215,7 @@ export default function LeftRail() {
    *  row actions use; we don't gate behind a dialog because the
    *  intent is "give me a shell here, right now".
    */
-  async function openTerminalAt(
-    projectId: string,
-    worktreeId: string | null,
-    label: string,
-  ) {
+  async function openTerminalAt(projectId: string, worktreeId: string | null, label: string) {
     setErr(null);
     // Activate the row's scope BEFORE spawning so the terminal lands
     // in the correct per-scope tab strip.
@@ -382,17 +376,9 @@ export default function LeftRail() {
               class="ag-btn ag-btn-ghost ag-btn-xs ag-btn-icon"
               onClick={() => setShowFiles(!showFiles())}
               data-testid="toggle-files"
-              aria-label={
-                showFiles()
-                  ? "Hide files and folders"
-                  : "Show files and folders"
-              }
+              aria-label={showFiles() ? "Hide files and folders" : "Show files and folders"}
               aria-pressed={showFiles()}
-              title={
-                showFiles()
-                  ? "Hide files and folders"
-                  : "Show files and folders"
-              }
+              title={showFiles() ? "Hide files and folders" : "Show files and folders"}
             >
               <Show when={showFiles()} fallback={<FilesOffIcon />}>
                 <FilesOnIcon />
@@ -411,19 +397,13 @@ export default function LeftRail() {
         </div>
 
         <Show when={err()}>
-          <p
-            class="text-[0.77em] text-danger px-2 mb-2"
-            data-testid="new-project-error"
-          >
+          <p class="text-[0.77em] text-danger px-2 mb-2" data-testid="new-project-error">
             {err()}
           </p>
         </Show>
 
         <Show when={picking()}>
-          <FolderPicker
-            onSelect={(p) => void onSelect(p)}
-            onCancel={() => setPicking(false)}
-          />
+          <FolderPicker onSelect={(p) => void onSelect(p)} onCancel={() => setPicking(false)} />
         </Show>
 
         <ul class="space-y-0.5" data-testid="project-list">
@@ -437,8 +417,7 @@ export default function LeftRail() {
                     ? "Git repo with remote"
                     : "Git repo (no remote)"
                   : "Folder";
-              const active = () =>
-                state.selectedProjectId === p.id && currentWorktreeId() === null;
+              const active = () => state.selectedProjectId === p.id && currentWorktreeId() === null;
               const open = () => isExpanded(p.id);
               return (
                 <li class="space-y-0.5">
@@ -642,8 +621,7 @@ export default function LeftRail() {
                         <For each={state.worktrees[p.id] ?? []}>
                           {(w) => {
                             const wtActive = () =>
-                              state.selectedProjectId === p.id &&
-                              currentWorktreeId() === w.id;
+                              state.selectedProjectId === p.id && currentWorktreeId() === w.id;
                             const wtOpen = () => isExpanded(w.id);
                             return (
                               <li class="space-y-0.5">
@@ -709,18 +687,12 @@ export default function LeftRail() {
                                                        users; they can just
                                                        re-click the X to
                                                        retry the delete. */}
-                                  <Show
-                                    when={
-                                      w.status !== "ready" &&
-                                      w.status !== "removing"
-                                    }
-                                  >
+                                  <Show when={w.status !== "ready" && w.status !== "removing"}>
                                     <span
                                       class="ml-auto ag-chip !text-[0.67em] !py-[1px] whitespace-nowrap"
                                       classList={{
                                         "ag-chip-warn":
-                                          w.status === "creating" ||
-                                          w.status === "pre_script",
+                                          w.status === "creating" || w.status === "pre_script",
                                         "!text-danger": w.status === "failed",
                                       }}
                                       title={`Status: ${w.status}`}
@@ -739,9 +711,7 @@ export default function LeftRail() {
                                       // suppressed "removing" + steady
                                       // "ready" states should NOT trigger
                                       // the inset.
-                                      "!ml-1":
-                                        w.status !== "ready" &&
-                                        w.status !== "removing",
+                                      "!ml-1": w.status !== "ready" && w.status !== "removing",
                                     }}
                                     onClick={(e) => {
                                       e.stopPropagation();
@@ -1023,12 +993,7 @@ function FilesOffIcon() {
         stroke-width="1.7"
         stroke-linecap="round"
       />
-      <path
-        d="M4 20 20 4"
-        stroke="currentColor"
-        stroke-width="1.7"
-        stroke-linecap="round"
-      />
+      <path d="M4 20 20 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
     </svg>
   );
 }
@@ -1079,7 +1044,8 @@ function GearIcon() {
 function FolderIcon() {
   return (
     <svg
-      width="1em" height="1em"
+      width="1em"
+      height="1em"
       viewBox="0 0 24 24"
       fill="none"
       class="text-fg-subtle shrink-0"
@@ -1102,7 +1068,8 @@ function FolderIcon() {
 function WorktreeIcon() {
   return (
     <svg
-      width="1em" height="1em"
+      width="1em"
+      height="1em"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -1126,7 +1093,8 @@ function WorktreeIcon() {
 function BranchPlusIcon() {
   return (
     <svg
-      width="1em" height="1em"
+      width="1em"
+      height="1em"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -1151,7 +1119,8 @@ function BranchPlusIcon() {
 function DiffIcon() {
   return (
     <svg
-      width="1em" height="1em"
+      width="1em"
+      height="1em"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -1175,7 +1144,8 @@ function HistoryIcon() {
   // Clock with arrow — represents "history / restore".
   return (
     <svg
-      width="1em" height="1em"
+      width="1em"
+      height="1em"
       viewBox="0 0 24 24"
       fill="none"
       class="shrink-0"
@@ -1187,7 +1157,13 @@ function HistoryIcon() {
         stroke-width="1.6"
         stroke-linecap="round"
       />
-      <path d="M3 4v5h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+      <path
+        d="M3 4v5h5"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
       <path
         d="M12 7v5l3 2"
         stroke="currentColor"
@@ -1202,7 +1178,8 @@ function HistoryIcon() {
 function ChatPlusIcon() {
   return (
     <svg
-      width="1em" height="1em"
+      width="1em"
+      height="1em"
       viewBox="0 0 24 24"
       fill="none"
       class="shrink-0"
@@ -1216,12 +1193,7 @@ function ChatPlusIcon() {
         stroke-linejoin="round"
       />
       {/* `+` glyph in the corner */}
-      <path
-        d="M19 13v6M16 16h6"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-      />
+      <path d="M19 13v6M16 16h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
     </svg>
   );
 }
@@ -1232,22 +1204,15 @@ function TerminalPlusIcon() {
   // reads as "create one of these here".
   return (
     <svg
-      width="1em" height="1em"
+      width="1em"
+      height="1em"
       viewBox="0 0 24 24"
       fill="none"
       class="shrink-0"
       aria-hidden="true"
     >
       {/* window frame */}
-      <rect
-        x="3"
-        y="4"
-        width="14"
-        height="13"
-        rx="2"
-        stroke="currentColor"
-        stroke-width="1.6"
-      />
+      <rect x="3" y="4" width="14" height="13" rx="2" stroke="currentColor" stroke-width="1.6" />
       {/* prompt chevron + cursor underscore inside the window */}
       <path
         d="M6 9l2.5 2L6 13"
@@ -1256,19 +1221,9 @@ function TerminalPlusIcon() {
         stroke-linecap="round"
         stroke-linejoin="round"
       />
-      <path
-        d="M10.5 14h4"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-      />
+      <path d="M10.5 14h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
       {/* `+` glyph in the corner */}
-      <path
-        d="M19 13v6M16 16h6"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-      />
+      <path d="M19 13v6M16 16h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
     </svg>
   );
 }
@@ -1307,9 +1262,7 @@ function DirNode(props: DirNodeProps) {
         {(entry) => (
           <Show
             when={entry.is_dir}
-            fallback={
-              <FileRow path={entry.path} name={entry.name} depth={props.depth} />
-            }
+            fallback={<FileRow path={entry.path} name={entry.name} depth={props.depth} />}
           >
             <FolderRow path={entry.path} name={entry.name} depth={props.depth} />
           </Show>
@@ -1376,7 +1329,8 @@ function FileRow(props: { path: string; name: string; depth: number }) {
 function Chevron(props: { open: boolean }) {
   return (
     <svg
-      width="0.72em" height="0.72em"
+      width="0.72em"
+      height="0.72em"
       viewBox="0 0 24 24"
       fill="none"
       aria-hidden="true"
@@ -1400,7 +1354,8 @@ function Chevron(props: { open: boolean }) {
 function TreeFolderIcon() {
   return (
     <svg
-      width="0.92em" height="0.92em"
+      width="0.92em"
+      height="0.92em"
       viewBox="0 0 24 24"
       fill="none"
       aria-hidden="true"
@@ -1419,7 +1374,8 @@ function TreeFolderIcon() {
 function TreeFileIcon() {
   return (
     <svg
-      width="0.92em" height="0.92em"
+      width="0.92em"
+      height="0.92em"
       viewBox="0 0 24 24"
       fill="none"
       aria-hidden="true"

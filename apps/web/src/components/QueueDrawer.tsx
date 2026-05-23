@@ -1,9 +1,14 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
-import {
-  api,
-  type QueueItem,
-  type QueueState,
-} from "../api/client";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { api, type QueueItem, type QueueState } from "../api/client";
+
+/** Resize bounds + persistence key for the queue dock width. Same
+ *  pattern as the LeftRail's resize handle, but bound to the right
+ *  edge of the chat pane so dragging LEFT grows the queue (and
+ *  shrinks the chat) and dragging RIGHT shrinks the queue. */
+const QUEUE_MIN_PX = 280;
+const QUEUE_MAX_PX = 720;
+const QUEUE_DEFAULT_PX = 420;
+const QUEUE_LS_KEY = "ag-queue-w";
 
 /**
  * Per-chat queue panel, docked inline as the right column of the
@@ -92,23 +97,113 @@ export default function QueueDock(props: Props) {
   const total = () => items().length;
   const mode = () => qstate()?.mode ?? "auto";
 
+  // Width persistence + drag state. Mirrors LeftRail's resize
+  // handle: handle sits on the LEFT edge of the dock (the boundary
+  // between chat timeline and queue) so dragging LEFT widens the
+  // queue at the expense of the chat.
+  const persisted = Number(localStorage.getItem(QUEUE_LS_KEY));
+  const initial =
+    Number.isFinite(persisted) && persisted >= QUEUE_MIN_PX && persisted <= QUEUE_MAX_PX
+      ? persisted
+      : QUEUE_DEFAULT_PX;
+  const [width, setWidth] = createSignal(initial);
+  const [dragging, setDragging] = createSignal(false);
+
+  function clamp(px: number) {
+    return Math.min(QUEUE_MAX_PX, Math.max(QUEUE_MIN_PX, Math.round(px)));
+  }
+
+  function onPointerDown(ev: PointerEvent) {
+    ev.preventDefault();
+    setDragging(true);
+    (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }
+  function onPointerMove(ev: PointerEvent) {
+    if (!dragging()) return;
+    // Dock is right-anchored: width = (viewport right edge) -
+    // (pointer x). Pointer moving LEFT grows the dock.
+    const next = clamp(window.innerWidth - ev.clientX);
+    setWidth(next);
+  }
+  function onPointerUp(ev: PointerEvent) {
+    if (!dragging()) return;
+    setDragging(false);
+    try {
+      (ev.currentTarget as HTMLElement).releasePointerCapture(ev.pointerId);
+    } catch {
+      // pointer might already be released
+    }
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    localStorage.setItem(QUEUE_LS_KEY, String(width()));
+  }
+  function onKeyDown(ev: KeyboardEvent) {
+    let next = width();
+    // ArrowLeft grows the dock (matches the drag-LEFT-to-widen
+    // semantics); ArrowRight shrinks it.
+    if (ev.key === "ArrowLeft") next += ev.shiftKey ? 32 : 8;
+    else if (ev.key === "ArrowRight") next -= ev.shiftKey ? 32 : 8;
+    else if (ev.key === "Home") next = QUEUE_MAX_PX;
+    else if (ev.key === "End") next = QUEUE_MIN_PX;
+    else if (ev.key === "Enter" || ev.key === " ") next = QUEUE_DEFAULT_PX;
+    else return;
+    ev.preventDefault();
+    setWidth(clamp(next));
+    localStorage.setItem(QUEUE_LS_KEY, String(width()));
+  }
+
+  // Belt-and-braces: if pointer is released outside the handle
+  // (e.g. over a child <iframe>) we still want to commit the width.
+  const onWindowUp = () => {
+    if (!dragging()) return;
+    setDragging(false);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    localStorage.setItem(QUEUE_LS_KEY, String(width()));
+  };
+  onMount(() => {
+    window.addEventListener("pointerup", onWindowUp);
+  });
+  onCleanup(() => {
+    window.removeEventListener("pointerup", onWindowUp);
+  });
+
   return (
     <Show when={props.open}>
       <aside
-        class="w-[min(420px,40vw)] shrink-0 h-full bg-bg-1 border-l border-border flex flex-col"
+        class="relative shrink-0 h-full bg-bg-1 border-l border-border flex flex-col"
+        style={{ width: `${width()}px` }}
         data-testid="queue-dock"
         aria-label="Queue"
       >
-          <header class="px-4 py-3 border-b border-border bg-bg-1">
-            <div class="flex items-center gap-2">
-              <h3 class="text-[13.5px] font-semibold tracking-tight">
-                Queue
-              </h3>
-              <span class="ag-chip text-[11px]" data-testid="queue-total">
-                {total()}
-              </span>
+        {/* Resize handle on the LEFT edge of the dock. Pointer drag
+            or arrow keys adjust width; persisted to localStorage. */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize queue panel"
+          aria-valuemin={QUEUE_MIN_PX}
+          aria-valuemax={QUEUE_MAX_PX}
+          aria-valuenow={width()}
+          tabIndex={0}
+          class="absolute top-0 left-0 h-full w-1.5 -ml-[3px] cursor-col-resize hover:bg-accent/30 active:bg-accent/50 transition-colors z-10 touch-none"
+          classList={{ "!bg-accent/50": dragging() }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onKeyDown={onKeyDown}
+          data-testid="queue-dock-resize"
+        />
+        <header class="px-4 py-3 border-b border-border bg-bg-1">
+          <div class="flex items-center gap-2">
+            <h3 class="text-[13.5px] font-semibold tracking-tight">Queue</h3>
+            <span class="ag-chip text-[11px]" data-testid="queue-total">
+              {total()}
+            </span>
 
-              {/*
+            {/*
                 Auto-drain toggle — promoted into the header row so
                 the queue dock keeps a single-row chrome. ON = items
                 send back-to-back as the agent finishes; OFF =
@@ -116,89 +211,76 @@ export default function QueueDock(props: Props) {
                 old test ids are aliased to this switch so existing
                 tests keep working regardless of state.
               */}
-              <label
-                class="ml-auto inline-flex items-center gap-2 select-none cursor-pointer"
-                title={
-                  mode() === "auto"
-                    ? "Auto-drain ON — pending messages send as soon as the agent finishes."
-                    : "Auto-drain OFF — pending messages wait; reorder or send them yourself."
-                }
-              >
-                <span class="text-[11px] text-fg-subtle uppercase tracking-wider">
-                  Auto
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={mode() === "auto"}
-                  disabled={busy()}
-                  onClick={() =>
-                    void setMode(mode() === "auto" ? "manual" : "auto")
-                  }
-                  data-testid={
-                    mode() === "auto" ? "queue-mode-auto" : "queue-mode-manual"
-                  }
-                  class="relative inline-flex h-4 w-7 items-center rounded-full transition-colors disabled:opacity-50"
-                  classList={{
-                    "bg-accent": mode() === "auto",
-                    "bg-bg-3 border border-border": mode() !== "auto",
-                  }}
-                >
-                  <span
-                    class="inline-block h-3 w-3 rounded-full bg-white shadow transition-transform"
-                    classList={{
-                      "translate-x-3.5": mode() === "auto",
-                      "translate-x-0.5": mode() !== "auto",
-                    }}
-                  />
-                </button>
-              </label>
-
-              <button
-                type="button"
-                class="ag-btn ag-btn-ghost ag-btn-sm"
-                onClick={() => props.onClose()}
-                aria-label="Close"
-                data-testid="queue-close"
-              >
-                ✕
-              </button>
-            </div>
-            <Show when={err()}>
-              <p
-                class="mt-1 text-[11px] text-danger"
-                title={err() ?? ""}
-              >
-                {err()}
-              </p>
-            </Show>
-          </header>
-
-          <div class="flex-1 overflow-y-auto px-3 py-3 space-y-2" data-testid="queue-items">
-            <Show
-              when={total() > 0}
-              fallback={
-                <p
-                  class="text-center text-[12.5px] text-fg-subtle py-8"
-                  data-testid="queue-empty"
-                >
-                  Queue is empty. Type a message while the agent is
-                  working to enqueue it.
-                </p>
+            <label
+              class="ml-auto inline-flex items-center gap-2 select-none cursor-pointer"
+              title={
+                mode() === "auto"
+                  ? "Auto-drain ON — pending messages send as soon as the agent finishes."
+                  : "Auto-drain OFF — pending messages wait; reorder or send them yourself."
               }
             >
-              <For each={items()}>
-                {(it) => (
-                  <QueueCard
-                    item={it}
-                    expanded={expanded().has(it.id)}
-                    onToggle={() => toggleExpanded(it.id)}
-                    onCancel={() => void cancel(it)}
-                  />
-                )}
-              </For>
-            </Show>
+              <span class="text-[11px] text-fg-subtle uppercase tracking-wider">Auto</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={mode() === "auto"}
+                disabled={busy()}
+                onClick={() => void setMode(mode() === "auto" ? "manual" : "auto")}
+                data-testid={mode() === "auto" ? "queue-mode-auto" : "queue-mode-manual"}
+                class="relative inline-flex h-4 w-7 items-center rounded-full transition-colors disabled:opacity-50"
+                classList={{
+                  "bg-accent": mode() === "auto",
+                  "bg-bg-3 border border-border": mode() !== "auto",
+                }}
+              >
+                <span
+                  class="inline-block h-3 w-3 rounded-full bg-white shadow transition-transform"
+                  classList={{
+                    "translate-x-3.5": mode() === "auto",
+                    "translate-x-0.5": mode() !== "auto",
+                  }}
+                />
+              </button>
+            </label>
+
+            <button
+              type="button"
+              class="ag-btn ag-btn-ghost ag-btn-sm"
+              onClick={() => props.onClose()}
+              aria-label="Close"
+              data-testid="queue-close"
+            >
+              ✕
+            </button>
           </div>
+          <Show when={err()}>
+            <p class="mt-1 text-[11px] text-danger" title={err() ?? ""}>
+              {err()}
+            </p>
+          </Show>
+        </header>
+
+        <div class="flex-1 overflow-y-auto px-3 py-3 space-y-2" data-testid="queue-items">
+          <Show
+            when={total() > 0}
+            fallback={
+              <p class="text-center text-[12.5px] text-fg-subtle py-8" data-testid="queue-empty">
+                Queue is empty. Type a message while the agent is working to enqueue it.
+              </p>
+            }
+          >
+            <For each={items()}>
+              {(it) => (
+                <QueueCard
+                  item={it}
+                  expanded={expanded().has(it.id)}
+                  onToggle={() => toggleExpanded(it.id)}
+                  onCancel={() => void cancel(it)}
+                />
+              )}
+            </For>
+          </Show>
+        </div>
       </aside>
     </Show>
   );
@@ -239,9 +321,7 @@ function QueueCard(props: {
         on items the user "shouldn't" cancel.
       */}
       <header class="flex items-center gap-2 text-[11.5px]">
-        <span class="text-fg-subtle">
-          {new Date(props.item.created_at).toLocaleTimeString()}
-        </span>
+        <span class="text-fg-subtle">{new Date(props.item.created_at).toLocaleTimeString()}</span>
         <button
           type="button"
           class="ml-auto text-fg-subtle hover:text-danger"
@@ -288,25 +368,17 @@ function QueueCard(props: {
       </Show>
 
       <Show when={split().attachments.length > 0}>
-        <ul
-          class="flex flex-wrap gap-1.5"
-          data-testid={`queue-card-attachments-${props.item.id}`}
-        >
+        <ul class="flex flex-wrap gap-1.5" data-testid={`queue-card-attachments-${props.item.id}`}>
           <For each={split().attachments}>
             {(a) => (
-              <li
-                class="ag-chip font-mono text-[11px] flex items-center gap-1"
-                title={a.path}
-              >
+              <li class="ag-chip font-mono text-[11px] flex items-center gap-1" title={a.path}>
                 <Show
                   when={a.mime?.startsWith("image/")}
                   fallback={<span class="text-fg-subtle">📎</span>}
                 >
                   <span class="text-fg-subtle">🖼</span>
                 </Show>
-                <span class="truncate max-w-[200px]">
-                  {basename(a.path)}
-                </span>
+                <span class="truncate max-w-[200px]">{basename(a.path)}</span>
                 <Show when={a.mime}>
                   <span class="text-fg-subtle">·</span>
                   <span class="text-fg-subtle">{a.mime}</span>

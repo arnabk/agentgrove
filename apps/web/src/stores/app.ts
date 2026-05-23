@@ -14,13 +14,7 @@
 
 import { createStore, produce } from "solid-js/store";
 import { createSignal } from "solid-js";
-import {
-  api,
-  type Project,
-  type Theme,
-  type UserSettings,
-  type Worktree,
-} from "../api/client";
+import { api, type Project, type Theme, type UserSettings, type Worktree } from "../api/client";
 
 /** Per-scope cap for chats (max 5 per project/worktree scope). */
 export const MAX_PER_PROJECT = 5;
@@ -44,6 +38,10 @@ export interface TerminalTab {
 export interface ChatTab {
   id: string;
   title: string;
+  /** Unsent composer draft for this chat. Persisted via the layout
+   *  write-through so it survives page reloads + scope switches.
+   *  Empty / missing means no draft. */
+  draft?: string;
 }
 
 /** Workspace scope: chat/editor/terminal state. Owned by a scope key
@@ -260,6 +258,39 @@ export function setActiveChat(chatId: string) {
   scheduleScopeLayoutWrite(key);
 }
 
+/** Persist an in-flight composer draft for `chatId`. Stored on the
+ *  chat tab so each chat keeps its own draft across scope switches
+ *  + reloads. The draft is dropped on successful send (caller
+ *  passes `""`). */
+export function setChatDraft(chatId: string, draft: string) {
+  const key = currentScopeKey();
+  if (!key) return;
+  setState(
+    "byScope",
+    key,
+    produce((s) => {
+      const tab = s.chats.find((c) => c.id === chatId);
+      if (!tab) return;
+      // Normalise so `""` clears the field entirely (avoids serialising
+      // empty strings into the layout blob on every keystroke).
+      if (draft.length === 0) {
+        delete tab.draft;
+      } else {
+        tab.draft = draft;
+      }
+    }),
+  );
+  scheduleScopeLayoutWrite(key);
+}
+
+/** Read the persisted draft for `chatId`, or `""` if none. */
+export function getChatDraft(chatId: string): string {
+  const key = currentScopeKey();
+  if (!key) return "";
+  const tab = state.byScope[key]?.chats.find((c) => c.id === chatId);
+  return tab?.draft ?? "";
+}
+
 // ---- terminal tabs -----------------------------------------------------
 
 export function addTerminalTab(t: TerminalTab): { ok: boolean; reason?: string } {
@@ -414,9 +445,7 @@ async function hydrateLayoutFromBackend() {
   try {
     const snap = await api.getLayout();
     for (const s of snap.scopes) {
-      const key = s.worktree_id
-        ? `${s.project_id}::${s.worktree_id}`
-        : s.project_id;
+      const key = s.worktree_id ? `${s.project_id}::${s.worktree_id}` : s.project_id;
       // Spread over a freshScope so any missing field gets a sane
       // default — the BE's blob is the FE's shape, but tolerant
       // hydration protects us across schema additions.

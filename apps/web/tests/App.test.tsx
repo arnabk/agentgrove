@@ -38,4 +38,3 @@ describe("App", () => {
     expect(await findByTestId("welcome")).toBeTruthy();
   });
 });
-

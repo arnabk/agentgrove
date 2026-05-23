@@ -1,9 +1,5 @@
 import { For, Show, createSignal, onMount } from "solid-js";
-import {
-  api,
-  type ChatView,
-  type SlashCommand,
-} from "../api/client";
+import { api, type ChatView, type SlashCommand } from "../api/client";
 import Select from "./Select";
 
 /** Per-chat configuration dialog: model, effort, slash-commands.
@@ -93,18 +89,14 @@ export default function ChatSettingsDialog(props: Props) {
       aria-label="Chat settings"
       data-testid="chat-settings-dialog"
     >
-      <div
-        class="absolute inset-0 bg-black/60"
-        onClick={() => !busy() && props.onClose()}
-      />
+      <div class="absolute inset-0 bg-black/60" onClick={() => !busy() && props.onClose()} />
       <div class="relative w-full max-w-md rounded-xl border border-border bg-bg-1 shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
         <header class="flex items-center justify-between px-5 py-3 border-b border-border">
           <div>
             <h3 class="text-[14px] font-semibold tracking-tight">Chat settings</h3>
             <p class="text-[11.5px] text-fg-subtle">
-              Provider: <span class="font-mono">{props.chat.provider}</span> ·
-              session is preserved across edits except when the model
-              changes (resume tokens are model-specific).
+              Provider: <span class="font-mono">{props.chat.provider}</span> · session is preserved
+              across edits except when the model changes (resume tokens are model-specific).
             </p>
           </div>
           <button
@@ -120,9 +112,7 @@ export default function ChatSettingsDialog(props: Props) {
 
         <div class="px-5 py-4 space-y-5 overflow-y-auto">
           <div>
-            <label class="block text-[12.5px] font-medium text-fg mb-1">
-              Model
-            </label>
+            <label class="block text-[12.5px] font-medium text-fg mb-1">Model</label>
             <p class="text-[11.5px] text-fg-subtle mb-2">
               Provider alias (e.g. <code class="font-mono">sonnet</code>,{" "}
               <code class="font-mono">opus</code>) or a full model id.
@@ -153,13 +143,10 @@ export default function ChatSettingsDialog(props: Props) {
           </div>
 
           <div>
-            <label class="block text-[12.5px] font-medium text-fg mb-1">
-              Thinking effort
-            </label>
+            <label class="block text-[12.5px] font-medium text-fg mb-1">Thinking effort</label>
             <p class="text-[11.5px] text-fg-subtle mb-2">
-              Reserved budget for the model's reasoning. Higher values
-              produce more thorough answers but cost more tokens. Only
-              Claude uses this today.
+              Reserved budget for the model's reasoning. Higher values produce more thorough answers
+              but cost more tokens. Only Claude uses this today.
             </p>
             <Select
               value={effort()}
@@ -173,12 +160,9 @@ export default function ChatSettingsDialog(props: Props) {
 
           <Show when={commands().length > 0}>
             <div>
-              <label class="block text-[12.5px] font-medium text-fg mb-1">
-                Slash commands
-              </label>
+              <label class="block text-[12.5px] font-medium text-fg mb-1">Slash commands</label>
               <p class="text-[11.5px] text-fg-subtle mb-2">
-                Built-in commands the provider's CLI exposes. Click to
-                drop one into the chat input.
+                Built-in commands the provider's CLI exposes. Click to drop one into the chat input.
               </p>
               <ul class="space-y-1">
                 <For each={commands()}>
@@ -191,9 +175,7 @@ export default function ChatSettingsDialog(props: Props) {
                         data-testid={`chat-settings-command-${c.name}`}
                       >
                         <span class="font-mono text-fg">/{c.name}</span>
-                        <span class="ml-2 text-[11.5px] text-fg-subtle">
-                          {c.description}
-                        </span>
+                        <span class="ml-2 text-[11.5px] text-fg-subtle">{c.description}</span>
                       </button>
                     </li>
                   )}

@@ -6,11 +6,7 @@ import LeftRail from "./components/LeftRail";
 import MemoryIndicator from "./components/MemoryIndicator";
 import SettingsModal from "./components/SettingsModal";
 import Welcome from "./components/Welcome";
-import {
-  declareMemorySource,
-  estimateJsonBytes,
-  recordMemoryUsage,
-} from "./lib/memory";
+import { declareMemorySource, estimateJsonBytes, recordMemoryUsage } from "./lib/memory";
 
 declareMemorySource("rail.projects", "Project + worktree state");
 import ChatPane from "./panes/ChatPane";
@@ -78,76 +74,91 @@ export default function App() {
 
   return (
     <>
-    <Show when={state.ready} fallback={<LoadingScreen />}>
-      <div
-        class="h-screen p-4 sm:p-5 md:p-6 flex"
-        data-testid="app-root"
-        data-theme="dark"
-      >
-        <div class="ag-shell flex-1 flex min-w-0 rounded-xl border border-border shadow-2xl overflow-hidden">
-          <Show when={state.projects.length > 0} fallback={null}>
-            <LeftRail />
-          </Show>
-          <main
-            class="flex-1 flex flex-col min-w-0 bg-transparent"
-            data-testid="main-area"
-          >
-            <Show
-              when={state.projects.length > 0}
-              fallback={
-                <>
-                  <header
-                    class="h-12 px-4 flex items-center justify-end gap-2 border-b border-border bg-transparent"
-                    data-testid="top-bar"
-                  >
+      <Show when={state.ready} fallback={<LoadingScreen />}>
+        <div class="h-screen p-4 sm:p-5 md:p-6 flex" data-testid="app-root" data-theme="dark">
+          <div class="ag-shell flex-1 flex min-w-0 rounded-xl border border-border shadow-2xl overflow-hidden">
+            <Show when={state.projects.length > 0} fallback={null}>
+              <LeftRail />
+            </Show>
+            <main class="flex-1 flex flex-col min-w-0 bg-transparent" data-testid="main-area">
+              <Show
+                when={state.projects.length > 0}
+                fallback={
+                  <>
+                    <header
+                      class="h-12 px-4 flex items-center justify-end gap-2 border-b border-border bg-transparent"
+                      data-testid="top-bar"
+                    >
+                      <SettingsButton />
+                      <TopBarIndicators />
+                    </header>
+                    <div class="flex-1 min-h-0 bg-transparent">
+                      <Welcome />
+                    </div>
+                  </>
+                }
+              >
+                <nav
+                  class="h-12 px-4 flex items-center gap-1.5 border-b border-border bg-transparent"
+                  data-testid="pane-tabs"
+                >
+                  <For each={Object.keys(PANES) as PaneId[]}>
+                    {(k) => (
+                      <button
+                        class="ag-btn ag-btn-ghost !py-1.5 !px-3 text-[12.5px]"
+                        classList={{
+                          "!bg-bg-3 !text-fg": activePane() === k,
+                        }}
+                        onClick={() => setActivePane(k)}
+                        data-testid={`tab-${k}`}
+                      >
+                        <span aria-hidden="true" class="text-fg-subtle inline-flex items-center">
+                          {PANE_META[k].Icon()}
+                        </span>
+                        <span>{PANE_META[k].label}</span>
+                      </button>
+                    )}
+                  </For>
+                  <div class="ml-auto flex items-center gap-2">
                     <SettingsButton />
                     <TopBarIndicators />
-                  </header>
-                  <div class="flex-1 min-h-0 bg-transparent">
-                    <Welcome />
                   </div>
-                </>
-              }
-            >
-              <nav
-                class="h-12 px-4 flex items-center gap-1.5 border-b border-border bg-transparent"
-                data-testid="pane-tabs"
-              >
-                <For each={Object.keys(PANES) as PaneId[]}>
-                  {(k) => (
-                    <button
-                      class="ag-btn ag-btn-ghost !py-1.5 !px-3 text-[12.5px]"
-                      classList={{
-                        "!bg-bg-3 !text-fg": activePane() === k,
-                      }}
-                      onClick={() => setActivePane(k)}
-                      data-testid={`tab-${k}`}
-                    >
-                      <span aria-hidden="true" class="text-fg-subtle inline-flex items-center">
-                        {PANE_META[k].Icon()}
-                      </span>
-                      <span>{PANE_META[k].label}</span>
-                    </button>
-                  )}
-                </For>
-                <div class="ml-auto flex items-center gap-2">
-                  <SettingsButton />
-                  <TopBarIndicators />
+                </nav>
+                <div
+                  class="flex-1 min-h-0 bg-transparent p-5"
+                  data-testid={`pane-${activePane()}-host`}
+                >
+                  {/*
+                  All panes stay MOUNTED simultaneously and we toggle
+                  visibility via CSS. Unmounting on tab switch tore
+                  down each pane's local state — the chat composer
+                  draft, scroll position, file-tree expansion, etc.
+                  — which made simple "flip to terminal, come back"
+                  flows lose work the user didn't realise was
+                  in-flight. Keeping all panes mounted matches the
+                  TerminalPane's own internal tab strategy (hide
+                  via display:none) and trades a small memory cost
+                  for predictable persistence.
+                */}
+                  <div class="ag-pane h-full rounded-lg border border-border overflow-hidden relative">
+                    <For each={Object.keys(PANES) as PaneId[]}>
+                      {(k) => (
+                        <div
+                          class="absolute inset-0"
+                          style={{ display: activePane() === k ? "block" : "none" }}
+                          data-testid={`pane-mount-${k}`}
+                        >
+                          <Dynamic component={PANES[k]} />
+                        </div>
+                      )}
+                    </For>
+                  </div>
                 </div>
-              </nav>
-              <div
-                class="flex-1 min-h-0 bg-transparent p-5"
-                data-testid={`pane-${activePane()}-host`}
-              >
-                <div class="ag-pane h-full rounded-lg border border-border overflow-hidden">
-                  <Dynamic component={PANES[activePane()]} />
-                </div>
-              </div>
-            </Show>
-          </main>
+              </Show>
+            </main>
+          </div>
         </div>
-      </div>
-    </Show>
+      </Show>
       <SettingsModal />
       <Show when={changesScope()}>
         <ChangesPanel />
@@ -171,10 +182,7 @@ function LoadingScreen() {
 /** Top-right indicators: connection + memory usage. */
 function TopBarIndicators() {
   return (
-    <div
-      class="flex items-center gap-2 text-[11px] text-fg-subtle"
-      data-testid="top-indicators"
-    >
+    <div class="flex items-center gap-2 text-[11px] text-fg-subtle" data-testid="top-indicators">
       <MemoryIndicator />
       <span
         class="inline-flex items-center gap-1.5 ag-chip"

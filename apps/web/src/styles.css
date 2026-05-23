@@ -295,9 +295,11 @@ textarea::placeholder {
 
 /* Primary: accent color + subtle inner highlight + soft shadow */
 .ag-btn-primary {
-  background: linear-gradient(180deg,
+  background: linear-gradient(
+    180deg,
     color-mix(in srgb, var(--ag-accent) 100%, white 6%),
-    var(--ag-accent));
+    var(--ag-accent)
+  );
   color: var(--ag-accent-fg);
   border-color: color-mix(in srgb, var(--ag-accent) 80%, black 8%);
   box-shadow:
@@ -306,9 +308,11 @@ textarea::placeholder {
     0 0 0 0 var(--ag-accent-soft);
 }
 .ag-btn-primary:hover:not(:disabled) {
-  background: linear-gradient(180deg,
+  background: linear-gradient(
+    180deg,
     color-mix(in srgb, var(--ag-accent-hover) 100%, white 6%),
-    var(--ag-accent-hover));
+    var(--ag-accent-hover)
+  );
   box-shadow:
     0 1px 0 0 rgba(255, 255, 255, 0.16) inset,
     0 2px 6px rgba(0, 0, 0, 0.3),
@@ -633,7 +637,13 @@ textarea::placeholder {
   margin: 0.7em 0 0.3em;
 }
 .ag-prose p {
-  margin: 0.4em 0;
+  margin: 0.85em 0;
+}
+.ag-prose p:first-child {
+  margin-top: 0;
+}
+.ag-prose p:last-child {
+  margin-bottom: 0;
 }
 .ag-prose strong {
   color: var(--ag-fg);
@@ -682,8 +692,8 @@ textarea::placeholder {
 }
 .ag-prose ul,
 .ag-prose ol {
-  margin: 0.4em 0;
-  padding-left: 1.4em;
+  margin: 0.85em 0;
+  padding-left: 1.5em;
 }
 .ag-prose ul {
   list-style: disc;
@@ -692,7 +702,30 @@ textarea::placeholder {
   list-style: decimal;
 }
 .ag-prose li {
-  margin: 0.15em 0;
+  margin: 0.35em 0;
+}
+.ag-prose li > p {
+  margin: 0.25em 0;
+}
+.ag-prose li > ul,
+.ag-prose li > ol {
+  margin: 0.3em 0;
+}
+.ag-prose h1,
+.ag-prose h2,
+.ag-prose h3 {
+  margin-top: 1.2em;
+  margin-bottom: 0.5em;
+}
+.ag-prose h1:first-child,
+.ag-prose h2:first-child,
+.ag-prose h3:first-child {
+  margin-top: 0;
+}
+.ag-prose hr {
+  margin: 1.2em 0;
+  border: 0;
+  border-top: 1px solid var(--ag-border);
 }
 .ag-prose ul[data-type="taskList"] {
   list-style: none;
@@ -786,4 +819,60 @@ textarea::placeholder {
 }
 .ag-prose > :last-child {
   margin-bottom: 0;
+}
+
+/* Chat-specific overrides: assistant bubble uses 13.5px / leading-
+   relaxed; cascading the Notes default (15px) made paragraphs
+   feel oversized AND cramped at the same time. This brings the
+   prose into line with the bubble while keeping the more
+   generous block-level rhythm we set above. */
+.ag-prose-chat {
+  font-size: inherit;
+  line-height: 1.6;
+}
+.ag-prose-chat h1 {
+  font-size: 1.4em;
+}
+.ag-prose-chat h2 {
+  font-size: 1.2em;
+}
+.ag-prose-chat h3 {
+  font-size: 1.05em;
+}
+.ag-prose-chat pre {
+  margin: 0.9em 0;
+}
+
+/* Composer-specific tightening. The chat input bubble is a fixed
+   height with `min-h-[3.2em]`; the default `.ag-prose p` rule sets
+   `0.85em` top/bottom margins, which pushes the first paragraph
+   (and the placeholder) below the visible viewport — looks like
+   the message is clipped. We zero those margins for blocks inside
+   `.ag-composer` so the caret + placeholder hug the top edge. */
+.ag-composer .ag-prose > :first-child,
+.ag-composer .ag-prose p:first-child,
+.ag-composer .ag-prose ul:first-child,
+.ag-composer .ag-prose ol:first-child {
+  margin-top: 0;
+}
+.ag-composer .ag-prose > :last-child,
+.ag-composer .ag-prose p:last-child,
+.ag-composer .ag-prose ul:last-child,
+.ag-composer .ag-prose ol:last-child {
+  margin-bottom: 0;
+}
+.ag-composer .ag-prose p {
+  margin: 0.35em 0;
+}
+
+/* Continuous rotate, used by RefreshButton in Settings → Providers
+   and the new-chat model picker while a refresh is in-flight. */
+@keyframes ag-spin-kf {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.ag-spin {
+  animation: ag-spin-kf 0.8s linear infinite;
+  transform-origin: 50% 50%;
 }

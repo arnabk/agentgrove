@@ -224,6 +224,11 @@ export interface UserSettings {
   font_size?: number;
   /** User-defined reusable prompt templates. */
   prompts?: PromptTemplate[];
+  /** Global default: auto-approve every agent tool invocation
+   *  (Claude / opencode `--dangerously-skip-permissions`). `undefined`
+   *  is treated as `true` by the BE so out-of-the-box agents never
+   *  stall on a permission prompt we can't forward. */
+  auto_approve_tools?: boolean;
 }
 
 export interface TreeEntry {

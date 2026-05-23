@@ -1,9 +1,5 @@
 import { For, Show, createSignal, onMount } from "solid-js";
-import {
-  api,
-  type Chat,
-  type ProviderDescriptor,
-} from "../api/client";
+import { api, type Chat, type ProviderDescriptor } from "../api/client";
 import Select, { type SelectOption } from "./Select";
 
 interface Props {
@@ -36,17 +32,40 @@ export default function NewChatDialog(props: Props) {
   const [providerId, setProviderId] = createSignal<string>("claude");
   const [model, setModel] = createSignal<string>("sonnet");
   const [loadingProviders, setLoadingProviders] = createSignal(true);
+  const [refreshing, setRefreshing] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [err, setErr] = createSignal<string | null>(null);
+
+  /** Re-fetch the active provider's descriptor so the model list
+   *  reflects any CLI / upstream changes since the dialog opened
+   *  (e.g. the user just installed a new opencode model). Drops
+   *  the BE's in-memory cache for that provider before re-detecting. */
+  async function refreshActiveProvider() {
+    const id = activeProvider()?.id;
+    if (!id || refreshing()) return;
+    setRefreshing(true);
+    try {
+      const fresh = await api.refreshProvider(id);
+      setProviders((list) => list.map((p) => (p.id === id ? fresh : p)));
+      // If the previously-selected model vanished from the list,
+      // snap to the provider default so the picker isn't stranded
+      // on an unknown value.
+      if (fresh.models.length > 0 && !fresh.models.includes(model())) {
+        setModel(fresh.default_model);
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   onMount(() => {
     void (async () => {
       try {
         const list = await api.listProviders();
         // Order: available providers first.
-        const sorted = [...list].sort(
-          (a, b) => Number(b.available) - Number(a.available),
-        );
+        const sorted = [...list].sort((a, b) => Number(b.available) - Number(a.available));
         setProviders(sorted);
         const firstAvailable = sorted.find((p) => p.available);
         if (firstAvailable) {
@@ -67,11 +86,7 @@ export default function NewChatDialog(props: Props) {
         value: p.id,
         label: p.available ? p.label : `${p.label} (not installed)`,
       };
-      const hint = p.available
-        ? p.version
-          ? `v${p.version}`
-          : undefined
-        : "missing CLI";
+      const hint = p.available ? (p.version ? `v${p.version}` : undefined) : "missing CLI";
       if (hint) opt.hint = hint;
       return opt;
     });
@@ -141,9 +156,7 @@ export default function NewChatDialog(props: Props) {
       return;
     }
     if (!provider.available) {
-      setErr(
-        `${provider.label} CLI is not installed. See ${provider.install_hint}`,
-      );
+      setErr(`${provider.label} CLI is not installed. See ${provider.install_hint}`);
       return;
     }
     setErr(null);
@@ -173,24 +186,19 @@ export default function NewChatDialog(props: Props) {
       class="fixed inset-0 z-50 flex items-center justify-center p-4"
       data-testid="new-chat-dialog"
     >
-      <div
-        class="absolute inset-0 bg-black/60"
-        onClick={() => !busy() && props.onCancel()}
-      />
+      <div class="absolute inset-0 bg-black/60" onClick={() => !busy() && props.onCancel()} />
       <form
         onSubmit={submit}
         class="relative w-full max-w-md rounded-xl border border-border bg-bg-1 p-6 shadow-2xl"
       >
         <h3 class="text-[15px] font-semibold mb-1">New chat</h3>
         <p class="text-[13px] text-fg-muted mb-5">
-          AgentGrove launches the selected provider's installed CLI
-          inside this {props.worktreeId ? "worktree" : "project"}.
-          Authentication is whatever your CLI is already set up for.
+          AgentGrove launches the selected provider's installed CLI inside this{" "}
+          {props.worktreeId ? "worktree" : "project"}. Authentication is whatever your CLI is
+          already set up for.
         </p>
 
-        <label class="block text-[12px] font-medium text-fg-muted mb-1.5">
-          Title
-        </label>
+        <label class="block text-[12px] font-medium text-fg-muted mb-1.5">Title</label>
         <input
           class="ag-input mb-4"
           value={title()}
@@ -199,9 +207,7 @@ export default function NewChatDialog(props: Props) {
           autofocus
         />
 
-        <label class="block text-[12px] font-medium text-fg-muted mb-1.5">
-          Provider
-        </label>
+        <label class="block text-[12px] font-medium text-fg-muted mb-1.5">Provider</label>
         <Show
           when={!loadingProviders()}
           fallback={
@@ -238,9 +244,39 @@ export default function NewChatDialog(props: Props) {
           </div>
         </Show>
 
-        <label class="block text-[12px] font-medium text-fg-muted mb-1.5">
-          Model
-        </label>
+        <div class="flex items-center justify-between mb-1.5">
+          <label class="text-[12px] font-medium text-fg-muted">Model</label>
+          <Show when={activeProvider()}>
+            <button
+              type="button"
+              class="ag-btn ag-btn-ghost ag-btn-sm inline-flex items-center gap-1 text-[11px]"
+              onClick={() => void refreshActiveProvider()}
+              disabled={refreshing()}
+              title="Refresh model list"
+              data-testid="new-chat-refresh-models"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                width="1em"
+                height="1em"
+                aria-hidden="true"
+                classList={{ "ag-spin": refreshing() }}
+              >
+                <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                <path d="M21 3v5h-5" />
+                <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                <path d="M3 21v-5h5" />
+              </svg>
+              {refreshing() ? "Refreshing…" : "Refresh"}
+            </button>
+          </Show>
+        </div>
         {/*
           Themed dropdown of the active provider's curated model
           aliases. If the BE happens to return an empty list (shouldn't
@@ -277,16 +313,12 @@ export default function NewChatDialog(props: Props) {
         </Show>
         <p class="text-[11px] text-fg-subtle mb-5">
           Provider aliases (e.g. <code class="font-mono">sonnet</code>,{" "}
-          <code class="font-mono">opus</code>) resolve to the current
-          release. Power users can paste a full model id later from
-          per-chat settings.
+          <code class="font-mono">opus</code>) resolve to the current release. Power users can paste
+          a full model id later from per-chat settings.
         </p>
 
         <Show when={err()}>
-          <p
-            class="mb-4 text-[12px] text-danger"
-            data-testid="new-chat-error"
-          >
+          <p class="mb-4 text-[12px] text-danger" data-testid="new-chat-error">
             {err()}
           </p>
         </Show>
@@ -318,17 +350,10 @@ export default function NewChatDialog(props: Props) {
                 {(p) => (
                   <li class="flex justify-between gap-2">
                     <span>
-                      {p.label}{" "}
-                      <span class="text-fg-subtle">({p.id})</span>
+                      {p.label} <span class="text-fg-subtle">({p.id})</span>
                     </span>
-                    <span
-                      class={
-                        p.available ? "text-success" : "text-fg-subtle"
-                      }
-                    >
-                      {p.available
-                        ? `v${p.version ?? "?"}`
-                        : "not installed"}
+                    <span class={p.available ? "text-success" : "text-fg-subtle"}>
+                      {p.available ? `v${p.version ?? "?"}` : "not installed"}
                     </span>
                   </li>
                 )}

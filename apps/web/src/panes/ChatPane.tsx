@@ -6,6 +6,7 @@ import {
   createSignal,
   onCleanup,
   onMount,
+  type JSX,
 } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import { createVirtualizer } from "@tanstack/solid-virtual";
@@ -30,12 +31,15 @@ import ChatSettingsDialog from "../components/ChatSettingsDialog";
 import { confirm } from "../components/dialog";
 import Markdown from "../components/Markdown";
 import QueueDrawer from "../components/QueueDrawer";
+import ChatComposer, { type ChatComposerHandle } from "../components/ChatComposer";
 import {
   closeChatTab,
   currentScope,
   currentWorktreeId,
+  getChatDraft,
   selectedChatId,
   setActiveChat,
+  setChatDraft,
   setScopeChats,
   state,
 } from "../stores/app";
@@ -90,6 +94,12 @@ const freshChatStore = (): ChatStore => ({
 export default function ChatPane() {
   const [chatStore, setChatStore] = createStore<ChatStore>(freshChatStore());
   const [input, setInput] = createSignal("");
+  /** Imperative handle to the rich composer. Used by slash-menu
+   *  apply, prompt-picker insert, file-paths append, and the
+   *  per-chat settings dialog's "insert command" action. Replaces
+   *  the old `document.querySelector('[data-testid="chat-input"]')`
+   *  textarea pokes. */
+  let composer: ChatComposerHandle | null = null;
   // Whether the agent is currently working on this chat's *latest*
   // prompt. Only the tail prompt can be in-flight — older prompts
   // are immutable history.
@@ -209,13 +219,28 @@ export default function ChatPane() {
     });
   });
 
-
-
   const scope = () => currentScope();
   const tabs = () => scope()?.chats ?? [];
   const activeId = () => selectedChatId();
 
-  /** Refresh the chat list for the active scope from the BE. */
+  /** Refresh the chat list for the active scope from the BE.
+   *
+   *  Tabs in this scope are user-curated: closing a tab is a local
+   *  action (the chat itself stays on the server, reachable from
+   *  the LeftRail). So we DO NOT replace the tab list with whatever
+   *  the BE returns — that would resurrect tabs the user has
+   *  intentionally closed every time they switch scopes.
+   *
+   *  Instead we reconcile in two passes:
+   *    1. **Bootstrap** — if the scope has never had any tabs (fresh
+   *       project / first visit), seed with every BE chat so the
+   *       user isn't staring at an empty pane.
+   *    2. **Intersect** — for an already-populated scope, drop tabs
+   *       whose chat was deleted server-side (defensive; should be
+   *       rare) and update titles in place. Chats the user closed
+   *       stay closed; new server chats only appear when the user
+   *       opens them from the LeftRail.
+   */
   async function refreshScopeChats() {
     const pid = state.selectedProjectId;
     if (!pid) {
@@ -225,8 +250,29 @@ export default function ChatPane() {
     try {
       const all = await api.listProjectChats(pid);
       const wt = currentWorktreeId();
-      const filtered = all.filter((c) => (c.worktree_id ?? null) === wt);
-      setScopeChats(filtered.map((c) => ({ id: c.id, title: c.title })));
+      const beChats = all.filter((c) => (c.worktree_id ?? null) === wt);
+      const beById = new Map(beChats.map((c) => [c.id, c]));
+      const current = scope()?.chats ?? [];
+      if (current.length === 0) {
+        // Bootstrap: scope has no tabs yet — seed with everything
+        // the BE knows about.
+        setScopeChats(beChats.map((c) => ({ id: c.id, title: c.title })));
+        return;
+      }
+      // Reconcile: keep the local tab order, drop tabs whose chat
+      // vanished server-side, refresh titles in place, AND preserve
+      // any per-tab draft text the user has typed. Dropping `draft`
+      // here silently wiped composer state on every scope-switch /
+      // page-reload because this reconcile runs whenever a chat
+      // pane mounts.
+      const reconciled = current
+        .filter((t) => beById.has(t.id))
+        .map((t) => ({
+          id: t.id,
+          title: beById.get(t.id)!.title,
+          ...(t.draft ? { draft: t.draft } : {}),
+        }));
+      setScopeChats(reconciled);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
@@ -398,9 +444,7 @@ export default function ChatPane() {
     if (!tail) return;
     const evs = tail.events;
     const last = evs[evs.length - 1];
-    const isInFlight =
-      evs.length === 0 ||
-      (last && last.type !== "done" && last.type !== "error");
+    const isInFlight = evs.length === 0 || (last && last.type !== "done" && last.type !== "error");
     if (!isInFlight) return;
     const handle = setInterval(() => {
       // `reconcileChat` is soft: it preserves liveTokens for any
@@ -418,9 +462,13 @@ export default function ChatPane() {
   });
 
   // Reload the open chat whenever the active chat id changes.
+  // Also restore that chat's persisted composer draft (or clear the
+  // input if it has none) so unsent text follows the chat the user
+  // expects to find it in.
   createEffect(() => {
-    void activeId();
+    const id = activeId();
     void loadChat();
+    setInput(id ? getChatDraft(id) : "");
   });
 
   // Report this chat's memory footprint to the global registry. The
@@ -464,9 +512,7 @@ export default function ChatPane() {
       const updated = await api.renameChat(id, next);
       // Update local tab list + (if this is the active chat) the
       // chat view so the provider chip / window header refresh.
-      setScopeChats(
-        tabs().map((t) => (t.id === id ? { ...t, title: updated.title } : t)),
-      );
+      setScopeChats(tabs().map((t) => (t.id === id ? { ...t, title: updated.title } : t)));
       if (chatStore.view && chatStore.view.id === id) {
         setChatStore("view", { ...chatStore.view, title: updated.title });
       }
@@ -571,10 +617,7 @@ export default function ChatPane() {
     if (!id || (!body && atts.length === 0)) return;
     if (atts.length > 0) {
       const lines = atts
-        .map(
-          (u) =>
-            `- ${u.path}${u.content_type ? ` (${u.content_type})` : ""}`,
-        )
+        .map((u) => `- ${u.path}${u.content_type ? ` (${u.content_type})` : ""}`)
         .join("\n");
       body = `${body}${body ? "\n\n" : ""}Attached files (absolute paths, read with your Read tool):\n${lines}`;
     }
@@ -587,12 +630,11 @@ export default function ChatPane() {
     const snapshot = { body, uploads: atts };
     setInput("");
     setUploads([]);
-    queueMicrotask(() => {
-      const el = document.querySelector<HTMLTextAreaElement>(
-        '[data-testid="chat-input"]',
-      );
-      autoResizeTextarea(el);
-    });
+    // Drop the persisted draft for this chat — the message is now
+    // in flight, no point keeping it as recoverable text.
+    const chatId = activeId();
+    if (chatId) setChatDraft(chatId, "");
+    queueMicrotask(() => composer?.setMarkdown(""));
 
     // Push an OPTIMISTIC placeholder prompt so the user's message
     // lands in the timeline instantly. We don't know yet whether
@@ -657,6 +699,9 @@ export default function ChatPane() {
       );
       setInput(snapshot.body);
       setUploads(snapshot.uploads);
+      // Restore the draft too so a reload / scope switch still
+      // shows the unsent message.
+      if (chatId) setChatDraft(chatId, snapshot.body);
       setErr(e instanceof Error ? e.message : String(e));
     }
   }
@@ -744,11 +789,7 @@ export default function ChatPane() {
     try {
       const updated = await api.updateChat(c.id, { model });
       setChatStore("view", (v) => (v ? { ...v, ...updated } : v));
-      setScopeChats(
-        tabs().map((t) =>
-          t.id === updated.id ? { ...t, title: updated.title } : t,
-        ),
-      );
+      setScopeChats(tabs().map((t) => (t.id === updated.id ? { ...t, title: updated.title } : t)));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
@@ -791,76 +832,72 @@ export default function ChatPane() {
       insert: `/${c.name}`,
       detail: c.description,
     }));
-    const prompts: SlashSuggestion[] = (state.settings.prompts ?? []).map(
-      (p) => ({
-        key: `prompt:${p.id}`,
-        label: p.name,
-        hint: "prompt",
-        insert: p.body,
-        detail: p.body.split("\n")[0] ?? "",
-      }),
-    );
+    const prompts: SlashSuggestion[] = (state.settings.prompts ?? []).map((p) => ({
+      key: `prompt:${p.id}`,
+      label: p.name,
+      hint: "prompt",
+      insert: p.body,
+      detail: p.body.split("\n")[0] ?? "",
+    }));
     const all = [...cmds, ...prompts];
     if (!needle) return all.slice(0, 12);
     return all
       .filter(
-        (s) =>
-          s.label.toLowerCase().includes(needle) ||
-          s.detail.toLowerCase().includes(needle),
+        (s) => s.label.toLowerCase().includes(needle) || s.detail.toLowerCase().includes(needle),
       )
       .slice(0, 12);
   }
 
-  /** Apply a suggestion: locate the `/<query>` token in the input
-   *  value, swap it for the insertion, and move the caret to the
-   *  end of the inserted text. */
+  /** Apply a suggestion. We work on the serialised Markdown value
+   *  rather than the editor's internal selection: the slash trigger
+   *  lives at a known string position (the most recent `/` at line
+   *  start), so we rewrite the document end-to-end and let the
+   *  composer rebuild ProseMirror nodes. Simpler than poking the
+   *  ProseMirror selection directly and avoids surprises around
+   *  inline marks (e.g. the slash query landing inside a code span). */
   function applySlash(suggestion: SlashSuggestion) {
-    const ta = document.querySelector<HTMLTextAreaElement>(
-      '[data-testid="chat-input"]',
-    );
-    if (!ta) return;
-    const value = ta.value;
-    const cursor = ta.selectionStart;
-    // The slash query is everything from the most recent slash before
-    // `cursor` (that sits at line start) up to the cursor.
-    const before = value.slice(0, cursor);
-    const slashAt = before.lastIndexOf("/");
+    const value = input();
+    if (!value) return;
+    const slashAt = value.lastIndexOf("/");
     if (slashAt < 0) return;
-    const atLineStart =
-      slashAt === 0 || value[slashAt - 1] === "\n" || value[slashAt - 1] === " ";
+    const atLineStart = slashAt === 0 || value[slashAt - 1] === "\n" || value[slashAt - 1] === " ";
     if (!atLineStart) return;
-    const newValue =
-      value.slice(0, slashAt) + suggestion.insert + value.slice(cursor);
-    ta.value = newValue;
+    const newValue = value.slice(0, slashAt) + suggestion.insert;
     setInput(newValue);
-    const caret = slashAt + suggestion.insert.length;
-    ta.focus();
-    ta.setSelectionRange(caret, caret);
-    autoResizeTextarea(ta);
+    composer?.setMarkdown(newValue);
+    composer?.focus();
     setSlashQuery(null);
     setSlashIdx(0);
   }
 
-  /** Inspect the textarea's current value + cursor and update the
-   *  slash menu state. Called from onInput and after Enter to track
-   *  what `/<token>` the user has typed. */
-  function updateSlashState(ta: HTMLTextAreaElement) {
-    const cursor = ta.selectionStart;
-    const before = ta.value.slice(0, cursor);
-    const slashAt = before.lastIndexOf("/");
+  /** Inspect the composer's serialised markdown and update the slash
+   *  menu state. Called whenever the input value changes. We no
+   *  longer have raw textarea cursor info (Tiptap owns the
+   *  selection), but the trigger is "user just typed `/foo` at a
+   *  line start" — easy to derive from the final character of the
+   *  current markdown string. */
+  function updateSlashState(md: string) {
+    if (!md) {
+      setSlashQuery(null);
+      return;
+    }
+    // The user's caret is conceptually at the end of the latest
+    // edit; tiptap-markdown emits the document as a single string,
+    // so we use the end of the string as our reference point. This
+    // is the same behaviour the old textarea path had whenever the
+    // caret was at the end of the input — the most common case for
+    // an in-progress slash trigger.
+    const slashAt = md.lastIndexOf("/");
     if (slashAt < 0) {
       setSlashQuery(null);
       return;
     }
-    const atLineStart =
-      slashAt === 0 || before[slashAt - 1] === "\n" || before[slashAt - 1] === " ";
+    const atLineStart = slashAt === 0 || md[slashAt - 1] === "\n" || md[slashAt - 1] === " ";
     if (!atLineStart) {
       setSlashQuery(null);
       return;
     }
-    const token = before.slice(slashAt + 1);
-    // Token ends at the next whitespace; if it contains one, abort
-    // the menu (the user moved on).
+    const token = md.slice(slashAt + 1);
     if (/\s/.test(token)) {
       setSlashQuery(null);
       return;
@@ -882,8 +919,7 @@ export default function ChatPane() {
               class="group inline-flex items-center gap-1 rounded-md border border-border bg-bg-2 pl-2 pr-1 py-1 text-[12px] cursor-pointer"
               classList={{
                 "!border-accent !bg-accent-soft": t.id === activeId(),
-                "hover:bg-bg-3":
-                  t.id !== activeId() && renamingId() !== t.id,
+                "hover:bg-bg-3": t.id !== activeId() && renamingId() !== t.id,
               }}
               onClick={() => {
                 if (renamingId() !== t.id) setActiveChat(t.id);
@@ -894,11 +930,7 @@ export default function ChatPane() {
               }}
               onKeyDown={(e) => {
                 // F2 starts rename when the tab is focused/active.
-                if (
-                  e.key === "F2" &&
-                  t.id === activeId() &&
-                  renamingId() !== t.id
-                ) {
+                if (e.key === "F2" && t.id === activeId() && renamingId() !== t.id) {
                   e.preventDefault();
                   startRename(t.id, t.title);
                 }
@@ -909,9 +941,7 @@ export default function ChatPane() {
             >
               <Show
                 when={renamingId() === t.id}
-                fallback={
-                  <span class="truncate max-w-[180px]">{t.title}</span>
-                }
+                fallback={<span class="truncate max-w-[180px]">{t.title}</span>}
               >
                 <input
                   class="ag-input !py-0 !px-1 !h-6 !text-[12px] max-w-[180px]"
@@ -957,21 +987,25 @@ export default function ChatPane() {
           )}
         </For>
 
-        <Show when={activeId() && (queueSummary()?.total ?? 0) > 0}>
+        {/* Queue badge: always present while a chat is active so the
+            user can toggle the dock even when the queue is empty.
+            Highlights when items are pending / running so it
+            doubles as a status indicator. */}
+        <Show when={activeId()}>
           <button
             type="button"
             class="ml-1 ag-chip flex items-center gap-1 hover:bg-bg-3"
             classList={{
               "!border-accent": (queueSummary()?.running ?? 0) > 0,
+              "!bg-accent-soft": queueOpen(),
             }}
             onClick={() => setQueueOpen(!queueOpen())}
             title={`Queue: ${queueSummary()?.pending ?? 0} pending, ${queueSummary()?.running ?? 0} running, ${queueSummary()?.total ?? 0} total`}
+            aria-pressed={queueOpen()}
             data-testid="chat-queue-badge"
           >
             <span class="text-fg-subtle">⏳ queue</span>
-            <span class="text-fg font-mono">
-              {queueSummary()?.pending ?? 0}
-            </span>
+            <span class="text-fg font-mono">{queueSummary()?.pending ?? 0}</span>
             <Show when={(queueSummary()?.running ?? 0) > 0}>
               <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
             </Show>
@@ -1009,89 +1043,83 @@ export default function ChatPane() {
             onRevert={(p) => void revert(p)}
           />
 
-      {/* Composer renders ONLY when there's an active chat. Otherwise
+          {/* Composer renders ONLY when there's an active chat. Otherwise
           we show a small empty-state strip so the bottom of the pane
           doesn't carry a disabled input that the user can't act on.
           This guards against the post-deletion view too: when the
           scope (project or worktree) is removed under us, activeId()
           flips to null and we collapse the composer rather than
           leaving a ghost "Send" button below the maze. */}
-      <Show
-        when={activeId()}
-        fallback={
-          <div
-            class="px-4 py-4 border-t border-border bg-bg-1 text-center text-[12.5px] text-fg-subtle"
-            data-testid="chat-empty-composer"
-          >
-            <Show
-              when={state.selectedProjectId}
-              fallback={
-                <span>Select a project on the left to start chatting.</span>
-              }
-            >
-              <span>
-                Open or create a chat in the left rail to start messaging.
-              </span>
-            </Show>
-          </div>
-        }
-      >
-      <form
-        onSubmit={send}
-        onDrop={onDrop}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        class="px-4 py-3 border-t border-border bg-bg-1 flex flex-col gap-2 relative"
-        classList={{ "ring-2 ring-accent ring-inset": dragActive() }}
-        data-testid="chat-input-form"
-      >
-        <Show when={dragActive()}>
-          <div
-            class="pointer-events-none absolute inset-0 flex items-center justify-center bg-bg-2/80 backdrop-blur-sm text-[13px] text-fg"
-            data-testid="chat-drop-overlay"
-          >
-            Drop files to attach
-          </div>
-        </Show>
-        <Show when={uploads().length > 0 || uploading()}>
-          <div class="flex flex-wrap gap-1.5" data-testid="chat-uploads">
-            <For each={uploads()}>
-              {(u) => (
-                <span
-                  class="ag-chip font-mono text-[11.5px] flex items-center gap-1"
-                  title={`${u.path} · ${fmtBytes(u.size)}`}
-                  data-testid={`chat-upload-${u.id}`}
+          <Show
+            when={activeId()}
+            fallback={
+              <div
+                class="px-4 py-4 border-t border-border bg-bg-1 text-center text-[12.5px] text-fg-subtle"
+                data-testid="chat-empty-composer"
+              >
+                <Show
+                  when={state.selectedProjectId}
+                  fallback={<span>Select a project on the left to start chatting.</span>}
                 >
-                  <Show
-                    when={u.content_type.startsWith("image/")}
-                    fallback={<span class="text-fg-subtle">📎</span>}
-                  >
-                    <img
-                      src={api.uploadRawUrl(u.id)}
-                      alt={u.filename}
-                      class="w-4 h-4 rounded-sm object-cover"
-                    />
+                  <span>Open or create a chat in the left rail to start messaging.</span>
+                </Show>
+              </div>
+            }
+          >
+            <form
+              onSubmit={send}
+              onDrop={onDrop}
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              class="px-4 py-3 border-t border-border bg-bg-1 flex flex-col gap-2 relative"
+              classList={{ "ring-2 ring-accent ring-inset": dragActive() }}
+              data-testid="chat-input-form"
+            >
+              <Show when={dragActive()}>
+                <div
+                  class="pointer-events-none absolute inset-0 flex items-center justify-center bg-bg-2/80 backdrop-blur-sm text-[13px] text-fg"
+                  data-testid="chat-drop-overlay"
+                >
+                  Drop files to attach
+                </div>
+              </Show>
+              <Show when={uploads().length > 0 || uploading()}>
+                <div class="flex flex-wrap gap-1.5" data-testid="chat-uploads">
+                  <For each={uploads()}>
+                    {(u) => (
+                      <span
+                        class="ag-chip font-mono text-[11.5px] flex items-center gap-1"
+                        title={`${u.path} · ${fmtBytes(u.size)}`}
+                        data-testid={`chat-upload-${u.id}`}
+                      >
+                        <Show
+                          when={u.content_type.startsWith("image/")}
+                          fallback={<span class="text-fg-subtle">📎</span>}
+                        >
+                          <img
+                            src={api.uploadRawUrl(u.id)}
+                            alt={u.filename}
+                            class="w-4 h-4 rounded-sm object-cover"
+                          />
+                        </Show>
+                        <span class="truncate max-w-[160px]">{u.filename}</span>
+                        <button
+                          type="button"
+                          class="text-fg-subtle hover:text-danger"
+                          onClick={() => removeUpload(u.id)}
+                          aria-label={`Remove ${u.filename}`}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    )}
+                  </For>
+                  <Show when={uploading()}>
+                    <span class="ag-chip text-[11.5px] text-fg-subtle italic">Uploading…</span>
                   </Show>
-                  <span class="truncate max-w-[160px]">{u.filename}</span>
-                  <button
-                    type="button"
-                    class="text-fg-subtle hover:text-danger"
-                    onClick={() => removeUpload(u.id)}
-                    aria-label={`Remove ${u.filename}`}
-                  >
-                    ✕
-                  </button>
-                </span>
-              )}
-            </For>
-            <Show when={uploading()}>
-              <span class="ag-chip text-[11.5px] text-fg-subtle italic">
-                Uploading…
-              </span>
-            </Show>
-          </div>
-        </Show>
-        {/*
+                </div>
+              </Show>
+              {/*
           Unified input shell — borders + focus ring live on the
           OUTER container so the textarea, the action icons, and the
           Send button read as a single surface (closer to ChatGPT /
@@ -1110,7 +1138,7 @@ export default function ChatPane() {
           rather than the top so it stays close to where the caret is
           when the user is finishing a message.
         */}
-        {/*
+              {/*
           Composer shell — single bordered surface laid out top→bottom:
             ┌──────────────────────────────────────────────────┐
             │ textarea (border-less, full width, grows up to   │
@@ -1125,133 +1153,113 @@ export default function ChatPane() {
           removes the dead space entirely. SlashMenu still positions
           itself above the textarea via its own absolute layer.
         */}
-        <div
-          class="ag-chat-input-shell flex flex-col rounded-lg border border-border bg-bg-0 shadow-sm relative"
-          classList={{ "opacity-60": !activeId() }}
-        >
-          <SlashMenu
-            query={slashQuery()}
-            suggestions={suggestions()}
-            activeIdx={slashIdx()}
-            onPick={applySlash}
-            onHoverIdx={setSlashIdx}
-          />
-          <textarea
-            rows="3"
-            class="resize-none max-h-60 min-h-[3.2em] w-full leading-relaxed bg-transparent px-3 pt-2.5 pb-1 text-fg placeholder:text-fg-subtle border-0 outline-none focus:outline-none focus-visible:outline-none focus:ring-0"
-            placeholder="Message the agent…  (⏎ to send, ⇧⏎ for newline, / for commands, - for bullets, paste/drop files to attach)"
-            value={input()}
-            onInput={(e) => {
-              setInput(e.currentTarget.value);
-              autoResizeTextarea(e.currentTarget);
-              updateSlashState(e.currentTarget);
-            }}
-            onPaste={onPaste}
-            onKeyDown={(e) => {
-              // While the slash menu is open, arrow keys + Enter +
-              // Tab + Escape drive the menu instead of the
-              // textarea defaults.
-              if (slashQuery() !== null) {
-                const list = suggestions();
-                if (e.key === "ArrowDown") {
-                  e.preventDefault();
-                  if (list.length > 0) {
-                    setSlashIdx((i) => (i + 1) % list.length);
-                  }
-                  return;
-                }
-                if (e.key === "ArrowUp") {
-                  e.preventDefault();
-                  if (list.length > 0) {
-                    setSlashIdx((i) => (i - 1 + list.length) % list.length);
-                  }
-                  return;
-                }
-                if (e.key === "Enter" || e.key === "Tab") {
-                  if (list.length > 0) {
-                    e.preventDefault();
-                    applySlash(list[slashIdx()] ?? list[0]!);
-                    return;
-                  }
-                }
-                if (e.key === "Escape") {
-                  e.preventDefault();
-                  setSlashQuery(null);
-                  return;
-                }
-              }
-              onChatInputKeyDown(e, () => {
-                const form = (e.currentTarget as HTMLTextAreaElement).form;
-                form?.requestSubmit();
-              });
-            }}
-            onSelect={(e) =>
-              updateSlashState(e.currentTarget as HTMLTextAreaElement)
-            }
-            onBlur={() => {
-              // Defer close so a mouse click on the menu still
-              // fires before the menu disappears.
-              setTimeout(() => setSlashQuery(null), 150);
-            }}
-            ref={(el) => {
-              queueMicrotask(() => autoResizeTextarea(el));
-            }}
-            disabled={!activeId()}
-            data-testid="chat-input"
-          />
+              <div
+                class="ag-chat-input-shell flex flex-col rounded-lg border border-border bg-bg-0 shadow-sm relative"
+                classList={{ "opacity-60": !activeId() }}
+              >
+                <SlashMenu
+                  query={slashQuery()}
+                  suggestions={suggestions()}
+                  activeIdx={slashIdx()}
+                  onPick={applySlash}
+                  onHoverIdx={setSlashIdx}
+                />
+                <ChatComposer
+                  value={input()}
+                  onChange={(md) => {
+                    setInput(md);
+                    updateSlashState(md);
+                    // Persist as a per-chat draft so switching scope /
+                    // reloading the page doesn't drop the unsent text.
+                    const id = activeId();
+                    if (id) setChatDraft(id, md);
+                  }}
+                  onSubmit={() => {
+                    // Find the surrounding form + submit it (preserves the
+                    // existing chat-input-form handler chain).
+                    const form = document.querySelector<HTMLFormElement>(
+                      '[data-testid="chat-input-form"]',
+                    );
+                    form?.requestSubmit();
+                  }}
+                  onPasteFiles={(files) => void uploadFileList(files)}
+                  onKey={(e) => {
+                    // Slash menu navigation steals priority while open.
+                    if (slashQuery() !== null) {
+                      const list = suggestions();
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        if (list.length > 0) {
+                          setSlashIdx((i) => (i + 1) % list.length);
+                        }
+                        return true;
+                      }
+                      if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        if (list.length > 0) {
+                          setSlashIdx((i) => (i - 1 + list.length) % list.length);
+                        }
+                        return true;
+                      }
+                      if ((e.key === "Enter" || e.key === "Tab") && list.length > 0) {
+                        e.preventDefault();
+                        applySlash(list[slashIdx()] ?? list[0]!);
+                        return true;
+                      }
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        setSlashQuery(null);
+                        return true;
+                      }
+                    }
+                    return false;
+                  }}
+                  disabled={!activeId()}
+                  placeholder="Message the agent…  ⏎ send · ⇧⏎ newline · / commands"
+                  ref={(h) => (composer = h)}
+                  testId="chat-input"
+                />
 
-          {/* Bottom action row. Icons left, Send right. No divider
+                {/* Bottom action row. Icons left, Send right. No divider
               between the textarea and this row — the reference design
               treats the whole shell as one surface, so a visible
               border line just split the composer in two. The slight
               `pt-0` keeps icons hugging the textarea without leaving
               an awkward gap. */}
-          <div class="flex items-center gap-1 px-2 pt-0 pb-1.5">
-            <button
-              type="button"
-              class="ag-btn ag-btn-ghost ag-btn-icon"
-              title="Attach files"
-              aria-label="Attach files"
-              data-testid="chat-attach"
-              onClick={(e) => {
-                const input = (e.currentTarget as HTMLButtonElement)
-                  .nextElementSibling as HTMLInputElement | null;
-                input?.click();
-              }}
-            >
-              <PaperclipIcon />
-            </button>
-            <input
-              type="file"
-              multiple
-              class="hidden"
-              data-testid="chat-attach-input"
-              onChange={(e) => {
-                const files = Array.from(e.currentTarget.files ?? []);
-                e.currentTarget.value = "";
-                if (files.length > 0) void uploadFileList(files);
-              }}
-            />
-            <PromptsPicker
-              onInsert={(body) => {
-                const ta = document.querySelector<HTMLTextAreaElement>(
-                  '[data-testid="chat-input"]',
-                );
-                if (!ta) return;
-                const start = ta.selectionStart;
-                const end = ta.selectionEnd;
-                const newValue =
-                  ta.value.slice(0, start) + body + ta.value.slice(end);
-                ta.value = newValue;
-                setInput(newValue);
-                const caret = start + body.length;
-                ta.focus();
-                ta.setSelectionRange(caret, caret);
-                autoResizeTextarea(ta);
-              }}
-            />
+                <div class="flex items-center gap-1 px-2 pt-0 pb-1.5">
+                  <button
+                    type="button"
+                    class="ag-btn ag-btn-ghost ag-btn-icon"
+                    title="Attach files"
+                    aria-label="Attach files"
+                    data-testid="chat-attach"
+                    onClick={(e) => {
+                      const input = (e.currentTarget as HTMLButtonElement)
+                        .nextElementSibling as HTMLInputElement | null;
+                      input?.click();
+                    }}
+                  >
+                    <PaperclipIcon />
+                  </button>
+                  <input
+                    type="file"
+                    multiple
+                    class="hidden"
+                    data-testid="chat-attach-input"
+                    onChange={(e) => {
+                      const files = Array.from(e.currentTarget.files ?? []);
+                      e.currentTarget.value = "";
+                      if (files.length > 0) void uploadFileList(files);
+                    }}
+                  />
+                  <PromptsPicker
+                    onInsert={(body) => {
+                      composer?.insertAtCursor(body);
+                      composer?.focus();
+                    }}
+                  />
 
-            {/*
+                  {/*
               Inline model picker. We render it next to the other
               composer-row controls so the user can switch models
               without opening the per-chat Settings dialog (which
@@ -1269,63 +1277,60 @@ export default function ChatPane() {
                   rendering a disabled trigger that would look like
                   a layout glitch.
             */}
-            <Show when={chat() && modelOptions().length > 0}>
-              <div
-                class="w-44 text-[11.5px]"
-                title="Model — switch on the fly"
-                data-testid="chat-model-picker"
-              >
-                <Select
-                  value={chat()!.model}
-                  options={modelOptions()}
-                  onChange={(v) => void changeModel(v)}
-                  ariaLabel="Model"
-                  placement="top"
-                  testId="chat-model-select"
-                />
-              </div>
-            </Show>
+                  <Show when={chat() && modelOptions().length > 0}>
+                    <div
+                      class="w-44 text-[11.5px]"
+                      title="Model — switch on the fly"
+                      data-testid="chat-model-picker"
+                    >
+                      <Select
+                        value={chat()!.model}
+                        options={modelOptions()}
+                        onChange={(v) => void changeModel(v)}
+                        ariaLabel="Model"
+                        placement="top"
+                        testId="chat-model-select"
+                      />
+                    </div>
+                  </Show>
 
-            <Show
-              when={isStreaming()}
-              fallback={
-                <button
-                  type="submit"
-                  class="ag-btn ag-btn-primary ml-auto !py-1 !px-2.5 text-[12px]"
-                  disabled={
-                    !activeId() ||
-                    (!input().trim() && uploads().length === 0)
-                  }
-                  // Always "Send" while idle. The send handler routes
-                  // idle messages to the dispatch path and busy ones
-                  // to the queue path automatically; queue mode
-                  // defaults to auto, so the BE drains messages
-                  // back-to-back. We swap to a Stop button (below)
-                  // while the agent is mid-turn.
-                  title="Send to the agent"
-                  data-testid="chat-send"
-                >
-                  Send
-                  <span class="ag-kbd !bg-transparent !border-transparent text-[var(--ag-accent-fg)] opacity-80 ml-1">
-                    ⏎
-                  </span>
-                </button>
-              }
-            >
-              <button
-                type="button"
-                class="ag-btn ag-btn-danger ml-auto !py-1 !px-2.5 text-[12px]"
-                onClick={() => void stopChat()}
-                title="Stop the agent. The chat keeps its history; you can send the next message right after."
-                data-testid="chat-stop"
-              >
-                ✕ Stop
-              </button>
-            </Show>
-          </div>
-        </div>
-      </form>
-      </Show>
+                  <Show
+                    when={isStreaming()}
+                    fallback={
+                      <button
+                        type="submit"
+                        class="ag-btn ag-btn-primary ml-auto !py-1 !px-2.5 text-[12px]"
+                        disabled={!activeId() || (!input().trim() && uploads().length === 0)}
+                        // Always "Send" while idle. The send handler routes
+                        // idle messages to the dispatch path and busy ones
+                        // to the queue path automatically; queue mode
+                        // defaults to auto, so the BE drains messages
+                        // back-to-back. We swap to a Stop button (below)
+                        // while the agent is mid-turn.
+                        title="Send to the agent"
+                        data-testid="chat-send"
+                      >
+                        Send
+                        <span class="ag-kbd !bg-transparent !border-transparent text-[var(--ag-accent-fg)] opacity-80 ml-1">
+                          ⏎
+                        </span>
+                      </button>
+                    }
+                  >
+                    <button
+                      type="button"
+                      class="ag-btn ag-btn-danger ml-auto !py-1 !px-2.5 text-[12px]"
+                      onClick={() => void stopChat()}
+                      title="Stop the agent. The chat keeps its history; you can send the next message right after."
+                      data-testid="chat-stop"
+                    >
+                      ✕ Stop
+                    </button>
+                  </Show>
+                </div>
+              </div>
+            </form>
+          </Show>
         </div>
 
         {/* Queue dock — toggled by the chat-header badge. Renders as
@@ -1352,28 +1357,12 @@ export default function ChatPane() {
             // changed indirectly.
             setChatStore("view", (v) => (v ? { ...v, ...updated } : v));
             setScopeChats(
-              tabs().map((t) =>
-                t.id === updated.id ? { ...t, title: updated.title } : t,
-              ),
+              tabs().map((t) => (t.id === updated.id ? { ...t, title: updated.title } : t)),
             );
           }}
           onInsertCommand={(cmd) => {
-            // Insert `/cmd` at cursor in the chat textarea.
-            const ta = document.querySelector<HTMLTextAreaElement>(
-              '[data-testid="chat-input"]',
-            );
-            if (!ta) return;
-            const insertion = `/${cmd}`;
-            const start = ta.selectionStart;
-            const end = ta.selectionEnd;
-            const newValue =
-              ta.value.slice(0, start) + insertion + ta.value.slice(end);
-            ta.value = newValue;
-            setInput(newValue);
-            const caret = start + insertion.length;
-            ta.focus();
-            ta.setSelectionRange(caret, caret);
-            autoResizeTextarea(ta);
+            composer?.insertAtCursor(`/${cmd}`);
+            composer?.focus();
             setChatSettingsOpen(false);
           }}
         />
@@ -1503,29 +1492,26 @@ function VirtualizedTimeline(props: {
         </div>
       </Show>
       {/* Flow-layout windowed render.
-         *
-         * We previously used the virtualizer's transform-positioned
-         * absolute layout, but variable-height bubbles (assistant
-         * replies grow as tokens stream in) consistently failed to
-         * re-measure correctly in our usage — items overlapped at
-         * the estimated stride.
-         *
-         * For the chat use case (modest counts; growing bubbles) the
-         * windowed-but-naturally-stacked approach is much more
-         * robust: we still mount only the visible-plus-overscan
-         * window via virtualizer.getVirtualItems(), but each row is
-         * `position: static`, so the browser handles the layout
-         * arithmetic that the virtualizer's estimateSize struggles
-         * with.
-         *
-         * Top/bottom padding spacers fake the height of the
-         * un-rendered prefix / suffix so the scrollbar stays
-         * proportional. */}
+       *
+       * We previously used the virtualizer's transform-positioned
+       * absolute layout, but variable-height bubbles (assistant
+       * replies grow as tokens stream in) consistently failed to
+       * re-measure correctly in our usage — items overlapped at
+       * the estimated stride.
+       *
+       * For the chat use case (modest counts; growing bubbles) the
+       * windowed-but-naturally-stacked approach is much more
+       * robust: we still mount only the visible-plus-overscan
+       * window via virtualizer.getVirtualItems(), but each row is
+       * `position: static`, so the browser handles the layout
+       * arithmetic that the virtualizer's estimateSize struggles
+       * with.
+       *
+       * Top/bottom padding spacers fake the height of the
+       * un-rendered prefix / suffix so the scrollbar stays
+       * proportional. */}
       <div style={{ width: "100%" }}>
-        <div
-          style={{ height: `${topSpacer()}px` }}
-          aria-hidden="true"
-        />
+        <div style={{ height: `${topSpacer()}px` }} aria-hidden="true" />
         <For each={virtualizer.getVirtualItems()}>
           {(vi) => {
             const prompt = () => props.prompts[vi.index];
@@ -1547,10 +1533,7 @@ function VirtualizedTimeline(props: {
             );
           }}
         </For>
-        <div
-          style={{ height: `${bottomSpacer()}px` }}
-          aria-hidden="true"
-        />
+        <div style={{ height: `${bottomSpacer()}px` }} aria-hidden="true" />
       </div>
     </div>
   );
@@ -1614,10 +1597,7 @@ function PromptRow(props: {
   const [thinkingOpen, setThinkingOpen] = createSignal(false);
 
   return (
-    <article
-      class="space-y-3 group py-2.5"
-      data-testid={`prompt-${props.prompt.id}`}
-    >
+    <article class="space-y-3 group py-4" data-testid={`prompt-${props.prompt.id}`}>
       {/*
         User bubble. Wrapped in a `group/bubble` so the copy button
         only reveals on hover of THIS bubble, not the whole row
@@ -1628,7 +1608,7 @@ function PromptRow(props: {
       */}
       <div class="flex justify-end">
         <div class="relative group/bubble max-w-[80%]">
-          <div class="rounded-2xl rounded-br-md bg-accent text-[var(--ag-accent-fg)] px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap shadow-sm">
+          <div class="rounded-2xl rounded-br-md bg-accent text-[var(--ag-accent-fg)] px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] shadow-sm">
             {props.prompt.content}
           </div>
           <CopyButton
@@ -1642,16 +1622,13 @@ function PromptRow(props: {
       <Show when={thinkingText()}>
         <div class="flex justify-start">
           <details
-            class="max-w-[80%] w-full rounded-xl bg-bg-2/40 border border-dashed border-border text-[12.5px] px-3 py-2 text-fg-muted"
+            class="w-full rounded-xl bg-bg-2/40 border border-dashed border-border text-[12.5px] px-3 py-2 text-fg-muted"
             data-testid={`thinking-${props.prompt.id}`}
             open={thinkingOpen()}
             onToggle={(e) => setThinkingOpen(e.currentTarget.open)}
           >
             <summary class="cursor-pointer select-none text-[11.5px] uppercase tracking-wide text-fg-subtle">
-              ✦ Thinking{" "}
-              <span class="text-fg-subtle">
-                ({fmtBytes(thinkingText().length)})
-              </span>
+              ✦ Thinking <span class="text-fg-subtle">({fmtBytes(thinkingText().length)})</span>
             </summary>
             <div class="mt-2 ag-prose">
               <Markdown source={thinkingText()} />
@@ -1669,26 +1646,86 @@ function PromptRow(props: {
             instead of leaving the user staring at their own
             bubble wondering if anything happened.
       */}
-      <Show when={assistantText() || tools().length > 0 || isPending()}>
+      {/*
+        Tool-activity rail. Rendered ABOVE the assistant bubble as
+        full-width rows (icon · label · monospace command preview)
+        so long commands get the room they need. Calls without a
+        result yet (in-flight) render at full opacity; once paired
+        with their `tool_result` they dim to indicate completion.
+        Errors + truncation pills follow underneath the rail since
+        they aren't tied to a specific call.
+      */}
+      <Show when={tools().length > 0}>
+        {(() => {
+          const paired = createMemo(() => pairTools(tools()));
+          return (
+            <div class="flex flex-col gap-1.5 px-1" data-testid={`tool-rail-${props.prompt.id}`}>
+              <For each={paired().entries}>
+                {(entry) => (
+                  <Show when={entry.call ?? entry.result} fallback={null}>
+                    <ToolRow
+                      ev={
+                        (entry.call ?? entry.result) as Extract<
+                          AgentEvent,
+                          { type: "tool_call" | "tool_result" }
+                        >
+                      }
+                      dim={Boolean(entry.call && entry.result)}
+                    />
+                  </Show>
+                )}
+              </For>
+              <For each={paired().errors}>
+                {(ev) => (
+                  <div
+                    class="text-[12px] text-danger flex items-center gap-2"
+                    data-testid="tool-error"
+                  >
+                    <span aria-hidden="true">⚠</span>
+                    <span class="font-mono text-[11.5px] truncate">{ev.message}</span>
+                  </div>
+                )}
+              </For>
+              <For each={paired().truncated}>
+                {(ev) => (
+                  <div class="text-[11.5px] text-fg-subtle italic" data-testid="tool-truncated">
+                    ⋯ {ev.dropped} earlier event
+                    {ev.dropped === 1 ? "" : "s"} dropped
+                  </div>
+                )}
+              </For>
+            </div>
+          );
+        })()}
+      </Show>
+      <Show when={assistantText() || isPending()}>
         <div class="flex justify-start">
-          <div class="relative group/bubble max-w-[80%]">
-            <div class="rounded-2xl rounded-bl-md bg-bg-1 border border-border text-[13.5px] leading-relaxed px-4 py-2.5">
+          <div class="relative group/bubble w-full">
+            <div class="rounded-2xl rounded-bl-md bg-bg-1 border border-border text-[13.5px] leading-relaxed px-5 py-4 [overflow-wrap:anywhere]">
               <Show
                 when={assistantText()}
                 fallback={
                   <span class="flex items-center gap-2 text-fg-subtle">
                     <span class="inline-flex gap-0.5">
-                      <span class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse" style="animation-delay:0ms" />
-                      <span class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse" style="animation-delay:150ms" />
-                      <span class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse" style="animation-delay:300ms" />
+                      <span
+                        class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse"
+                        style="animation-delay:0ms"
+                      />
+                      <span
+                        class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse"
+                        style="animation-delay:150ms"
+                      />
+                      <span
+                        class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse"
+                        style="animation-delay:300ms"
+                      />
                     </span>
                     <em>working…</em>
                   </span>
                 }
               >
-                <Markdown source={assistantText()} />
+                <Markdown source={assistantText()} class="ag-prose-chat" />
               </Show>
-              <For each={tools()}>{(ev) => <ToolBadge ev={ev} />}</For>
             </div>
             {/* Only offer Copy when there's actual text to copy — a
                 bubble that still shows just the "working…" pulse
@@ -1766,10 +1803,7 @@ function autoResizeTextarea(el: HTMLTextAreaElement | null | undefined): void {
  *   - **Tab** inside a fenced code block inserts two spaces
  *     (Shift+Tab outdents by two if present).
  */
-function onChatInputKeyDown(
-  e: KeyboardEvent,
-  submit: () => void,
-): void {
+function onChatInputKeyDown(e: KeyboardEvent, submit: () => void): void {
   const ta = e.currentTarget as HTMLTextAreaElement;
 
   // ---- Enter handling: list / blockquote continuation + submit ----
@@ -1968,13 +2002,7 @@ function SlashMenu(props: {
     detail: string;
   }[];
   activeIdx: number;
-  onPick: (s: {
-    key: string;
-    label: string;
-    hint: string;
-    insert: string;
-    detail: string;
-  }) => void;
+  onPick: (s: { key: string; label: string; hint: string; insert: string; detail: string }) => void;
   onHoverIdx: (i: number) => void;
 }) {
   return (
@@ -2002,9 +2030,7 @@ function SlashMenu(props: {
               data-testid={`chat-slash-${s.key}`}
             >
               <span class="text-[12.5px] font-mono text-fg">{s.label}</span>
-              <span class="text-[10.5px] uppercase tracking-wide text-fg-subtle">
-                {s.hint}
-              </span>
+              <span class="text-[10.5px] uppercase tracking-wide text-fg-subtle">{s.hint}</span>
               <span class="text-[11.5px] text-fg-subtle truncate flex-1 text-right">
                 {s.detail}
               </span>
@@ -2074,9 +2100,7 @@ function PromptsPicker(props: { onInsert: (body: string) => void }) {
                       }}
                       data-testid={`chat-prompt-pick-${p.id}`}
                     >
-                      <div class="text-[12.5px] font-medium text-fg truncate">
-                        {p.name}
-                      </div>
+                      <div class="text-[12.5px] font-medium text-fg truncate">{p.name}</div>
                       <div class="text-[11px] text-fg-subtle truncate">
                         {p.body.split("\n")[0] || "(empty)"}
                       </div>
@@ -2138,12 +2162,7 @@ function PaperclipIcon() {
  *  Visual feedback: the icon swaps to a check for ~1.2 s after a
  *  successful copy so the user knows something happened — without
  *  this it was easy to double-click thinking the first one missed. */
-function CopyButton(props: {
-  text: string;
-  class?: string;
-  label: string;
-  testId?: string;
-}) {
+function CopyButton(props: { text: string; class?: string; label: string; testId?: string }) {
   const [copied, setCopied] = createSignal(false);
   let timer: number | null = null;
 
@@ -2237,49 +2256,241 @@ function fmtBytes(b: number): string {
   return `${v.toFixed(fixed)} ${units[i]}`;
 }
 
-function ToolBadge(props: { ev: AgentEvent }) {
-  switch (props.ev.type) {
-    case "tool_call":
+/** Tool registry: maps the CLI's tool name (Anthropic / opencode
+ *  conventions) to a display label + an inline SVG glyph rendered
+ *  full-width in the tool-activity rail. Falls back to a generic
+ *  bullet for unknown names so new tools degrade gracefully. */
+const TOOL_META: Record<string, { label: string; icon: () => JSX.Element }> = {
+  Bash: {
+    label: "Bash",
+    icon: () => <ToolIcon glyph="terminal" />,
+  },
+  Read: { label: "Read", icon: () => <ToolIcon glyph="file" /> },
+  Write: { label: "Write", icon: () => <ToolIcon glyph="file-pen" /> },
+  Edit: { label: "Edit", icon: () => <ToolIcon glyph="file-pen" /> },
+  Glob: { label: "Glob", icon: () => <ToolIcon glyph="file" /> },
+  Grep: { label: "Grep", icon: () => <ToolIcon glyph="search" /> },
+  Search: { label: "Search", icon: () => <ToolIcon glyph="search" /> },
+  WebFetch: { label: "Fetch", icon: () => <ToolIcon glyph="globe" /> },
+  WebSearch: { label: "Web", icon: () => <ToolIcon glyph="globe" /> },
+  Task: { label: "Task", icon: () => <ToolIcon glyph="sparkles" /> },
+  TodoWrite: { label: "Todo", icon: () => <ToolIcon glyph="checks" /> },
+};
+
+function metaFor(name: string): { label: string; icon: () => JSX.Element } {
+  return (
+    TOOL_META[name] ?? {
+      label: name || "tool",
+      icon: () => <ToolIcon glyph="dot" />,
+    }
+  );
+}
+
+/** Inline Lucide-style glyphs, em-sized so they track the chat font. */
+function ToolIcon(props: { glyph: string }) {
+  const common = {
+    xmlns: "http://www.w3.org/2000/svg",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "1.75",
+    "stroke-linecap": "round" as const,
+    "stroke-linejoin": "round" as const,
+    width: "1em",
+    height: "1em",
+    "aria-hidden": true as const,
+  };
+  switch (props.glyph) {
+    case "terminal":
       return (
-        <div
-          class="mt-2 inline-block ag-chip font-mono text-[11.5px]"
-          title={safeStringify(props.ev.args)}
-          data-testid="tool-call"
-        >
-          → {props.ev.name}
-        </div>
+        <svg {...common}>
+          <path d="m4 9 4 3-4 3" />
+          <path d="M12 15h8" />
+          <rect x="2" y="4" width="20" height="16" rx="2" />
+        </svg>
       );
-    case "tool_result":
+    case "file":
       return (
-        <div
-          class="mt-1 inline-block ag-chip font-mono text-[11.5px] text-fg-subtle"
-          title={safeStringify(props.ev.result)}
-          data-testid="tool-result"
-        >
-          ✓ {props.ev.name || "result"}
-        </div>
+        <svg {...common}>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+        </svg>
       );
-    case "error":
+    case "file-pen":
       return (
-        <div
-          class="mt-2 inline-block ag-chip font-mono text-[11.5px] text-danger"
-          data-testid="tool-error"
-        >
-          ⚠ {props.ev.message}
-        </div>
+        <svg {...common}>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h7" />
+          <path d="M14 2v6h6" />
+          <path d="m17 17 4 4" />
+          <path d="m21 13-4 4-2 .5.5-2 4-4a1.4 1.4 0 0 1 1.5 1.5z" />
+        </svg>
       );
-    case "truncated":
+    case "search":
       return (
-        <div
-          class="mt-2 inline-block ag-chip font-mono text-[11.5px] text-fg-subtle"
-          data-testid="tool-truncated"
-        >
-          ⋯ {props.ev.dropped} earlier event{props.ev.dropped === 1 ? "" : "s"} dropped
-        </div>
+        <svg {...common}>
+          <circle cx="11" cy="11" r="7" />
+          <path d="m21 21-4.3-4.3" />
+        </svg>
+      );
+    case "globe":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="10" />
+          <path d="M2 12h20" />
+          <path d="M12 2a14 14 0 0 1 0 20" />
+          <path d="M12 2a14 14 0 0 0 0 20" />
+        </svg>
+      );
+    case "sparkles":
+      return (
+        <svg {...common}>
+          <path d="M12 3 13.9 8.1 19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
+          <path d="M19 17v4" />
+          <path d="M17 19h4" />
+        </svg>
+      );
+    case "checks":
+      return (
+        <svg {...common}>
+          <path d="M3 12 7 16 17 6" />
+          <path d="m11 16 4-4" />
+        </svg>
       );
     default:
-      return null;
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      );
   }
+}
+
+/** Pull a single-line command / preview string out of a tool_call's
+ *  free-form `args` payload. The shape is provider-specific:
+ *    - Bash → { command: "git log …" }
+ *    - Read → { file_path / path }
+ *    - Glob/Grep → { pattern, path? }
+ *    - WebFetch → { url }
+ *  Anything else gets a JSON-stringified one-liner. */
+function previewForArgs(name: string, args: unknown): string {
+  if (!args || typeof args !== "object") return "";
+  const a = args as Record<string, unknown>;
+  const pickStr = (...keys: string[]): string | undefined => {
+    for (const k of keys) {
+      const v = a[k];
+      if (typeof v === "string" && v.trim()) return v;
+    }
+    return undefined;
+  };
+  switch (name) {
+    case "Bash":
+      return pickStr("command", "cmd") ?? "";
+    case "Read":
+    case "Write":
+    case "Edit":
+      return pickStr("file_path", "path", "filename") ?? "";
+    case "Glob":
+    case "Grep":
+    case "Search": {
+      const pat = pickStr("pattern", "query", "q");
+      const path = pickStr("path");
+      if (pat && path) return `${pat}  ${path}`;
+      return pat ?? path ?? "";
+    }
+    case "WebFetch":
+    case "WebSearch":
+      return pickStr("url", "query") ?? "";
+    case "TodoWrite":
+      return Array.isArray(a.todos) ? `${a.todos.length} item(s)` : "";
+    case "Task":
+      return pickStr("description", "prompt") ?? "";
+    default: {
+      // Generic: prefer "description" if the CLI supplied one,
+      // else the first string-valued field, else stringified args.
+      const desc = pickStr("description");
+      if (desc) return desc;
+      for (const v of Object.values(a)) {
+        if (typeof v === "string" && v.trim()) return v;
+      }
+      return safeStringify(args);
+    }
+  }
+}
+
+/** Single row in the tool-activity rail: icon · label · mono
+ *  command preview. Full bubble width so long commands have room.
+ *  Used for both calls (full opacity) and results (dimmed). */
+function ToolRow(props: {
+  ev: Extract<AgentEvent, { type: "tool_call" | "tool_result" }>;
+  dim?: boolean;
+}) {
+  const meta = metaFor(props.ev.name || "");
+  const args =
+    props.ev.type === "tool_call" ? props.ev.args : (props.ev as { result: unknown }).result;
+  const preview = previewForArgs(props.ev.name, args);
+  const title =
+    props.ev.type === "tool_call"
+      ? safeStringify(props.ev.args)
+      : safeStringify((props.ev as { result: unknown }).result);
+  return (
+    <div
+      class="flex items-center gap-2 min-w-0 text-[12.5px] leading-snug"
+      classList={{ "opacity-60": Boolean(props.dim) }}
+      title={title}
+      data-testid={props.ev.type === "tool_call" ? "tool-call" : "tool-result"}
+    >
+      <span class="text-fg-subtle shrink-0">{meta.icon()}</span>
+      <span class="font-medium text-fg shrink-0">{meta.label}</span>
+      <Show when={preview}>
+        <span class="font-mono text-[11.5px] text-fg-subtle bg-bg-2/60 rounded px-1.5 py-0.5 truncate min-w-0">
+          {preview}
+        </span>
+      </Show>
+    </div>
+  );
+}
+
+/** Pair `tool_call` events with their `tool_result` (by `id`) so the
+ *  rail renders one row per logical tool invocation. Calls without a
+ *  result yet (in-flight) stay un-paired and show un-dimmed. Result
+ *  events without a preceding call are surfaced on their own as a
+ *  defensive fallback. */
+interface ToolEntry {
+  call?: Extract<AgentEvent, { type: "tool_call" }>;
+  result?: Extract<AgentEvent, { type: "tool_result" }>;
+  /** Stable key for solid's For: id when known, else index. */
+  key: string;
+}
+function pairTools(evs: AgentEvent[]): {
+  entries: ToolEntry[];
+  errors: Extract<AgentEvent, { type: "error" }>[];
+  truncated: Extract<AgentEvent, { type: "truncated" }>[];
+} {
+  const entries: ToolEntry[] = [];
+  const byId = new Map<string, number>();
+  const errors: Extract<AgentEvent, { type: "error" }>[] = [];
+  const truncated: Extract<AgentEvent, { type: "truncated" }>[] = [];
+  evs.forEach((ev, i) => {
+    if (ev.type === "tool_call") {
+      const id = ev.id ?? `idx-${i}`;
+      const entry: ToolEntry = { call: ev, key: id };
+      byId.set(id, entries.length);
+      entries.push(entry);
+    } else if (ev.type === "tool_result") {
+      const id = ev.id ?? "";
+      const idx = id ? byId.get(id) : undefined;
+      if (idx !== undefined) {
+        entries[idx]!.result = ev;
+      } else {
+        entries.push({ result: ev, key: `result-${i}` });
+      }
+    } else if (ev.type === "error") {
+      errors.push(ev);
+    } else if (ev.type === "truncated") {
+      truncated.push(ev);
+    }
+  });
+  return { entries, errors, truncated };
 }
 
 function safeStringify(v: unknown): string {

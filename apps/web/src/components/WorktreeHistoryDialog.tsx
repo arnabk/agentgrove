@@ -100,9 +100,8 @@ export default function WorktreeHistoryDialog(props: Props) {
           </button>
         </div>
         <p class="text-[12.5px] text-fg-muted mb-4">
-          Soft-deleted worktrees stay here so you can recover a branch
-          name or restore the record. Restoring does not re-create the
-          worktree on disk.
+          Soft-deleted worktrees stay here so you can recover a branch name or restore the record.
+          Restoring does not re-create the worktree on disk.
         </p>
 
         <input
@@ -125,16 +124,11 @@ export default function WorktreeHistoryDialog(props: Props) {
             when={!loading() && items().length === 0}
             fallback={
               <Show when={loading()}>
-                <p class="text-center text-[12.5px] text-fg-subtle py-6">
-                  Loading…
-                </p>
+                <p class="text-center text-[12.5px] text-fg-subtle py-6">Loading…</p>
               </Show>
             }
           >
-            <p
-              class="text-center text-[12.5px] text-fg-subtle py-6"
-              data-testid="history-empty"
-            >
+            <p class="text-center text-[12.5px] text-fg-subtle py-6" data-testid="history-empty">
               No removed worktrees match.
             </p>
           </Show>
@@ -142,15 +136,10 @@ export default function WorktreeHistoryDialog(props: Props) {
           <ul class="divide-y divide-border">
             <For each={items()}>
               {(w) => (
-                <li
-                  class="flex items-center gap-3 py-2.5"
-                  data-testid={`history-row-${w.id}`}
-                >
+                <li class="flex items-center gap-3 py-2.5" data-testid={`history-row-${w.id}`}>
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
-                      <span class="font-mono text-[12.5px] truncate">
-                        {w.branch}
-                      </span>
+                      <span class="font-mono text-[12.5px] truncate">{w.branch}</span>
                       <span class="ag-chip text-[10px]">{w.base_ref}</span>
                     </div>
                     <div class="text-[11px] text-fg-subtle truncate" title={w.path}>

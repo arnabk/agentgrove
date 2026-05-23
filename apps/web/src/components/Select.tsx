@@ -135,7 +135,9 @@ export default function Select(props: SelectProps) {
         onKeyDown={onTriggerKey}
       >
         <span class="truncate">
-          {selected()?.label ?? <span class="text-fg-subtle">{props.placeholder ?? "Select…"}</span>}
+          {selected()?.label ?? (
+            <span class="text-fg-subtle">{props.placeholder ?? "Select…"}</span>
+          )}
         </span>
         <Caret />
       </button>

@@ -94,16 +94,10 @@ export default function TerminalPane() {
     }
   }
 
-  async function closeTab(id: string) {
-    const ok = await confirm({
-      title: "Close terminal",
-      body: "Kill this terminal session? The shell process will end.",
-      confirmLabel: "Close",
-      danger: true,
-      testId: "confirm-close-terminal",
-    });
-    if (!ok) return;
-    // Tear down cached session.
+  /** Tear down BE session + FE cached xterm + tab row. Shared by
+   *  the user-initiated close (with confirm) and the auto-close
+   *  triggered when the shell exits cleanly via Ctrl+D / `exit`. */
+  async function destroyTab(id: string) {
     const c = cache.get(id);
     if (c) {
       c.poll.stop = true;
@@ -123,6 +117,18 @@ export default function TerminalPane() {
     }
     closeTerminalTab(id);
     setExitedMap(id, undefined as unknown as boolean);
+  }
+
+  async function closeTab(id: string) {
+    const ok = await confirm({
+      title: "Close terminal",
+      body: "Kill this terminal session? The shell process will end.",
+      confirmLabel: "Close",
+      danger: true,
+      testId: "confirm-close-terminal",
+    });
+    if (!ok) return;
+    await destroyTab(id);
   }
 
   /** Lazily create the cached xterm instance for a session id. */
@@ -155,30 +161,35 @@ export default function TerminalPane() {
     // Poll BE history + status loop. History pulls new bytes from the
     // PTY's ring buffer. Status reports whether the shell has exited so
     // the tab can render an "exited" chip without forcing a close.
+    // Delta-poll loop. Per tick (~200ms) we ask the BE only for
+    // bytes appended since our last known total; the response also
+    // carries the exit flag, so there's no separate status call.
+    // The old approach pulled the ENTIRE ring buffer (up to
+    // 200 KB) every 200ms which made the terminal feel laggy on
+    // long-running shells — fast-typing latency was visibly worse
+    // because every keystroke's render was racing the next poll.
     void (async () => {
-      let tick = 0;
       while (!poll.stop) {
         try {
-          const h = await api.terminalHistory(id);
-          if (h.length > session.lastBytes) {
-            term.write(h.slice(session.lastBytes));
-            session.lastBytes = h.length;
+          const delta = await api.terminalHistoryDelta(id, session.lastBytes);
+          if (delta.bytes.length > 0) {
+            term.write(delta.bytes);
+          }
+          // Always adopt the BE total — covers the case where the
+          // ring dropped bytes off the front (our `since` fell off
+          // the buffer and the BE returned the whole remaining
+          // ring; `total` may be lower than our previous lastBytes).
+          if (delta.total !== session.lastBytes) {
+            session.lastBytes = delta.total;
             reportTerminalBytes(cache);
+          }
+          if (delta.exited) {
+            await destroyTab(id);
+            break;
           }
         } catch {
           break;
         }
-        // Poll status every ~1s (every 5 history ticks).
-        if (tick % 5 === 0) {
-          try {
-            const s = await api.terminalStatus(id);
-            setExitedMap(id, s.exited);
-          } catch {
-            // session gone server-side; stop polling
-            break;
-          }
-        }
-        tick += 1;
         await new Promise((r) => setTimeout(r, 200));
       }
     })();
@@ -190,6 +201,47 @@ export default function TerminalPane() {
     // then reveal the active one.
     syncStage();
   });
+
+  // Re-fit + tell BE PTY when the window resizes. Without this the
+  // BE keeps the original cols/rows and the shell wraps wrong on any
+  // pane/window resize (arrow-up + edit-in-place visibly scrambles
+  // the buffer). ResizeObserver on the stage would be ideal but
+  // window.resize fires for the common cases (browser resize, FE
+  // pane width change via the LeftRail handle).
+  const onWindowResize = () => {
+    const a = activeId();
+    if (!a) return;
+    const sess = cache.get(a);
+    if (sess) fitAndResize(a, sess);
+  };
+  onMount(() => {
+    window.addEventListener("resize", onWindowResize);
+  });
+  onCleanup(() => {
+    window.removeEventListener("resize", onWindowResize);
+  });
+
+  /** Run xterm's FitAddon for `id` AND tell the BE PTY about the
+   *  new cols/rows. Skipping the BE half is what causes the
+   *  display-garble bug: xterm draws at the new width but the
+   *  shell still thinks it has 80 cols, so its line-wrap math is
+   *  off by however far the visible width drifted from 80. After
+   *  this call both sides agree on the dimensions and arrow-up /
+   *  edit-in-place stops scrambling the buffer. */
+  function fitAndResize(id: string, sess: CachedSession) {
+    try {
+      sess.fit.fit();
+    } catch {
+      /* not sized yet */
+      return;
+    }
+    const cols = sess.term.cols;
+    const rows = sess.term.rows;
+    void api.resizeTerminal(id, cols, rows).catch(() => {
+      // Network errors are benign — the BE still has the old size
+      // and the user can re-trigger resize by changing pane size.
+    });
+  }
 
   /** Reconcile the stage's children with the active project's terminals,
    *  showing only the active session's host. Called whenever the
@@ -219,11 +271,7 @@ export default function TerminalPane() {
       if (!sess) continue;
       sess.host.style.display = t.id === a ? "block" : "none";
       if (t.id === a) {
-        try {
-          sess.fit.fit();
-        } catch {
-          /* not sized yet */
-        }
+        fitAndResize(t.id, sess);
         sess.term.focus();
       }
     }
@@ -302,11 +350,7 @@ export default function TerminalPane() {
           </span>
         </Show>
       </header>
-      <div
-        class="relative flex-1 bg-bg-1"
-        ref={(el) => (stage = el)}
-        data-testid="term-stage"
-      >
+      <div class="relative flex-1 bg-bg-1" ref={(el) => (stage = el)} data-testid="term-stage">
         <Show when={tabs().length === 0}>
           <div class="absolute inset-0 flex items-center justify-center text-fg-subtle text-[13px]">
             Click <span class="mx-1 ag-kbd">+ New</span> to open a terminal in this project.

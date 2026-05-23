@@ -7,13 +7,20 @@ import { changesScope, setChangesScope } from "../stores/app";
 import { confirm } from "./dialog";
 
 /**
- * Right-side slide-in panel showing the git status for the active
- * scope (project root or worktree path). Two groups — staged and
- * unstaged — list entries; selecting a file loads a side-by-side
- * MergeView (HEAD vs working tree) below.
+ * Centred large dialog showing the git status for the active scope
+ * (project root or worktree path). Two groups — staged and
+ * unstaged — list entries on the LEFT rail; selecting a file opens
+ * a side-by-side MergeView (HEAD vs working tree) that fills the
+ * rest of the dialog.
+ *
+ * Sizing: 96vw × 92vh. The original right-slide panel made the diff
+ * area too narrow on wide screens; a centred dialog gives the diff
+ * the room it actually needs to be readable without horizontal
+ * scrolling on typical 100-col code.
  *
  * Mounted at the App-shell level and shown whenever `changesScope` is
- * non-null. Closing it sets `changesScope(null)`.
+ * non-null. Closing it sets `changesScope(null)`. Escape + backdrop
+ * click also close.
  */
 /** Persisted toggle for soft-wrapping long lines in the diff view. */
 const WRAP_LS_KEY = "ag-changes-wrap";
@@ -112,7 +119,21 @@ export default function ChangesPanel() {
     if (sel) void openDiff(sel);
   });
 
-  onCleanup(() => tearDownView());
+  // Escape closes the dialog. Registered globally because the
+  // focus may live inside the MergeView's CodeMirror instance,
+  // which would otherwise consume the keystroke for its own key
+  // handling.
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setChangesScope(null);
+    }
+  };
+  onMount(() => document.addEventListener("keydown", onKey));
+  onCleanup(() => {
+    document.removeEventListener("keydown", onKey);
+    tearDownView();
+  });
 
   /** Discard the working-tree changes for a single file (VSCode-style
    *  per-row Discard action). Restores tracked files from HEAD,
@@ -129,14 +150,12 @@ export default function ChangesPanel() {
       title: isUntracked ? "Delete file" : "Discard changes",
       body: isUntracked ? (
         <div>
-          Delete the untracked file{" "}
-          <code class="font-mono">{entry.path}</code> from disk? This
+          Delete the untracked file <code class="font-mono">{entry.path}</code> from disk? This
           cannot be undone.
         </div>
       ) : (
         <div>
-          Discard all changes in{" "}
-          <code class="font-mono">{entry.path}</code>? The file will be
+          Discard all changes in <code class="font-mono">{entry.path}</code>? The file will be
           restored to its HEAD revision.
         </div>
       ),
@@ -175,17 +194,14 @@ export default function ChangesPanel() {
 
   return (
     <div
-      class="fixed inset-0 z-40 flex justify-end"
+      class="fixed inset-0 z-40 flex items-center justify-center p-4"
       data-testid="changes-panel"
       role="dialog"
       aria-modal="true"
       aria-label="Changes"
     >
-      <div
-        class="absolute inset-0 bg-black/40"
-        onClick={() => setChangesScope(null)}
-      />
-      <aside class="relative w-[min(960px,90vw)] h-full bg-bg-1 border-l border-border shadow-2xl flex flex-col">
+      <div class="absolute inset-0 bg-black/60" onClick={() => setChangesScope(null)} />
+      <aside class="relative w-[96vw] h-[92vh] max-w-[1800px] bg-bg-1 border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden">
         <header class="h-11 px-4 flex items-center gap-2 border-b border-border bg-bg-1">
           <h3 class="text-[13.5px] font-semibold tracking-tight">Changes</h3>
           <Show when={changesScope()}>
@@ -235,15 +251,25 @@ export default function ChangesPanel() {
           </p>
         </Show>
 
-        <div class="flex-1 grid grid-cols-[280px,1fr] min-h-0">
+        <div class="flex-1 grid grid-cols-[320px,1fr] min-h-0">
           {/* File list */}
           <div class="border-r border-border overflow-y-auto">
-            <Section title="Staged" items={staged()} statusLabel={statusLabel}
-              selected={selected()} onSelect={(p) => void openDiff(p)}
-              onDiscard={(e, ev) => void discardFile(e, ev)} />
-            <Section title="Unstaged" items={unstaged()} statusLabel={statusLabel}
-              selected={selected()} onSelect={(p) => void openDiff(p)}
-              onDiscard={(e, ev) => void discardFile(e, ev)} />
+            <Section
+              title="Staged"
+              items={staged()}
+              statusLabel={statusLabel}
+              selected={selected()}
+              onSelect={(p) => void openDiff(p)}
+              onDiscard={(e, ev) => void discardFile(e, ev)}
+            />
+            <Section
+              title="Unstaged"
+              items={unstaged()}
+              statusLabel={statusLabel}
+              selected={selected()}
+              onSelect={(p) => void openDiff(p)}
+              onDiscard={(e, ev) => void discardFile(e, ev)}
+            />
             <Show when={!loading() && entries().length === 0}>
               <p
                 class="text-center text-[12.5px] text-fg-subtle py-6 px-3"
@@ -314,9 +340,7 @@ function Section(props: SectionProps) {
                   class="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus:opacity-100 p-1 rounded text-fg-subtle hover:text-danger hover:bg-bg-2"
                   onClick={(ev) => props.onDiscard(e, ev)}
                   aria-label={
-                    e.untracked
-                      ? `Delete untracked file ${e.path}`
-                      : `Discard changes in ${e.path}`
+                    e.untracked ? `Delete untracked file ${e.path}` : `Discard changes in ${e.path}`
                   }
                   title={e.untracked ? "Delete untracked file" : "Discard changes"}
                   data-testid={`changes-discard-${e.path}`}

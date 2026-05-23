@@ -11,21 +11,89 @@ interface Props {
 }
 
 const ADJECTIVES = [
-  "swift", "bold", "calm", "brave", "clever", "lucky", "merry", "quiet",
-  "sharp", "shiny", "spry", "vivid", "zesty", "amber", "azure", "coral",
-  "ember", "frost", "ivory", "jade", "olive", "pearl", "rusty", "snowy",
-  "sunny", "balmy", "breezy", "dapper", "dusty", "feisty", "glossy",
-  "humble", "jolly", "noble", "plucky", "rosy", "silky", "tidy", "wily",
+  "swift",
+  "bold",
+  "calm",
+  "brave",
+  "clever",
+  "lucky",
+  "merry",
+  "quiet",
+  "sharp",
+  "shiny",
+  "spry",
+  "vivid",
+  "zesty",
+  "amber",
+  "azure",
+  "coral",
+  "ember",
+  "frost",
+  "ivory",
+  "jade",
+  "olive",
+  "pearl",
+  "rusty",
+  "snowy",
+  "sunny",
+  "balmy",
+  "breezy",
+  "dapper",
+  "dusty",
+  "feisty",
+  "glossy",
+  "humble",
+  "jolly",
+  "noble",
+  "plucky",
+  "rosy",
+  "silky",
+  "tidy",
+  "wily",
   "zippy",
 ];
 
 const NOUNS = [
-  "otter", "lynx", "panda", "robin", "heron", "finch", "raven", "marten",
-  "puffin", "newt", "axolotl", "owl", "fox", "moth", "salmon", "krill",
-  "tigerlily", "fern", "cedar", "willow", "alder", "moss", "comet",
-  "nebula", "ember", "harbor", "meadow", "ridge", "summit", "delta",
-  "cove", "anchor", "lantern", "compass", "atlas", "loom", "quill",
-  "ledger", "satchel", "anvil",
+  "otter",
+  "lynx",
+  "panda",
+  "robin",
+  "heron",
+  "finch",
+  "raven",
+  "marten",
+  "puffin",
+  "newt",
+  "axolotl",
+  "owl",
+  "fox",
+  "moth",
+  "salmon",
+  "krill",
+  "tigerlily",
+  "fern",
+  "cedar",
+  "willow",
+  "alder",
+  "moss",
+  "comet",
+  "nebula",
+  "ember",
+  "harbor",
+  "meadow",
+  "ridge",
+  "summit",
+  "delta",
+  "cove",
+  "anchor",
+  "lantern",
+  "compass",
+  "atlas",
+  "loom",
+  "quill",
+  "ledger",
+  "satchel",
+  "anvil",
 ];
 
 function pick<T>(arr: T[]): T {
@@ -133,25 +201,19 @@ export default function RenameWorktreeDialog(props: Props) {
       aria-label="Rename worktree"
       data-testid="rename-worktree-dialog"
     >
-      <div
-        class="absolute inset-0 bg-black/60"
-        onClick={() => !busy() && props.onCancel()}
-      />
+      <div class="absolute inset-0 bg-black/60" onClick={() => !busy() && props.onCancel()} />
       <form
         onSubmit={submit}
         class="relative w-full max-w-md rounded-xl border border-border bg-bg-1 p-6 shadow-2xl"
       >
         <h3 class="text-[15px] font-semibold mb-1">Rename worktree</h3>
         <p class="text-[13px] text-fg-muted mb-5">
-          Renames the branch via{" "}
-          <code class="font-mono">git branch -m</code>. The worktree
+          Renames the branch via <code class="font-mono">git branch -m</code>. The worktree
           directory on disk keeps its current path.
         </p>
 
         <div class="flex items-center justify-between mb-1.5">
-          <label class="block text-[12px] font-medium text-fg-muted">
-            New branch name
-          </label>
+          <label class="block text-[12px] font-medium text-fg-muted">New branch name</label>
           <button
             type="button"
             class="ag-btn ag-btn-ghost ag-btn-xs"
@@ -170,15 +232,10 @@ export default function RenameWorktreeDialog(props: Props) {
           data-testid="rename-branch"
           autofocus
         />
-        <p class="text-[11px] text-fg-subtle mb-5 font-mono break-all">
-          was {props.currentBranch}
-        </p>
+        <p class="text-[11px] text-fg-subtle mb-5 font-mono break-all">was {props.currentBranch}</p>
 
         <Show when={err()}>
-          <p
-            class="mb-4 text-[12px] text-danger"
-            data-testid="rename-error"
-          >
+          <p class="mb-4 text-[12px] text-danger" data-testid="rename-error">
             {err()}
           </p>
         </Show>

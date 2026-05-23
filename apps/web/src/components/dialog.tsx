@@ -154,9 +154,7 @@ export function DialogHost() {
             <div class="relative w-full max-w-md rounded-xl border border-border bg-bg-1 shadow-2xl overflow-hidden">
               <Show when={d.title}>
                 <header class="px-5 py-3.5 border-b border-border">
-                  <h2 class="text-[15px] font-semibold tracking-tight">
-                    {d.title}
-                  </h2>
+                  <h2 class="text-[15px] font-semibold tracking-tight">{d.title}</h2>
                 </header>
               </Show>
               <Show when={d.body}>

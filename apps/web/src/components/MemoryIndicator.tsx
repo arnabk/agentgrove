@@ -143,11 +143,7 @@ export default function MemoryIndicator() {
   }
 
   return (
-    <div
-      ref={(el) => (rootEl = el)}
-      class="relative"
-      data-testid="mem-indicator"
-    >
+    <div ref={(el) => (rootEl = el)} class="relative" data-testid="mem-indicator">
       <button
         type="button"
         class="ag-chip flex items-center gap-1.5 font-mono cursor-pointer hover:bg-bg-3"
@@ -176,10 +172,7 @@ export default function MemoryIndicator() {
         >
           <div class="flex items-center justify-between mb-2">
             <span class="font-semibold text-[12.5px]">Memory</span>
-            <span
-              class="ag-chip font-mono"
-              title="Sum of backend + child PTYs"
-            >
+            <span class="ag-chip font-mono" title="Sum of backend + child PTYs">
               total {fmtBytes(totalBytes())}
             </span>
           </div>
@@ -187,9 +180,7 @@ export default function MemoryIndicator() {
           <Section title="AgentGrove (FE attribution)">
             <div class="grid grid-cols-2 gap-x-2 gap-y-0.5 font-mono text-fg-muted">
               <span class="font-semibold text-fg">total</span>
-              <span class="text-fg text-right font-semibold">
-                {fmtBytes(ag().total)}
-              </span>
+              <span class="text-fg text-right font-semibold">{fmtBytes(ag().total)}</span>
               <For each={ag().entries}>
                 {(e) => (
                   <>
@@ -202,10 +193,9 @@ export default function MemoryIndicator() {
               </For>
             </div>
             <p class="mt-1 text-[0.73em] text-fg-subtle">
-              Bytes AgentGrove itself owns: chat events, terminal
-              scrollback, editor document, project state. Excludes
-              browser overhead (V8 isolate, CSSOM, GPU buffers, image
-              cache) which only Chrome can measure.
+              Bytes AgentGrove itself owns: chat events, terminal scrollback, editor document,
+              project state. Excludes browser overhead (V8 isolate, CSSOM, GPU buffers, image cache)
+              which only Chrome can measure.
             </p>
           </Section>
 
@@ -251,19 +241,15 @@ export default function MemoryIndicator() {
                 </For>
               </div>
               <p class="mt-1 text-[0.73em] text-fg-subtle leading-snug">
-                via performance.measureUserAgentSpecificMemory() ·
-                last sampled {staleLabel()}. Chrome throttles this
-                call so it refreshes about every 12 s.
+                via performance.measureUserAgentSpecificMemory() · last sampled {staleLabel()}.
+                Chrome throttles this call so it refreshes about every 12 s.
                 <br />
                 <span class="block mt-1">
-                  This is a <strong>subset</strong> of what Chrome's
-                  per-tab Task Manager / hover tooltip reports.
-                  Included: JS heap + DOM + workers + V8 shared
-                  isolate. Excluded: GPU process, image decode cache,
-                  fetch/network buffers, audio/video element buffers,
-                  and renderer-process overhead. The Task Manager
-                  number is typically 2-3× this value; that gap is
-                  not measurable from a web page.
+                  This is a <strong>subset</strong> of what Chrome's per-tab Task Manager / hover
+                  tooltip reports. Included: JS heap + DOM + workers + V8 shared isolate. Excluded:
+                  GPU process, image decode cache, fetch/network buffers, audio/video element
+                  buffers, and renderer-process overhead. The Task Manager number is typically 2-3×
+                  this value; that gap is not measurable from a web page.
                 </span>
               </p>
             </Section>
@@ -272,23 +258,15 @@ export default function MemoryIndicator() {
             <Section title="Renderer (JS heap only)">
               <div class="grid grid-cols-2 gap-x-2 gap-y-0.5 font-mono text-fg-muted">
                 <span>used</span>
-                <span class="text-fg text-right">
-                  {fmtBytes(tabHeap()!.usedJSHeapSize)}
-                </span>
+                <span class="text-fg text-right">{fmtBytes(tabHeap()!.usedJSHeapSize)}</span>
                 <span>total</span>
-                <span class="text-right">
-                  {fmtBytes(tabHeap()!.totalJSHeapSize)}
-                </span>
+                <span class="text-right">{fmtBytes(tabHeap()!.totalJSHeapSize)}</span>
                 <span>limit</span>
-                <span class="text-right">
-                  {fmtBytes(tabHeap()!.jsHeapSizeLimit)}
-                </span>
+                <span class="text-right">{fmtBytes(tabHeap()!.jsHeapSizeLimit)}</span>
               </div>
               <p class="mt-1 text-[0.73em] text-fg-subtle">
-                JS heap only — even smaller than the JS+DOM figure
-                we'd show with cross-origin isolation enabled.
-                Chrome's Task Manager will show several times this
-                number.
+                JS heap only — even smaller than the JS+DOM figure we'd show with cross-origin
+                isolation enabled. Chrome's Task Manager will show several times this number.
               </p>
             </Section>
           </Show>
@@ -303,10 +281,7 @@ export default function MemoryIndicator() {
   );
 }
 
-function Section(props: {
-  title: string;
-  children?: import("solid-js").JSX.Element | undefined;
-}) {
+function Section(props: { title: string; children?: import("solid-js").JSX.Element | undefined }) {
   return (
     <div class="mt-2 pt-2 border-t border-border first:border-t-0 first:mt-0 first:pt-0">
       <div class="text-[10.5px] font-semibold uppercase tracking-wider text-fg-subtle mb-1">
@@ -397,9 +372,11 @@ function isolatedAndSupported(): boolean {
  *  type so the popover can show a compact summary. The API is
  *  throttled to once every ~10s; throttled calls reject. */
 async function measureFullTab(): Promise<TabFullMeasurement | null> {
-  const fn = (performance as unknown as {
-    measureUserAgentSpecificMemory?: () => Promise<MeasureMemoryResult>;
-  }).measureUserAgentSpecificMemory;
+  const fn = (
+    performance as unknown as {
+      measureUserAgentSpecificMemory?: () => Promise<MeasureMemoryResult>;
+    }
+  ).measureUserAgentSpecificMemory;
   if (typeof fn !== "function") return null;
   const r = await fn.call(performance);
   // Aggregate by primary type for a readable breakdown.
@@ -417,9 +394,9 @@ async function measureFullTab(): Promise<TabFullMeasurement | null> {
 
 /** Chromium-only: window.performance.memory. Returns null elsewhere. */
 function readPerformanceMemory(): JsHeap | null {
-  const perf = (
-    typeof performance !== "undefined" ? (performance as unknown) : null
-  ) as { memory?: JsHeap } | null;
+  const perf = (typeof performance !== "undefined" ? (performance as unknown) : null) as {
+    memory?: JsHeap;
+  } | null;
   if (!perf || !perf.memory) return null;
   const m = perf.memory;
   if (
