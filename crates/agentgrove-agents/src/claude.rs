@@ -90,6 +90,20 @@ impl ClaudeProvider {
 
 /// Locate the `claude` binary on `PATH`. Returned path is canonical
 /// when possible so users can copy/paste it.
+/// Append any [`SlashCommand`]s from `additions` to `out` whose
+/// `name` isn't already present. Built-ins win on name conflict —
+/// a user-authored `clear.md` won't shadow the CLI's own /clear
+/// because the merge happens after the built-in set is seeded.
+fn merge_unique(out: &mut Vec<SlashCommand>, additions: Vec<SlashCommand>) {
+    use std::collections::HashSet;
+    let seen: HashSet<String> = out.iter().map(|c| c.name.clone()).collect();
+    for c in additions {
+        if !seen.contains(&c.name) {
+            out.push(c);
+        }
+    }
+}
+
 fn find_binary() -> Option<PathBuf> {
     which::which(BINARY_NAME).ok()
 }
@@ -260,15 +274,26 @@ impl AgentProvider for ClaudeProvider {
     }
 
     /// Static set of Claude Code slash commands surfaced to the FE
-    /// picker. Mirrors the universal commands the CLI reports under
-    /// the `slash_commands` field of its `system/init` event; we keep
-    /// this list curated so the picker shows only commands that make
-    /// sense to invoke from a chat input (e.g. `/clear`, `/compact`).
-    /// MCP-server-specific commands the user may have installed are
-    /// intentionally omitted — they typically require flags the
-    /// picker can't supply.
-    fn slash_commands(&self) -> Vec<SlashCommand> {
-        const ITEMS: &[(&str, &str)] = &[
+    /// Slash commands surfaced to the FE picker. Union of three
+    /// sources, deduped by name (built-in wins on conflict):
+    ///
+    ///   1. The curated built-in Claude Code commands. Mirrors the
+    ///      universal commands the CLI reports under the
+    ///      `slash_commands` field of its `system/init` event;
+    ///      MCP-specific commands the user may have installed are
+    ///      intentionally omitted because they typically require
+    ///      flags the picker can't supply.
+    ///   2. User-level commands from `~/.claude/commands/*.md`.
+    ///      File name (sans `.md`) is the slug; YAML front-matter
+    ///      `description:` is the picker hint.
+    ///   3. Project-level commands from
+    ///      `<ctx.cwd>/.claude/commands/*.md` when `ctx.cwd` is set.
+    ///
+    /// All async because (2) + (3) read filesystem; the scan is
+    /// cheap (few dozen files at most) but we want to stay off the
+    /// runtime thread.
+    async fn slash_commands(&self, ctx: crate::SlashCommandContext<'_>) -> Vec<SlashCommand> {
+        const BUILTINS: &[(&str, &str)] = &[
             ("clear", "Reset the conversation history."),
             ("compact", "Summarise older turns to free context budget."),
             ("context", "Show current context window usage."),
@@ -282,13 +307,33 @@ impl AgentProvider for ClaudeProvider {
             ("extra-usage", "Show detailed model-level usage."),
             ("insights", "Surface project insights Claude has gathered."),
         ];
-        ITEMS
+        let mut out: Vec<SlashCommand> = BUILTINS
             .iter()
             .map(|(name, description)| SlashCommand {
                 name: (*name).to_string(),
                 description: (*description).to_string(),
             })
-            .collect()
+            .collect();
+
+        // User-level commands: ~/.claude/commands/.
+        if let Some(home) = directories_next::BaseDirs::new() {
+            let user_dir = home.home_dir().join(".claude").join("commands");
+            merge_unique(
+                &mut out,
+                crate::slash_files::scan_markdown_commands(&user_dir),
+            );
+        }
+
+        // Project-level commands: <cwd>/.claude/commands/.
+        if let Some(cwd) = ctx.cwd {
+            let proj_dir = cwd.join(".claude").join("commands");
+            merge_unique(
+                &mut out,
+                crate::slash_files::scan_markdown_commands(&proj_dir),
+            );
+        }
+
+        out
     }
 }
 

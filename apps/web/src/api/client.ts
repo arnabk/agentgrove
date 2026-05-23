@@ -39,6 +39,7 @@ export interface Worktree {
 /** Chat metadata as returned by list endpoints (no prompts). */
 export interface Chat {
   id: string;
+  project_id: string;
   worktree_id: string | null;
   title: string;
   provider: string;
@@ -400,9 +401,14 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ title }),
     }),
-  /** Slash commands surfaced by a provider's CLI. */
-  listProviderCommands: (providerId: string) =>
-    req<SlashCommand[]>(`/api/providers/${encodeURIComponent(providerId)}/commands`),
+  /** Slash commands surfaced by a provider's CLI. Pass `projectId`
+   *  to include project-scoped Markdown commands living under
+   *  `<project_root>/.claude/commands/` or
+   *  `<project_root>/.opencode/command/`. */
+  listProviderCommands: (providerId: string, projectId?: string) => {
+    const qs = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+    return req<SlashCommand[]>(`/api/providers/${encodeURIComponent(providerId)}/commands${qs}`);
+  },
   /** Read a per-provider config (base URL + has_api_key). The
    *  plaintext API key is never returned over HTTP. */
   getProviderConfig: (providerId: string) =>

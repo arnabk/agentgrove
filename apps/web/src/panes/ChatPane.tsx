@@ -803,8 +803,10 @@ export default function ChatPane() {
       setProviderCommands([]);
       return;
     }
+    // Scope by active project so we pull project-level Markdown
+    // commands too (`<project>/.claude/commands/*.md`).
     void api
-      .listProviderCommands(c.provider)
+      .listProviderCommands(c.provider, state.selectedProjectId ?? undefined)
       .then(setProviderCommands)
       .catch(() => setProviderCommands([]));
   });

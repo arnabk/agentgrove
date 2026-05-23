@@ -290,3 +290,61 @@ async fn refresh_provider_unknown_id_returns_404() {
         .unwrap();
     assert_eq!(res.status(), 404);
 }
+
+/// `GET /api/providers/claude/commands?project_id=<pid>` returns
+/// the built-in set PLUS any Markdown files the user (or this
+/// project) authored under `<project>/.claude/commands/`. We
+/// don't assert specific built-in names — that's a Claude-CLI
+/// concern — but we DO assert that a project-scoped file we
+/// plant under .claude/commands/ shows up.
+#[tokio::test]
+async fn slash_commands_include_project_scoped_files() {
+    let h = BeHarness::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    // Plant a project-scoped command file BEFORE registering the
+    // project (the scan happens lazily per-request).
+    std::fs::create_dir_all(dir.path().join(".claude/commands")).unwrap();
+    std::fs::write(
+        dir.path().join(".claude/commands/ship-it.md"),
+        "---\ndescription: ship it\n---\n",
+    )
+    .unwrap();
+    let body = serde_json::json!({
+        "name": "scoped",
+        "root": dir.path().to_string_lossy(),
+    });
+    let created = h
+        .post_auth("/api/projects")
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    let p: serde_json::Value = created.json().await.unwrap();
+    let pid = p["id"].as_str().unwrap().to_owned();
+
+    let res = h
+        .get_auth(&format!("/api/providers/claude/commands?project_id={pid}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let cmds: serde_json::Value = res.json().await.unwrap();
+    let arr = cmds.as_array().unwrap();
+    let has_scoped = arr.iter().any(|c| c["name"] == "ship-it");
+    assert!(has_scoped, "project-scoped command missing: {arr:?}");
+    let scoped = arr.iter().find(|c| c["name"] == "ship-it").unwrap();
+    assert_eq!(scoped["description"], "ship it");
+}
+
+/// Unknown `project_id` softly falls back to user-level + built-in
+/// commands rather than 500'ing — the FE may pass a stale id.
+#[tokio::test]
+async fn slash_commands_unknown_project_returns_global_set() {
+    let h = BeHarness::start().await;
+    let res = h
+        .get_auth("/api/providers/claude/commands?project_id=does-not-exist")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+}

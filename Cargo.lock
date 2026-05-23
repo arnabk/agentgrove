@@ -25,6 +25,7 @@ dependencies = [
  "agentgrove-core",
  "async-trait",
  "bytes",
+ "directories-next",
  "futures",
  "futures-util",
  "reqwest",

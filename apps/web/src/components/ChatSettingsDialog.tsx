@@ -37,7 +37,10 @@ export default function ChatSettingsDialog(props: Props) {
   onMount(() => {
     void (async () => {
       try {
-        const cmds = await api.listProviderCommands(props.chat.provider);
+        // Pass project_id so user-authored project-scoped commands
+        // (`<project>/.claude/commands/*.md`) appear alongside the
+        // built-ins.
+        const cmds = await api.listProviderCommands(props.chat.provider, props.chat.project_id);
         setCommands(cmds);
       } catch (e) {
         // Slash commands are optional — non-fatal.

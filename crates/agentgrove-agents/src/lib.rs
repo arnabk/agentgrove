@@ -28,6 +28,7 @@ pub mod claude;
 pub mod fake;
 pub mod models_cache;
 pub mod opencode;
+pub mod slash_files;
 
 /// Streaming event emitted by an agent provider.
 ///
@@ -244,14 +245,39 @@ pub trait AgentProvider: Send + Sync {
         events: mpsc::UnboundedSender<AgentEvent>,
     ) -> Result<(), ProviderError>;
 
-    /// Static list of slash commands supported by the provider's CLI.
-    /// Providers override this to expose their `/clear`, `/compact`,
-    /// `/review`, etc. so the FE picker can render them without
-    /// hard-coding any provider knowledge. Returns an empty list by
-    /// default (no slash-commands).
-    fn slash_commands(&self) -> Vec<SlashCommand> {
+    /// Slash commands supported by the provider's CLI, optionally
+    /// scoped to a project root.
+    ///
+    /// Implementations typically union three sources:
+    ///   1. **Built-in** CLI commands the provider always ships
+    ///      (Claude: `/clear`, `/compact`, …).
+    ///   2. **User-level** Markdown files in the CLI's config dir
+    ///      (Claude: `~/.claude/commands/*.md`; opencode:
+    ///      `~/.config/opencode/command/*.md`).
+    ///   3. **Project-level** Markdown files in
+    ///      `<ctx.cwd>/.claude/commands/*.md` /
+    ///      `<ctx.cwd>/.opencode/command/*.md` when `ctx.cwd` is
+    ///      `Some`.
+    ///
+    /// The trait method is async so providers can fs-walk + read
+    /// front-matter blocks without blocking. Default impl returns
+    /// an empty list (no slash-commands surface).
+    async fn slash_commands(&self, _ctx: SlashCommandContext<'_>) -> Vec<SlashCommand> {
         Vec::new()
     }
+}
+
+/// Per-request context passed to [`AgentProvider::slash_commands`].
+/// `cwd` is `Some(<project_root>)` when the FE is asking for
+/// commands in the context of a specific project — providers add
+/// project-local command files (e.g.
+/// `<cwd>/.claude/commands/*.md`) on top of the user-level set
+/// when it's present. `None` means "give me only the user-level
+/// + built-in set" (e.g. before any project is selected).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SlashCommandContext<'a> {
+    /// Absolute path to the active project's working directory.
+    pub cwd: Option<&'a std::path::Path>,
 }
 
 #[cfg(test)]

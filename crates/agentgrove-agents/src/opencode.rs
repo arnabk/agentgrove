@@ -275,11 +275,34 @@ impl AgentProvider for OpencodeProvider {
         Ok(())
     }
 
-    fn slash_commands(&self) -> Vec<SlashCommand> {
-        // opencode `run` doesn't expose a stable slash-command surface
-        // the way Claude does. Leave empty for now; users can still
-        // type commands as part of the prompt.
-        vec![]
+    /// User + project Markdown commands. opencode doesn't ship a
+    /// curated built-in slash set the way Claude does — its CLI
+    /// surface is `opencode run [message..]` and that's about it.
+    /// What users DO have is per-user + per-project command files
+    /// in `~/.config/opencode/command/*.md` and
+    /// `<cwd>/.opencode/command/*.md` (note singular `command`,
+    /// not `commands` — opencode's convention).
+    async fn slash_commands(&self, ctx: crate::SlashCommandContext<'_>) -> Vec<SlashCommand> {
+        let mut out: Vec<SlashCommand> = Vec::new();
+        // User-level: ~/.config/opencode/command/.
+        if let Some(base) = directories_next::BaseDirs::new() {
+            let user_dir = base.config_dir().join("opencode").join("command");
+            out.extend(crate::slash_files::scan_markdown_commands(&user_dir));
+        }
+        // Project-level: <cwd>/.opencode/command/.
+        if let Some(cwd) = ctx.cwd {
+            let proj_dir = cwd.join(".opencode").join("command");
+            // Dedupe by name: user-level wins. opencode itself
+            // resolves with the same precedence today.
+            let names: std::collections::HashSet<String> =
+                out.iter().map(|c| c.name.clone()).collect();
+            for c in crate::slash_files::scan_markdown_commands(&proj_dir) {
+                if !names.contains(&c.name) {
+                    out.push(c);
+                }
+            }
+        }
+        out
     }
 }
 

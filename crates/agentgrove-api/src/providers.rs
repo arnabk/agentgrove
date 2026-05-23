@@ -133,14 +133,39 @@ pub async fn list(State(state): State<AppState>) -> Json<Vec<ProviderDto>> {
     Json(out)
 }
 
-/// `GET /api/providers/:id/commands` — slash commands the provider's
-/// CLI exposes. The FE renders these in the chat input's `/` picker.
+/// `GET /api/providers/:id/commands?project_id=…` — slash commands
+/// the provider's CLI exposes. The FE renders these in the chat
+/// input's `/` picker.
+///
+/// Pass `project_id` to include project-scoped Markdown commands
+/// living under `<project_root>/.claude/commands/` (or
+/// `.opencode/command/`). Omit it to get only the user-level +
+/// built-in set.
+#[derive(Debug, serde::Deserialize)]
+pub struct CommandsQuery {
+    #[serde(default)]
+    pub project_id: Option<String>,
+}
+
 pub async fn commands(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<CommandsQuery>,
 ) -> Result<Json<Vec<SlashCommand>>, StatusCode> {
     let p = resolve(&state, &id).await.ok_or(StatusCode::NOT_FOUND)?;
-    Ok(Json(p.slash_commands()))
+    // Resolve the project root path when a project_id is supplied.
+    // We swallow lookup failures (404 from a stale FE) by treating
+    // them as "no project scope" — the user still gets the user-
+    // level + built-in set rather than an opaque 500.
+    let cwd_path = if let Some(pid) = q.project_id.as_deref() {
+        state.projects.get(pid).await.ok().map(|p| p.root.clone())
+    } else {
+        None
+    };
+    let ctx = agentgrove_agents::SlashCommandContext {
+        cwd: cwd_path.as_deref(),
+    };
+    Ok(Json(p.slash_commands(ctx).await))
 }
 
 /// `POST /api/providers/:id/refresh` — drop the cached model list for
