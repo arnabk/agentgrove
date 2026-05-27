@@ -162,33 +162,55 @@ impl QueueRepo {
         &self,
         chat_id: &str,
     ) -> Result<Option<QueueItemRow>, QueueError> {
-        // SELECT ... LIMIT 1 then UPDATE in a transaction so two
-        // concurrent pops can't pick the same row.
-        let mut tx = self.pool.begin().await?;
-        let row: Option<QueueRowTuple> = sqlx::query_as(
-            "SELECT id, chat_id, body, status, position, created_at, updated_at \
-             FROM queue_items WHERE chat_id = ?1 AND status = 'pending' \
-             ORDER BY position ASC, created_at ASC LIMIT 1",
-        )
-        .bind(chat_id)
-        .fetch_optional(&mut *tx)
-        .await?;
-        let Some(tuple) = row else {
-            tx.commit().await?;
-            return Ok(None);
-        };
-        let id = tuple.0.clone();
-        let now_ms = Utc::now().timestamp_millis();
-        sqlx::query("UPDATE queue_items SET status = 'running', updated_at = ?1 WHERE id = ?2")
-            .bind(now_ms)
-            .bind(&id)
-            .execute(&mut *tx)
+        // Why explicit BEGIN IMMEDIATE: the default `pool.begin()`
+        // starts a DEFERRED transaction that takes a read lock
+        // first and only escalates to a write lock at the first
+        // UPDATE. Under concurrent dispatch (drain loop +
+        // smart-send + chat persistence all share the pool) the
+        // upgrade can collide with another transaction's write
+        // lock and SQLite returns SQLITE_BUSY (5) / BUSY_SNAPSHOT
+        // (517) instantly — busy_timeout doesn't help because
+        // each transaction holds the only path forward.
+        //
+        // Pin to one connection so BEGIN/COMMIT land on the same
+        // sqlite handle (the pool would otherwise re-dispatch
+        // each query).
+        let mut conn = self.pool.acquire().await?;
+        sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+        let result = async {
+            let row: Option<QueueRowTuple> = sqlx::query_as(
+                "SELECT id, chat_id, body, status, position, created_at, updated_at \
+                 FROM queue_items WHERE chat_id = ?1 AND status = 'pending' \
+                 ORDER BY position ASC, created_at ASC LIMIT 1",
+            )
+            .bind(chat_id)
+            .fetch_optional(&mut *conn)
             .await?;
-        tx.commit().await?;
-        let mut item = row_to_item(tuple);
-        item.status = QueueStatus::Running;
-        item.updated_at = ts_to_dt(now_ms);
-        Ok(Some(item))
+            let Some(tuple) = row else {
+                return Ok::<Option<QueueItemRow>, QueueError>(None);
+            };
+            let id = tuple.0.clone();
+            let now_ms = Utc::now().timestamp_millis();
+            sqlx::query("UPDATE queue_items SET status = 'running', updated_at = ?1 WHERE id = ?2")
+                .bind(now_ms)
+                .bind(&id)
+                .execute(&mut *conn)
+                .await?;
+            let mut item = row_to_item(tuple);
+            item.status = QueueStatus::Running;
+            item.updated_at = ts_to_dt(now_ms);
+            Ok(Some(item))
+        }
+        .await;
+        match &result {
+            Ok(_) => {
+                sqlx::query("COMMIT").execute(&mut *conn).await?;
+            }
+            Err(_) => {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            }
+        }
+        result
     }
 
     /// Delete a Running item — used by the drain loop after the
