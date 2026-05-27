@@ -1,4 +1,4 @@
-import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { api } from "../api/client";
 import { refreshWorktreesForProject, state } from "../stores/app";
 
@@ -180,6 +180,31 @@ export default function WorktreeDialog(props: Props) {
    *     (so the user can see what went wrong) + a Close button. */
   type Phase = "form" | "running" | "ready" | "failed";
   const [phase, setPhase] = createSignal<Phase>("form");
+
+  // Auto-close on full success: when the worktree-add + the
+  // optional pre-script both finish cleanly the row flips to
+  // `ready`, which the poll loop reflects into phase="ready".
+  // Close the dialog one short beat later so the user has a
+  // chance to glance at the final console output before it
+  // disappears. Failures stay open until the user dismisses
+  // them so they can read what went wrong (see the explicit
+  // `Close` button rendered in the `failed` branch).
+  let autoCloseTimer: ReturnType<typeof setTimeout> | null = null;
+  createEffect(() => {
+    if (phase() === "ready") {
+      if (autoCloseTimer) clearTimeout(autoCloseTimer);
+      autoCloseTimer = setTimeout(() => {
+        autoCloseTimer = null;
+        finish();
+      }, 600);
+    } else if (autoCloseTimer) {
+      clearTimeout(autoCloseTimer);
+      autoCloseTimer = null;
+    }
+  });
+  onCleanup(() => {
+    if (autoCloseTimer) clearTimeout(autoCloseTimer);
+  });
   /** Buffered console lines from the WS topic. Each entry is a
    *  parsed payload (`stage`, `stdout`, `stderr`, `exit`, `info`).
    *  Capped at 2000 lines defensively — most worktree creations emit

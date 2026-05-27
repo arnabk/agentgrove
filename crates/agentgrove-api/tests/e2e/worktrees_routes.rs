@@ -3,10 +3,52 @@
 use crate::support::BeHarness;
 use serde_json::{json, Value};
 
+/// Build a working git repo wired to a local bare repo as `origin`.
+/// Worktree creation requires a remote (see the BE 400 check), so
+/// every test that hits POST /api/projects/:id/worktrees needs to
+/// start with one. The bare repo lives next to the working copy
+/// under the same TempDir so cleanup is automatic. After init we
+/// push the initial commit to origin so `main` exists on the
+/// remote — otherwise `git fetch origin main` would fail.
 async fn make_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
-    agentgrove_git::init_repo(dir.path()).await.unwrap();
+    let work = dir.path().join("work");
+    let bare = dir.path().join("origin.git");
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::create_dir_all(&bare).unwrap();
+    // Bare remote.
+    run_git_in(&bare, &["init", "--bare", "-b", "main"]).await;
+    // Working copy with initial commit + remote wired up.
+    agentgrove_git::init_repo(&work).await.unwrap();
+    run_git_in(&work, &["remote", "add", "origin", bare.to_str().unwrap()]).await;
+    run_git_in(&work, &["push", "-u", "origin", "main"]).await;
+    // The project root is the working copy, not the TempDir
+    // itself. Tests use a thin wrapper to grab work() below.
     dir
+}
+
+/// Shorthand to invoke git in `cwd` from test code. Panics on
+/// non-zero exit since tests should know about setup failures
+/// up front.
+async fn run_git_in(cwd: &std::path::Path, args: &[&str]) {
+    let out = tokio::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .await
+        .expect("spawn git");
+    assert!(
+        out.status.success(),
+        "git {args:?} failed in {cwd:?}: {}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+}
+
+/// Working-copy path inside a temp dir produced by `make_repo`.
+/// Hides the `work` / `origin.git` split from individual tests.
+fn work(dir: &tempfile::TempDir) -> std::path::PathBuf {
+    dir.path().join("work")
 }
 
 /// Poll the project's worktree list until the entry with `wt_id`
@@ -39,7 +81,7 @@ async fn make_project(h: &BeHarness) -> (tempfile::TempDir, String) {
     let dir = make_repo().await;
     let res = h
         .post_auth("/api/projects")
-        .json(&json!({"name":"wt-test","root": dir.path().to_string_lossy()}))
+        .json(&json!({"name":"wt-test","root": work(&dir).to_string_lossy()}))
         .send()
         .await
         .unwrap();
@@ -356,7 +398,7 @@ async fn worktree_rename_succeeds() {
 
     // Git itself agrees — the old branch is gone, the new one exists.
     let out = std::process::Command::new("git")
-        .args(["-C", &dir.path().to_string_lossy(), "branch", "--list"])
+        .args(["-C", &work(&dir).to_string_lossy(), "branch", "--list"])
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -480,7 +522,7 @@ async fn worktree_delete_with_branch_removes_branch() {
 
     // Branch no longer in git.
     let out = std::process::Command::new("git")
-        .args(["-C", &dir.path().to_string_lossy(), "branch", "--list"])
+        .args(["-C", &work(&dir).to_string_lossy(), "branch", "--list"])
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -642,12 +684,50 @@ async fn worktree_delete_without_flag_keeps_branch() {
     assert_eq!(del.status(), 204);
 
     let out = std::process::Command::new("git")
-        .args(["-C", &dir.path().to_string_lossy(), "branch", "--list"])
+        .args(["-C", &work(&dir).to_string_lossy(), "branch", "--list"])
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("feature/keep-me"),
         "branch was unexpectedly deleted:\n{stdout}"
+    );
+}
+
+/// Worktree creation refuses with 400 when the project has no
+/// `origin` remote. The "always create from remote" guarantee
+/// only holds with a remote to talk to, so we surface the
+/// limitation up-front rather than silently degrading to a
+/// stale local ref. The FE LeftRail hides the +worktree button
+/// in this case; the BE guard is the belt-and-braces.
+#[tokio::test]
+async fn create_worktree_without_remote_returns_400() {
+    let h = BeHarness::start().await;
+    // init_repo gives us a working copy WITHOUT a remote — the
+    // opposite of `make_repo` which wires up origin.
+    let dir = tempfile::tempdir().unwrap();
+    agentgrove_git::init_repo(dir.path()).await.unwrap();
+    let project: Value = h
+        .post_auth("/api/projects")
+        .json(&json!({"name":"no-remote","root": dir.path().to_string_lossy()}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pid = project["id"].as_str().unwrap();
+
+    let res = h
+        .post_auth(&format!("/api/projects/{pid}/worktrees"))
+        .json(&json!({"branch":"feature-no-remote","base_ref":"main"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400, "expected 400, got {}", res.status());
+    let body = res.text().await.unwrap();
+    assert!(
+        body.contains("remote"),
+        "error message should mention 'remote': {body}",
     );
 }

@@ -123,6 +123,22 @@ pub async fn create(
         other => (StatusCode::INTERNAL_SERVER_ERROR, format!("db: {other}")),
     })?;
 
+    // Worktree creation requires a git remote — the freshness
+    // guarantee ("always create from origin/<base_ref>") only
+    // works if there's an origin to talk to. Local-only repos can
+    // still use the editor, terminal, chat, etc.; worktrees are
+    // an opt-in feature gated on `has_remote` (also enforced by
+    // the FE LeftRail which hides the +worktree button without a
+    // remote). Surface a 400 here rather than letting the task
+    // silently degrade to a stale local ref.
+    let repo_info = git::inspect_repo(&project.root).await;
+    if !repo_info.has_remote {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "project has no git remote — worktree creation requires a remote (add one with `git remote add origin <url>`)".into(),
+        ));
+    }
+
     let safe_branch = sanitize_branch(&body.branch);
     let wt_path = match body.path {
         Some(p) => PathBuf::from(p),
@@ -179,46 +195,53 @@ pub async fn create(
     let wt_path_for_task = wt_path.clone();
     let topic_for_task = topic.clone();
     tokio::spawn(async move {
-        // First pull the latest of `base_ref` from `origin` so the new
-        // worktree is rooted on the freshest commit instead of whatever
-        // happens to be cached locally. A fetch failure is downgraded
-        // to a warning event — we still proceed to the worktree-add so
-        // that offline / no-remote setups (e.g. a freshly-init'd repo
-        // with no `origin`) keep working. Network-related errors show
-        // up in the live console for visibility.
+        // Step 1: fetch the latest of `base_ref` from `origin`.
+        // The remote was validated at request time, so any failure
+        // here is a hard error (network down, branch deleted
+        // upstream, auth missing, …). We do NOT silently fall back
+        // to a stale local ref — that defeats the freshness
+        // guarantee the user expects from "create new worktree".
         state_for_task.logbus.publish(
             &topic_for_task,
             serde_json::json!({"type":"stage","stage":"git_fetch"}).to_string(),
         );
-        match git::fetch_ref(&project_root, &base_ref).await {
-            Ok(()) => {
-                state_for_task.logbus.publish(
-                    &topic_for_task,
-                    serde_json::json!({"type":"stage","stage":"git_fetch_done"}).to_string(),
-                );
-            }
-            Err(e) => {
-                // Soft-fail: surface stderr so the user can see if the
-                // remote was unreachable, but don't abort the create.
-                state_for_task.logbus.publish(
-                    &topic_for_task,
-                    serde_json::json!({
-                        "type":"stderr",
-                        "line": format!("git fetch origin {base_ref} failed (continuing with local ref): {e}")
-                    })
-                    .to_string(),
-                );
-            }
+        if let Err(e) = git::fetch_ref(&project_root, &base_ref).await {
+            let _ = state_for_task
+                .worktrees
+                .set_status(&wt_id, WorktreeStatus::Failed)
+                .await;
+            state_for_task.logbus.publish(
+                &topic_for_task,
+                serde_json::json!({
+                    "type":"stderr",
+                    "line": format!("git fetch origin {base_ref} failed: {e}")
+                })
+                .to_string(),
+            );
+            state_for_task.logbus.publish(
+                &topic_for_task,
+                serde_json::json!({"type":"exit","code": -1}).to_string(),
+            );
+            return;
         }
+        state_for_task.logbus.publish(
+            &topic_for_task,
+            serde_json::json!({"type":"stage","stage":"git_fetch_done"}).to_string(),
+        );
 
-        // Announce start of the worktree-add stage so the FE renders
-        // the console with a header line.
+        // Step 2: worktree-add against `origin/<base_ref>` (NOT
+        // the local ref). After the fetch above this is the
+        // freshest commit on that branch; passing the remote-
+        // qualified ref is what makes "always create from remote"
+        // actually mean what it says, even if a local copy of the
+        // branch happens to be lagging.
+        let remote_ref = format!("origin/{base_ref}");
         state_for_task.logbus.publish(
             &topic_for_task,
             serde_json::json!({"type":"stage","stage":"git_add"}).to_string(),
         );
         if let Err(e) =
-            git::add_worktree(&project_root, &wt_path_for_task, &branch, &base_ref).await
+            git::add_worktree(&project_root, &wt_path_for_task, &branch, &remote_ref).await
         {
             let _ = state_for_task
                 .worktrees
