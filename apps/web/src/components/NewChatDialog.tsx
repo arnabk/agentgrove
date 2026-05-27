@@ -64,8 +64,15 @@ export default function NewChatDialog(props: Props) {
     void (async () => {
       try {
         const list = await api.listProviders();
+        // Filter out the test-only `fake` provider. The BE keeps it
+        // registered for deterministic L4 e2e dispatch, but exposing
+        // it in the new-chat dropdown would let real users pick a
+        // provider that just echoes the prompt back. The id is
+        // stable across builds so a hard-coded filter is safer than
+        // a "test-only" flag that could leak through.
+        const userVisible = list.filter((p) => p.id !== "fake");
         // Order: available providers first.
-        const sorted = [...list].sort((a, b) => Number(b.available) - Number(a.available));
+        const sorted = [...userVisible].sort((a, b) => Number(b.available) - Number(a.available));
         setProviders(sorted);
         const firstAvailable = sorted.find((p) => p.available);
         if (firstAvailable) {

@@ -674,7 +674,9 @@ function ProvidersTab() {
   onMount(() => {
     void (async () => {
       try {
-        const list = await api.listProviders();
+        // FakeProvider is a BE-only test surface; filter it out
+        // so it never lands in the Settings -> Providers list.
+        const list = (await api.listProviders()).filter((p) => p.id !== "fake");
         cachedProviders = list;
         setProviders(list);
       } catch {

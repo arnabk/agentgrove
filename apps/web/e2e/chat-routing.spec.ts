@@ -177,15 +177,14 @@ test.describe("chat send routing", () => {
   });
 
   // Rule 4 + 5 exercise the auto-drain path. Each queued message
-  // dispatches through the active provider — by default Claude /
-  // opencode, which take seconds + network. We skip unless the
-  // BE was started with AGENTGROVE_ENABLE_FAKE=1, which registers
-  // the deterministic FakeProvider. CI does this; local dev runs
-  // need to opt in (see docs/CONTRIBUTING.md).
+  // dispatches through the active provider; we pin to the BE-only
+  // FakeProvider (registered in `ProviderRegistry::default` but
+  // hidden from the FE new-chat dropdown by an id="fake" filter)
+  // so the test stays deterministic + network-free.
   //
-  // When fake IS available, the tests create a fake-backed chat
-  // directly via the BE API (no FE provider picker integration
-  // yet) and assert the queue mechanics end-to-end.
+  // Tests create a fake-backed chat directly via the BE API
+  // because the FE NewChatDialog deliberately doesn't expose
+  // FakeProvider — only real CLI providers are user-visible.
   async function fakeAvailable(): Promise<boolean> {
     try {
       const res = await fetch(`${BE_URL}/api/providers`);
@@ -222,7 +221,7 @@ test.describe("chat send routing", () => {
 
   test("rule 4: auto mode drains queue back into timeline", async () => {
     if (!(await fakeAvailable())) {
-      test.skip(true, "AGENTGROVE_ENABLE_FAKE=1 not set on the BE");
+      test.skip(true, "FakeProvider missing from BE registry (was the registry tampered with?)");
     }
     const chatId = await makeFakeChat();
     // Auto mode is default; rapid-fire 4 prompts via the BE
@@ -248,7 +247,7 @@ test.describe("chat send routing", () => {
 
   test("rule 5 + bug repro: rapid-fire → flip manual → run_next drains everything", async () => {
     if (!(await fakeAvailable())) {
-      test.skip(true, "AGENTGROVE_ENABLE_FAKE=1 not set on the BE");
+      test.skip(true, "FakeProvider missing from BE registry (was the registry tampered with?)");
     }
     const chatId = await makeFakeChat();
     for (let i = 0; i < 4; i++) {
