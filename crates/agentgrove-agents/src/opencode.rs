@@ -170,9 +170,18 @@ impl AgentProvider for OpencodeProvider {
             .arg("--format")
             .arg("json")
             .arg("-m")
-            .arg(model)
-            // Surface the model's reasoning trace as `Thinking` events.
-            .arg("--thinking");
+            .arg(model);
+        // `--thinking` is opt-in via `effort`. Several opencode-
+        // routable models (notably the 9router endpoints) hang for
+        // 60+ seconds when the flag is set even though they don't
+        // surface a reasoning trace — they end up waiting for an
+        // upstream stream that never arrives. Gating on `effort`
+        // matches the Claude integration (which uses `effort` to
+        // unlock extended-thinking output) and keeps the default
+        // path fast.
+        if opts.effort.is_some() {
+            cmd.arg("--thinking");
+        }
         if let Some(session) = opts.resume_session_id.as_deref() {
             cmd.arg("--session").arg(session);
         }
