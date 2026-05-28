@@ -399,10 +399,35 @@ pub async fn delete(
         .set_status(&worktree_id, WorktreeStatus::Removing)
         .await;
     if let Err(e) = git::remove_worktree(&project.root, &wt.path).await {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("git worktree remove failed: {e}"),
-        ));
+        // Tolerant case 1: the on-disk directory is gone (user
+        // deleted by hand, prior crash mid-remove, …). git
+        // `worktree remove` returns "not a working tree" or
+        // similar — we treat that as "already removed" and
+        // continue to the metadata cleanup so the row doesn't
+        // stay stuck in `removing` forever. We still try
+        // `git worktree prune` to clear any dangling
+        // administrative state under <repo>/.git/worktrees/.
+        let wt_path_missing = !wt.path.exists();
+        let stderr = e.to_string().to_lowercase();
+        let already_gone = wt_path_missing
+            || stderr.contains("not a working tree")
+            || stderr.contains("does not exist");
+        if !already_gone {
+            // Real failure: roll the status back to ready so the
+            // FE doesn't keep showing "removing" + the user can
+            // retry. Surfacing the original error message tells
+            // them what to fix.
+            let _ = state
+                .worktrees
+                .set_status(&worktree_id, WorktreeStatus::Ready)
+                .await;
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("git worktree remove failed: {e}"),
+            ));
+        }
+        // Best-effort prune to clear stale administrative state.
+        let _ = git::prune_worktrees(&project.root).await;
     }
 
     // Optional follow-up: drop the local branch in the same call so

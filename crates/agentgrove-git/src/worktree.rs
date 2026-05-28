@@ -120,6 +120,20 @@ pub async fn remove_worktree(repo_path: &Path, worktree_path: &Path) -> Result<(
     Ok(())
 }
 
+/// Garbage-collect dangling worktree administrative entries under
+/// `<repo>/.git/worktrees/`. Used by the API delete handler when
+/// the on-disk worktree directory is already gone (manual delete /
+/// prior crash mid-remove) so git stops complaining about stale
+/// metadata on subsequent worktree operations.
+///
+/// # Errors
+///
+/// Returns [`GitError`] if git is missing or returns non-zero.
+pub async fn prune_worktrees(repo_path: &Path) -> Result<(), GitError> {
+    run_git(&["worktree", "prune"], repo_path).await?;
+    Ok(())
+}
+
 /// Rename a local branch from `old` to `new` using `git branch -m`.
 ///
 /// This is the metadata side of a worktree rename — the underlying

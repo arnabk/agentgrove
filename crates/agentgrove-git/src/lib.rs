@@ -16,7 +16,7 @@ pub use inspect::{inspect_repo, RepoInfo};
 pub use status::{status, StatusEntry};
 pub use worktree::{
     add_worktree, delete_branch, discard_path, fetch_ref, init_repo, list_worktrees,
-    remove_worktree, rename_branch, DiscardOutcome, GitError,
+    prune_worktrees, remove_worktree, rename_branch, DiscardOutcome, GitError,
 };
 
 /// Returns this crate's version string. Used by smoke tests.
