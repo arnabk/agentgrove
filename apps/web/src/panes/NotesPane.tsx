@@ -132,7 +132,31 @@ export default function NotesPane() {
     }
     try {
       const pad = await api.getScratchpad(pid);
-      editor?.commands.setContent(pad.body || "", false);
+      const newBody = pad.body || "";
+      // Skip the DOM replacement when the content hasn't changed —
+      // a no-op setContent still resets ProseMirror's selection
+      // (jumping the cursor to the end on every autosave echo).
+      const currentHtml = editor?.getHTML() ?? "";
+      if (newBody !== currentHtml) {
+        // Preserve the cursor position across the content swap.
+        // ProseMirror's setContent blows the selection away; we
+        // save the JSON-serialised selection anchor+head, run the
+        // replacement, then restore it. The cursor may land in
+        // slightly the wrong spot if the remote edit shifted nodes
+        // around the anchor, but it's far less disruptive than
+        // silently jumping to the end.
+        const anchor = editor?.state.selection.anchor ?? 0;
+        const head = editor?.state.selection.head ?? 0;
+        editor?.commands.setContent(newBody, false);
+        // Clamp to the new document length so an out-of-bounds
+        // anchor (remote edit shortened the doc) doesn't throw.
+        if (editor) {
+          const max = editor.state.doc.content.size;
+          const safeAnchor = Math.min(anchor, max);
+          const safeHead = Math.min(head, max);
+          editor.commands.setTextSelection({ from: safeAnchor, to: safeHead });
+        }
+      }
       editor?.setEditable(true);
       setLoadedFor(pid);
       if (pad.body && pad.updated_at) {
