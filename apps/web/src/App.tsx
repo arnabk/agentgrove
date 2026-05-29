@@ -109,8 +109,8 @@ export default function App() {
   return (
     <>
       <Show when={state.ready} fallback={<LoadingScreen />}>
-        <div class="h-screen p-4 sm:p-5 md:p-6 flex" data-testid="app-root" data-theme="dark">
-          <div class="ag-shell flex-1 flex min-w-0 rounded-xl border border-border shadow-2xl overflow-hidden">
+        <div class="h-screen flex" data-testid="app-root" data-theme="dark">
+          <div class="ag-shell flex-1 flex min-w-0 overflow-hidden">
             <Show when={state.projects.length > 0} fallback={null}>
               <LeftRail />
             </Show>
@@ -159,7 +159,7 @@ export default function App() {
                   </div>
                 </nav>
                 <div
-                  class="flex-1 min-h-0 bg-transparent p-5"
+                  class="flex-1 min-h-0 bg-transparent"
                   data-testid={`pane-${activePane()}-host`}
                 >
                   {/*
@@ -174,7 +174,7 @@ export default function App() {
                   via display:none) and trades a small memory cost
                   for predictable persistence.
                 */}
-                  <div class="ag-pane h-full rounded-lg border border-border overflow-hidden relative">
+                  <div class="ag-pane h-full overflow-hidden relative">
                     <For each={Object.keys(PANES) as PaneId[]}>
                       {(k) => (
                         <div
