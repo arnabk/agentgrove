@@ -557,6 +557,16 @@ export default function ChatPane() {
     });
     if (!ok) return;
     closeChatTab(id);
+    // If we just closed the chat that was active, immediately
+    // clear the in-memory view so the timeline doesn't show stale
+    // content while the reactive effect chain catches up. Without
+    // this the user sees the just-closed chat's bubbles for one
+    // render frame (or longer if the effect microtask races).
+    if (!activeId()) {
+      setChatStore(freshChatStore());
+      setInput("");
+      composer?.setMarkdown("");
+    }
   }
 
   /** Hand a list of File objects to the BE. Successful uploads append
