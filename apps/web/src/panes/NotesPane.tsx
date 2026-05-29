@@ -6,8 +6,10 @@ import TaskItem from "@tiptap/extension-task-item";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
 import Link from "@tiptap/extension-link";
+import GlobalDragHandle from "tiptap-extension-global-drag-handle";
 import { api } from "../api/client";
 import { state } from "../stores/app";
+import { useSyncSubscription } from "../lib/crossInstanceSync";
 
 /**
  * One large rich-text scratchpad per project. Persists to the BE at
@@ -53,6 +55,20 @@ export default function NotesPane() {
         Placeholder.configure({
           placeholder:
             "Start writing… use the toolbar above or markdown shortcuts like # H1, ## H2, - bullet, 1. list, [ ] task.",
+        }),
+        // Block-level drag handle: hovering any paragraph / heading
+        // / list-item reveals a `⠿` grab handle in the left gutter
+        // (see styles.css `.drag-handle`). Drag it to reorder
+        // anywhere in the doc; the underlying ProseMirror node
+        // moves as a unit so nested lists + tasks stay intact.
+        GlobalDragHandle.configure({
+          dragHandleWidth: 24,
+          scrollTreshold: 100,
+          // Default excludes already cover code blocks / horizontal
+          // rules; we add task-list children so dragging a parent
+          // task moves the whole subtree instead of orphaning the
+          // nested checks.
+          excludedTags: [],
         }),
       ],
       editorProps: {
@@ -145,6 +161,27 @@ export default function NotesPane() {
       setSaving(false);
     }
   }
+
+  // Cross-instance sync: another client (any browser, any
+  // machine) edited this project's scratchpad. Reload the doc so
+  // we render their changes; suppress our own save echo by
+  // comparing the BE updated_at against our last savedAt.
+  useSyncSubscription((frame) => {
+    if (frame.kind !== "scratchpad_updated") return;
+    const pid = loadedFor();
+    if (!pid || frame.project_id !== pid) return;
+    // If WE just saved (within the last 2 s) the frame is our
+    // own echo — skip the reload to avoid clobbering an in-
+    // flight edit. 2 s is generous enough to cover the BE
+    // round-trip + the WS replay back to us.
+    const last = savedAt();
+    if (last) {
+      const lastTs = new Date(last).getTime();
+      const remoteTs = new Date(frame.updated_at).getTime();
+      if (Math.abs(remoteTs - lastTs) < 2_000) return;
+    }
+    void loadForProject(pid);
+  });
 
   // ---- toolbar actions ----
   function chain() {

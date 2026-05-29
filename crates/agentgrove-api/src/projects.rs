@@ -98,7 +98,20 @@ pub async fn create(
         .create(NewProject { name, root })
         .await
         .map_err(map_err)?;
-    Ok(Json(record_to_dto(rec).await))
+    let dto = record_to_dto(rec).await;
+    // Cross-instance sync: the LeftRail in every connected
+    // browser refreshes its project list when a `project_created`
+    // event lands. The payload carries only the id so other
+    // clients pull the canonical record themselves.
+    state.logbus.publish(
+        "sync",
+        serde_json::json!({
+            "kind": "project_created",
+            "project_id": dto.id,
+        })
+        .to_string(),
+    );
+    Ok(Json(dto))
 }
 
 pub async fn list(
@@ -167,6 +180,17 @@ pub async fn delete(
     if !removed {
         return Err((StatusCode::NOT_FOUND, format!("project {id} not found")));
     }
+    // Cross-instance sync: tabs pinning this project drop it from
+    // their LeftRail + flip back to a sibling. Tabs unrelated to
+    // the project ignore the message.
+    state.logbus.publish(
+        "sync",
+        serde_json::json!({
+            "kind": "project_deleted",
+            "project_id": id,
+        })
+        .to_string(),
+    );
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -207,5 +231,18 @@ pub async fn update(
                 .map_err(map_err)?;
         }
     }
-    Ok(Json(record_to_dto(record).await))
+    let dto = record_to_dto(record).await;
+    // Cross-instance sync: project metadata changed (name,
+    // pre_worktree_script, etc.). Other tabs refresh their copy
+    // so the ProjectSettingsDialog + the rail row label stay
+    // consistent.
+    state.logbus.publish(
+        "sync",
+        serde_json::json!({
+            "kind": "project_updated",
+            "project_id": dto.id,
+        })
+        .to_string(),
+    );
+    Ok(Json(dto))
 }

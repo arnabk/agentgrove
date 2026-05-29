@@ -8,6 +8,7 @@ import MemoryIndicator from "./components/MemoryIndicator";
 import SettingsModal from "./components/SettingsModal";
 import Welcome from "./components/Welcome";
 import { installRouteSync } from "./lib/routeSync";
+import { installCrossInstanceSync } from "./lib/crossInstanceSync";
 import { declareMemorySource, estimateJsonBytes, recordMemoryUsage } from "./lib/memory";
 
 declareMemorySource("rail.projects", "Project + worktree state");
@@ -50,6 +51,16 @@ export default function App() {
   // state. Refreshing keeps you on the same scope + pane + chat +
   // file; copy-pasting the URL into another tab opens the same view.
   installRouteSync();
+
+  // Cross-browser-instance sync: open one WS to `/ws?topic=sync`
+  // and react to project / worktree / chat / scratchpad changes
+  // any other connected client makes. This is what lets two
+  // different browsers (or two machines) stay in step — same-
+  // origin BroadcastChannel covers only same-instance tabs.
+  onMount(() => {
+    const dispose = installCrossInstanceSync();
+    onCleanup(dispose);
+  });
 
   createEffect(() => {
     if (state.themes.length > 0) {

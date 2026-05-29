@@ -643,6 +643,23 @@ async fn persist_create_chat(
 
     let mut reg = state.chats.write().await;
     reg.ingest_chat(rec.clone());
+    drop(reg);
+
+    // Cross-instance sync: tell every browser/tab subscribed to
+    // the global `sync` topic that a new chat appeared so they
+    // can refresh their LeftRail chat lists. Payload stays tiny
+    // (ids + scope) — clients pull the full chat record on
+    // demand via GET /api/projects/:id/chats.
+    state.logbus.publish(
+        "sync",
+        serde_json::json!({
+            "kind": "chat_created",
+            "chat_id": rec.id,
+            "project_id": rec.project_id,
+            "worktree_id": rec.worktree_id,
+        })
+        .to_string(),
+    );
     Ok(rec)
 }
 
@@ -816,7 +833,26 @@ pub async fn patch(
     let rec = reg
         .get(&id)
         .ok_or((StatusCode::NOT_FOUND, format!("chat {id} not found")))?;
-    Ok(Json(window_chat(rec)))
+    let project_id = rec.project_id.clone();
+    let worktree_id = rec.worktree_id.clone();
+    let view = window_chat(rec);
+    drop(reg);
+
+    // Cross-instance sync: notify all subscribers that this chat
+    // changed (title rename, model/effort tweak). Payload carries
+    // the chat id + scope so the FE can decide if it cares — a
+    // tab pointing at a different project ignores the message.
+    state.logbus.publish(
+        "sync",
+        serde_json::json!({
+            "kind": "chat_updated",
+            "chat_id": id,
+            "project_id": project_id,
+            "worktree_id": worktree_id,
+        })
+        .to_string(),
+    );
+    Ok(Json(view))
 }
 
 /// Query for `GET /api/chats/:id/prompts`.

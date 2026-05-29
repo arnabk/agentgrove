@@ -72,12 +72,28 @@ pub async fn put(
     Json(body): Json<UpdateBody>,
 ) -> Result<Json<Scratchpad>, (StatusCode, String)> {
     let pad = Scratchpad {
-        project_id,
+        project_id: project_id.clone(),
         body: body.body,
         updated_at: Utc::now(),
     };
     write_one(&state.state_dir, &pad)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    // Cross-instance sync: every connected client (any browser,
+    // any machine) subscribed to the `sync` topic gets a small
+    // notification frame and re-fetches the scratchpad. The
+    // payload deliberately stays minimal (project_id +
+    // updated_at) — clients pull the body themselves so we don't
+    // round-trip the entire document over the WS for every
+    // keystroke save.
+    state.logbus.publish(
+        "sync",
+        serde_json::json!({
+            "kind": "scratchpad_updated",
+            "project_id": pad.project_id,
+            "updated_at": pad.updated_at.to_rfc3339(),
+        })
+        .to_string(),
+    );
     Ok(Json(pad))
 }

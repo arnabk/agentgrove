@@ -192,6 +192,10 @@ pub async fn create(
     let base_ref = body.base_ref.clone();
     let wt_id = record.id.clone();
     let project_root = project.root.clone();
+    // Capture project_id by value into the task; the sync
+    // publishes below clone it again so each json! macro gets a
+    // String it can move into the Value tree.
+    let project_id_for_task = project_id.clone();
     let wt_path_for_task = wt_path.clone();
     let topic_for_task = topic.clone();
     tokio::spawn(async move {
@@ -210,6 +214,15 @@ pub async fn create(
                 .worktrees
                 .set_status(&wt_id, WorktreeStatus::Failed)
                 .await;
+            state_for_task.logbus.publish(
+                "sync",
+                serde_json::json!({
+                    "kind": "worktree_updated",
+                    "worktree_id": wt_id,
+                    "project_id": project_id_for_task,
+                })
+                .to_string(),
+            );
             state_for_task.logbus.publish(
                 &topic_for_task,
                 serde_json::json!({
@@ -247,6 +260,15 @@ pub async fn create(
                 .worktrees
                 .set_status(&wt_id, WorktreeStatus::Failed)
                 .await;
+            state_for_task.logbus.publish(
+                "sync",
+                serde_json::json!({
+                    "kind": "worktree_updated",
+                    "worktree_id": wt_id,
+                    "project_id": project_id_for_task,
+                })
+                .to_string(),
+            );
             state_for_task.logbus.publish(
                 &topic_for_task,
                 serde_json::json!({"type":"stderr","line": format!("git worktree add failed: {e}")})
@@ -305,6 +327,15 @@ pub async fn create(
                         .set_status(&wt_id, WorktreeStatus::Failed)
                         .await;
                     state_for_task.logbus.publish(
+                        "sync",
+                        serde_json::json!({
+                            "kind": "worktree_updated",
+                            "worktree_id": wt_id,
+                            "project_id": project_id_for_task,
+                        })
+                        .to_string(),
+                    );
+                    state_for_task.logbus.publish(
                         &topic_for_task,
                         serde_json::json!({"type":"stderr","line": format!("pre-script exited {code}")})
                             .to_string(),
@@ -320,6 +351,15 @@ pub async fn create(
                         .worktrees
                         .set_status(&wt_id, WorktreeStatus::Failed)
                         .await;
+                    state_for_task.logbus.publish(
+                        "sync",
+                        serde_json::json!({
+                            "kind": "worktree_updated",
+                            "worktree_id": wt_id,
+                            "project_id": project_id_for_task,
+                        })
+                        .to_string(),
+                    );
                     state_for_task.logbus.publish(
                         &topic_for_task,
                         serde_json::json!({"type":"stderr","line": format!("pre-script error: {e}")})
@@ -342,8 +382,32 @@ pub async fn create(
             &topic_for_task,
             serde_json::json!({"type":"stage","stage":"ready"}).to_string(),
         );
+        // Cross-instance sync: tell other tabs the worktree is
+        // ready so their LeftRail row stops showing the pending
+        // chrome + a new chat can be created against it.
+        state_for_task.logbus.publish(
+            "sync",
+            serde_json::json!({
+                "kind": "worktree_updated",
+                "worktree_id": wt_id,
+                "project_id": project_id_for_task,
+            })
+            .to_string(),
+        );
     });
 
+    // Cross-instance sync on initial response: the row exists in
+    // status=creating; other tabs render it with the pending
+    // chrome until the ready broadcast above arrives.
+    state.logbus.publish(
+        "sync",
+        serde_json::json!({
+            "kind": "worktree_created",
+            "worktree_id": dto.id,
+            "project_id": dto.project_id,
+        })
+        .to_string(),
+    );
     Ok(Json(dto))
 }
 
@@ -454,6 +518,17 @@ pub async fn delete(
         .delete(&worktree_id)
         .await
         .map_err(map_wt_err)?;
+    // Cross-instance sync: tabs in other browser instances drop
+    // the row from their LeftRail.
+    state.logbus.publish(
+        "sync",
+        serde_json::json!({
+            "kind": "worktree_deleted",
+            "worktree_id": worktree_id,
+            "project_id": project_id,
+        })
+        .to_string(),
+    );
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -564,7 +639,18 @@ pub async fn update(
         .rename(&worktree_id, &new_branch)
         .await
         .map_err(map_wt_err)?;
-    Ok(Json(updated.into()))
+    let dto: WorktreeDto = updated.into();
+    // Cross-instance sync: branch label changed.
+    state.logbus.publish(
+        "sync",
+        serde_json::json!({
+            "kind": "worktree_updated",
+            "worktree_id": dto.id,
+            "project_id": dto.project_id,
+        })
+        .to_string(),
+    );
+    Ok(Json(dto))
 }
 
 /// Query params for `GET /api/worktrees/history`.
@@ -642,7 +728,17 @@ pub async fn restore(
         .get(&worktree_id)
         .await
         .map_err(map_wt_err)?;
-    Ok(Json(fresh.into()))
+    let dto: WorktreeDto = fresh.into();
+    state.logbus.publish(
+        "sync",
+        serde_json::json!({
+            "kind": "worktree_restored",
+            "worktree_id": dto.id,
+            "project_id": dto.project_id,
+        })
+        .to_string(),
+    );
+    Ok(Json(dto))
 }
 
 fn sanitize_branch(branch: &str) -> String {

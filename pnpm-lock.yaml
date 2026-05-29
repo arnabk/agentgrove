@@ -88,6 +88,9 @@ importers:
       solid-js:
         specifier: ^1.9.3
         version: 1.9.13
+      tiptap-extension-global-drag-handle:
+        specifier: ^0.1.18
+        version: 0.1.18
       tiptap-markdown:
         specifier: ^0.9.0
         version: 0.9.0(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))
@@ -2352,6 +2355,9 @@ packages:
   tinyspy@3.0.2:
     resolution: {integrity: sha512-n1cw8k1k0x4pgA2+9XrOkFydTerNcJ1zWCO5Nn9scWHTD+5tp8dghT2x1uduQePZTZgd3Tupf+x9BxJjeJi77Q==}
     engines: {node: '>=14.0.0'}
+
+  tiptap-extension-global-drag-handle@0.1.18:
+    resolution: {integrity: sha512-jwFuy1K8DP3a4bFy76Hpc63w1Sil0B7uZ3mvhQomVvUFCU787Lg2FowNhn7NFzeyok761qY2VG+PZ/FDthWUdg==}
 
   tiptap-markdown@0.9.0:
     resolution: {integrity: sha512-dKLQ9iiuGNgrlGVjrNauF/UBzWu4LYOx5pkD0jNkmQt/GOwfCJsBuzZTsf1jZ204ANHOm572mZ9PYvGh1S7tpQ==}
@@ -4896,6 +4902,8 @@ snapshots:
   tinyrainbow@1.2.0: {}
 
   tinyspy@3.0.2: {}
+
+  tiptap-extension-global-drag-handle@0.1.18: {}
 
   tiptap-markdown@0.9.0(@tiptap/core@2.27.2(@tiptap/pm@2.27.2)):
     dependencies:

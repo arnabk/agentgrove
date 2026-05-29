@@ -33,6 +33,7 @@ import Markdown from "../components/Markdown";
 import QueueDrawer from "../components/QueueDrawer";
 import ChatComposer, { type ChatComposerHandle } from "../components/ChatComposer";
 import { ToolRail } from "./chat/ToolRail";
+import { useSyncSubscription } from "../lib/crossInstanceSync";
 import {
   closeChatTab,
   currentScope,
@@ -460,6 +461,23 @@ export default function ChatPane() {
     void state.selectedProjectId;
     void currentWorktreeId();
     void refreshScopeChats();
+  });
+
+  // Cross-instance sync: another client (any browser, any
+  // machine) created or updated a chat in this scope. Reconcile
+  // our tab list so the row shows up (or its title catches up to
+  // a remote rename). Filter on scope so unrelated chats in
+  // other projects don't trigger a refresh.
+  useSyncSubscription((frame) => {
+    if (frame.kind !== "chat_created" && frame.kind !== "chat_updated") return;
+    if (frame.project_id !== state.selectedProjectId) return;
+    if ((frame.worktree_id ?? null) !== currentWorktreeId()) return;
+    void refreshScopeChats();
+    // Refresh the active chat view too so a remote rename / model
+    // change is reflected in the header chip.
+    if (frame.kind === "chat_updated" && frame.chat_id === activeId()) {
+      void loadChat();
+    }
   });
 
   // Reload the open chat whenever the active chat id changes.
