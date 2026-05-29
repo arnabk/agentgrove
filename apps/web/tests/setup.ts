@@ -34,6 +34,7 @@ globalThis.WebSocket = class FakeWebSocket extends EventTarget {
   onclose: ((ev: CloseEvent) => void) | null = null;
   onerror: ((ev: Event) => void) | null = null;
   onmessage: ((ev: MessageEvent) => void) | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   constructor(url: string | URL, _protocols?: string | string[]) {
     super();
     this.url = typeof url === "string" ? url : url.toString();
