@@ -1054,6 +1054,25 @@ export default function ChatPane() {
       */}
       <div class="flex-1 flex min-h-0">
         <div class="flex-1 flex flex-col min-w-0">
+          <Show
+            when={activeId()}
+            fallback={
+              <div class="flex-1 flex items-center justify-center text-[13px] text-fg-subtle px-6 text-center">
+                <Show
+                  when={tabs().length === 0 && state.selectedProjectId}
+                  fallback={
+                    <span>Select a project from the left to get started.</span>
+                  }
+                >
+                  <span>
+                    No chat open. Click{" "}
+                    <span class="ag-kbd">+ chat</span> in the left rail to
+                    start a conversation.
+                  </span>
+                </Show>
+              </div>
+            }
+          >
           <VirtualizedTimeline
             prompts={chatStore.prompts}
             liveTokens={chatStore.liveTokens}
@@ -1063,14 +1082,14 @@ export default function ChatPane() {
             onLoadOlder={() => void loadOlder()}
             onRevert={(p) => void revert(p)}
           />
+          </Show>
 
-          {/* Composer renders ONLY when there's an active chat. Otherwise
-          we show a small empty-state strip so the bottom of the pane
-          doesn't carry a disabled input that the user can't act on.
-          This guards against the post-deletion view too: when the
-          scope (project or worktree) is removed under us, activeId()
-          flips to null and we collapse the composer rather than
-          leaving a ghost "Send" button below the maze. */}
+          {/* Composer renders ONLY when there's an active chat — the
+          outer <Show when={activeId()}> on the timeline above already
+          handles the empty-state for the whole body. This inner Show
+          is kept as a SECOND gate so the composer form has its own
+          mount/unmount lifecycle (the chat-input Tiptap editor is
+          expensive to keep alive when no chat is selected). */}
           <Show
             when={activeId()}
             fallback={
