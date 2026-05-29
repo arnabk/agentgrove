@@ -13,7 +13,7 @@
 //! mutation, collect frames for up to a few seconds.
 
 use crate::support::BeHarness;
-use futures::{SinkExt as _, StreamExt as _};
+use futures::StreamExt as _;
 use serde_json::{json, Value};
 use tokio_tungstenite::tungstenite::Message;
 

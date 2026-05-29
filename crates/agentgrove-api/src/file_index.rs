@@ -203,7 +203,7 @@ impl FileIndex {
                 Some((s, f))
             })
             .collect();
-        scored.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_unstable_by_key(|&(score, _)| std::cmp::Reverse(score));
         scored.truncate(limit);
         scored
             .into_iter()

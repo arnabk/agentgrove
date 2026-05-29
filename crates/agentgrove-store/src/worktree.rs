@@ -305,39 +305,19 @@ impl WorktreeRepo {
         Ok(res.rows_affected() == 1)
     }
 
-    /// Rename a worktree's branch label. This is a metadata-only
-    /// update: the caller is responsible for invoking
-    /// `git branch -m` against the on-disk repo. The worktree's path
-    /// is left untouched (we deliberately do not move the directory —
-    /// keeping the on-disk layout stable across renames matches the
-    /// "rename branch only" policy chosen by the product).
-    ///
-    /// Returns the updated record on success.
-    ///
-    /// # Errors
-    ///
-    /// - [`WorktreeError::EmptyBranch`] if `new_branch` is blank.
-    /// - [`WorktreeError::NotFound`] if no row matched `id`.
-    /// - [`WorktreeError::Db`] for any underlying sqlx failure.
-    /// Reset lifecycle rows that are stuck in a transient state from a
+    /// Reset lifecycle rows stuck in a transient state from a
     /// previous run of the server.
     ///
     /// Statuses like `creating` / `pre_script` / `removing` are only
     /// valid mid-task; if the server was killed (or panicked) before
     /// the task finished, those rows stay in the transient state
-    /// forever — there's no resumable task on disk to flip them. We
-    /// rewrite them as follows:
+    /// forever. We rewrite them as follows:
     ///
-    ///   - `creating` / `pre_script` → `failed`  (the create flow
-    ///     never reached `ready`; surfacing the failure is more
-    ///     honest than silently pretending the worktree is fine.
-    ///     The user can delete + retry.)
-    ///   - `removing` → `ready`  (the delete flow never finished;
-    ///     the row is back to its pre-delete state. The user can
-    ///     re-click Remove to retry.)
+    /// - `creating` / `pre_script` → `failed` (the create flow
+    ///   never reached `ready`).
+    /// - `removing` → `ready` (the delete flow never finished).
     ///
-    /// Returns the number of rows touched so the caller can log it.
-    /// Idempotent: a second call after recovery is a no-op.
+    /// Returns the number of rows touched. Idempotent.
     ///
     /// # Errors
     ///

@@ -117,6 +117,7 @@ pub fn invalidate(id: ProviderId) {
 }
 
 #[cfg(test)]
+#[allow(clippy::await_holding_lock)]
 mod tests {
     use super::*;
 

@@ -20,21 +20,27 @@ pub struct StatusEntry {
 }
 
 impl StatusEntry {
+    /// True when the path is untracked (`??`).
     pub fn is_untracked(&self) -> bool {
         self.x == '?' && self.y == '?'
     }
+    /// True when the path is ignored (`!!`).
     pub fn is_ignored(&self) -> bool {
         self.x == '!' && self.y == '!'
     }
+    /// True when the path was renamed in the index or worktree.
     pub fn is_renamed(&self) -> bool {
         self.x == 'R' || self.y == 'R'
     }
+    /// True when the path was deleted in the index or worktree.
     pub fn is_deleted(&self) -> bool {
         self.x == 'D' || self.y == 'D'
     }
+    /// True when the path was added (staged `A` or untracked `?`).
     pub fn is_added(&self) -> bool {
         self.x == 'A' || self.y == '?'
     }
+    /// True when the path was modified in the index or worktree.
     pub fn is_modified(&self) -> bool {
         self.x == 'M' || self.y == 'M'
     }

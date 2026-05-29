@@ -258,8 +258,8 @@ impl AgentProvider for OpencodeProvider {
 
         let stderr = child.stderr.take();
         let events_for_stderr = events.clone();
-        let stderr_task = if let Some(stderr) = stderr {
-            Some(tokio::spawn(async move {
+        let stderr_task = stderr.map(|stderr| {
+            tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     if line.trim().is_empty() {
@@ -269,10 +269,8 @@ impl AgentProvider for OpencodeProvider {
                         message: line.trim().to_string(),
                     });
                 }
-            }))
-        } else {
-            None
-        };
+            })
+        });
 
         let status = child.wait().await?;
         let _ = stdout_task.await;

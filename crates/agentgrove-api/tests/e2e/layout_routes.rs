@@ -71,7 +71,7 @@ async fn put_scope_supports_project_root_and_worktree_scopes() {
         .collect();
     assert!(entries
         .iter()
-        .any(|(p, w, b)| *p == "proj-a" && *w == "" && (*b)["k"] == "v1"));
+        .any(|(p, w, b)| *p == "proj-a" && w.is_empty() && (*b)["k"] == "v1"));
     assert!(entries
         .iter()
         .any(|(p, w, b)| *p == "proj-a" && *w == "wt-x" && (*b)["k"] == "v2"));

@@ -138,8 +138,10 @@ mod tests {
 
     #[tokio::test]
     async fn history_is_bounded() {
-        let mut bus = LogBus::default();
-        bus.history_capacity = 3;
+        let bus = LogBus {
+            history_capacity: 3,
+            ..LogBus::default()
+        };
         for i in 0..10 {
             bus.publish("t", format!("msg{i}"));
         }

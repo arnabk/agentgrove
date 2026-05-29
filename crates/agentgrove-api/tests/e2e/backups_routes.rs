@@ -52,7 +52,7 @@ async fn create_manual_snapshot_returns_name() {
         .iter()
         .filter_map(|b| b["name"].as_str())
         .collect();
-    assert!(names.iter().any(|n| *n == name), "name missing: {names:?}");
+    assert!(names.contains(&name), "name missing: {names:?}");
 }
 
 /// Restoring an unknown snapshot is 404.

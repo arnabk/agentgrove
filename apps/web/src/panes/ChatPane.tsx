@@ -1078,28 +1078,25 @@ export default function ChatPane() {
               <div class="flex-1 flex items-center justify-center text-[13px] text-fg-subtle px-6 text-center">
                 <Show
                   when={tabs().length === 0 && state.selectedProjectId}
-                  fallback={
-                    <span>Select a project from the left to get started.</span>
-                  }
+                  fallback={<span>Select a project from the left to get started.</span>}
                 >
                   <span>
-                    No chat open. Click{" "}
-                    <span class="ag-kbd">+ chat</span> in the left rail to
-                    start a conversation.
+                    No chat open. Click <span class="ag-kbd">+ chat</span> in the left rail to start
+                    a conversation.
                   </span>
                 </Show>
               </div>
             }
           >
-          <VirtualizedTimeline
-            prompts={chatStore.prompts}
-            liveTokens={chatStore.liveTokens}
-            liveThinking={chatStore.liveThinking}
-            atStart={chatStore.atStart}
-            loadingOlder={chatStore.loadingOlder}
-            onLoadOlder={() => void loadOlder()}
-            onRevert={(p) => void revert(p)}
-          />
+            <VirtualizedTimeline
+              prompts={chatStore.prompts}
+              liveTokens={chatStore.liveTokens}
+              liveThinking={chatStore.liveThinking}
+              atStart={chatStore.atStart}
+              loadingOlder={chatStore.loadingOlder}
+              onLoadOlder={() => void loadOlder()}
+              onRevert={(p) => void revert(p)}
+            />
           </Show>
 
           {/* Composer renders ONLY when there's an active chat — the

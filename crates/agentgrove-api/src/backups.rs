@@ -90,7 +90,7 @@ pub async fn list(
             });
         }
     }
-    out.sort_by(|a, b| b.created_at_secs.cmp(&a.created_at_secs));
+    out.sort_by_key(|a| std::cmp::Reverse(a.created_at_secs));
     Ok(Json(BackupsListResponse {
         backups: out,
         state_dir: state.state_dir.to_string_lossy().into_owned(),

@@ -14,7 +14,7 @@ async fn make_project(h: &BeHarness) -> String {
         res.text().await.unwrap()
     );
     let p: Value = serde_json::from_str(
-        &h.get(&format!("/api/projects"))
+        &h.get("/api/projects")
             .send()
             .await
             .unwrap()

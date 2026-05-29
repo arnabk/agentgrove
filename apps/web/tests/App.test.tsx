@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, waitFor } from "@solidjs/testing-library";
+import { Route, Router } from "@solidjs/router";
 import App from "../src/App";
 
 /** Helper that returns 200 + empty array for any list endpoint and the
@@ -25,7 +26,11 @@ describe("App", () => {
   it("loads straight into the shell — no login, no token", async () => {
     const fetchMock = mockBackend();
     vi.stubGlobal("fetch", fetchMock);
-    const { findByTestId } = render(() => <App />);
+    const { findByTestId } = render(() => (
+      <Router>
+        <Route path="*" component={App} />
+      </Router>
+    ));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(await findByTestId("app-root")).toBeTruthy();
   });
@@ -33,7 +38,11 @@ describe("App", () => {
   it("shows the welcome screen when no projects exist", async () => {
     const fetchMock = mockBackend();
     vi.stubGlobal("fetch", fetchMock);
-    const { findByTestId } = render(() => <App />);
+    const { findByTestId } = render(() => (
+      <Router>
+        <Route path="*" component={App} />
+      </Router>
+    ));
     // Welcome takes over the main area when projects.length === 0.
     expect(await findByTestId("welcome")).toBeTruthy();
   });

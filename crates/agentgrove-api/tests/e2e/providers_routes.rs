@@ -80,7 +80,7 @@ async fn providers_commands_returns_static_claude_set() {
     }
     // Each item carries a non-empty description.
     for item in items {
-        assert!(item["description"].as_str().unwrap().len() > 0);
+        assert!(!item["description"].as_str().unwrap().is_empty());
     }
 }
 

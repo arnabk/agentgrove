@@ -177,7 +177,9 @@ pub enum MigrationError {
          sqlx detail: {detail}"
     )]
     ChecksumMismatch {
+        /// The original sqlx error message.
         detail: String,
+        /// Path to the most recent snapshot directory, if any.
         snapshot_hint: Option<std::path::PathBuf>,
     },
     /// The DB has applied a migration version that doesn't exist on
@@ -190,7 +192,9 @@ pub enum MigrationError {
          sqlx detail: {detail}"
     )]
     MissingMigration {
+        /// The original sqlx error message.
         detail: String,
+        /// Path to the most recent snapshot directory, if any.
         snapshot_hint: Option<std::path::PathBuf>,
     },
     /// Pass-through for everything else sqlx could throw at us.

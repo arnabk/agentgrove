@@ -284,9 +284,9 @@ impl TerminalManager {
     /// buffer's logical history. The ring drops oldest bytes once
     /// it exceeds 200 KB, so an old `since` can fall off the
     /// front; we handle that by returning the WHOLE current buffer
-    /// + a `total` the FE can adopt verbatim (the visual cost is a
-    /// one-time redraw, which is unavoidable when we've lost
-    /// scrollback anyway).
+    /// and a `total` the FE can adopt verbatim (the visual cost is
+    /// a one-time redraw, which is unavoidable when we've lost
+    /// scrollback).
     pub fn history_since(&self, id: &str, since: usize) -> Option<HistoryDelta> {
         let map = self.sessions.lock().unwrap();
         let sess = map.get(id)?.clone();

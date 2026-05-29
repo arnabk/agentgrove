@@ -578,6 +578,7 @@ pub(crate) async fn persist_chat_update(
 }
 
 /// Delete a chat from BOTH the store and the cache.
+#[allow(dead_code)]
 pub(crate) async fn persist_chat_delete(
     state: &AppState,
     chat_id: &str,
@@ -890,7 +891,7 @@ pub async fn list_prompts(
 ) -> Result<Json<PromptsBackfill>, StatusCode> {
     let reg = state.chats.read().await;
     let chat = reg.get(&id).ok_or(StatusCode::NOT_FOUND)?;
-    let limit = q.limit.min(200).max(1) as usize;
+    let limit = (q.limit).clamp(1, 200) as usize;
     let before = q.before;
     // Collect prompts with seq < before, take the last `limit`.
     let mut slice: Vec<PromptRecord> = chat
