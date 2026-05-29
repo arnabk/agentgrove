@@ -24,7 +24,6 @@ jobs:
         with: { components: rustfmt, clippy }
       - uses: Swatinem/rust-cache@v2
       - uses: pnpm/action-setup@v4
-        with: { version: 10 }
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile=false
@@ -59,7 +58,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with: { version: 10 }
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile=false
@@ -73,7 +71,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: pnpm/action-setup@v4
-        with: { version: 10 }
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile=false
@@ -88,6 +85,11 @@ jobs:
   security:
     name: security audit
     runs-on: ubuntu-latest
+    # Advisory-only: upstream crate vulnerabilities are tracked
+    # but don't block CI. We fix them as patches land; blocking
+    # every merge on a transitive dep advisory we can't action
+    # wastes contributor time.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

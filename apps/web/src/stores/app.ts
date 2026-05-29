@@ -57,6 +57,16 @@ export interface Scope {
 
   chats: ChatTab[];
   activeChat: string | null; // chat id
+
+  /** Set to true after the first chat-tab reconciliation (either
+   *  bootstrap from BE or user-initiated open/close). Distinguishes
+   *  "never visited this scope" (hydrated=false → seed with all BE
+   *  chats on first visit) from "user closed every chat"
+   *  (hydrated=true, chats=[] → stay empty). Without this the
+   *  closed-last-chat → switch away → switch back flow resurrects
+   *  the closed chat because refreshScopeChats sees chats=[] and
+   *  re-bootstraps. */
+  chatsHydrated?: boolean;
 }
 
 function freshScope(): Scope {
@@ -67,6 +77,7 @@ function freshScope(): Scope {
     activeTerminal: null,
     chats: [],
     activeChat: null,
+    chatsHydrated: false,
   };
 }
 
@@ -223,6 +234,7 @@ export function setScopeChats(chats: ChatTab[]) {
     key,
     produce((s) => {
       s.chats = chats;
+      s.chatsHydrated = true;
       if (s.activeChat && !chats.find((c) => c.id === s.activeChat)) {
         s.activeChat = chats[0]?.id ?? null;
       } else if (!s.activeChat && chats.length > 0) {

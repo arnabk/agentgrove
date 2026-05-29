@@ -255,10 +255,18 @@ export default function ChatPane() {
       const beChats = all.filter((c) => (c.worktree_id ?? null) === wt);
       const beById = new Map(beChats.map((c) => [c.id, c]));
       const current = scope()?.chats ?? [];
-      if (current.length === 0) {
-        // Bootstrap: scope has no tabs yet — seed with everything
-        // the BE knows about.
+      const hydrated = scope()?.chatsHydrated ?? false;
+      if (current.length === 0 && !hydrated) {
+        // Bootstrap: scope has NEVER been visited — seed with
+        // everything the BE knows about. Once hydrated=true is set
+        // (via setScopeChats), an empty list means "user closed
+        // everything" and we respect that rather than re-seeding.
         setScopeChats(beChats.map((c) => ({ id: c.id, title: c.title })));
+        return;
+      }
+      if (current.length === 0 && hydrated) {
+        // User has explicitly closed every tab in this scope.
+        // Don't resurrect them — leave the tab strip empty.
         return;
       }
       // Reconcile: keep the local tab order, drop tabs whose chat
