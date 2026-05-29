@@ -1,0 +1,186 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+
+# Only one release at a time — if two merges land in quick
+# succession the second run waits for the first to finish so
+# version numbers stay sequential.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  # ── 1. Bump version + create tag ────────────────────────────
+  tag:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+      skipped: ${{ steps.bump.outputs.skipped }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine next version
+        id: bump
+        run: |
+          set -euo pipefail
+          # Read current version from root Cargo.toml.
+          CURRENT=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "current=$CURRENT"
+
+          # Check if this version is already tagged — if so, bump
+          # the patch number. If not (e.g. someone manually bumped
+          # the version in Cargo.toml), use it as-is.
+          if git rev-parse "v$CURRENT" >/dev/null 2>&1; then
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+            PATCH=$((PATCH + 1))
+            NEXT="${MAJOR}.${MINOR}.${PATCH}"
+          else
+            NEXT="$CURRENT"
+          fi
+
+          # If HEAD is already tagged with this version, skip.
+          if git tag --points-at HEAD | grep -q "^v${NEXT}$"; then
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            echo "Already tagged v$NEXT — skipping."
+            exit 0
+          fi
+
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEXT" >> "$GITHUB_OUTPUT"
+          echo "skipped=false" >> "$GITHUB_OUTPUT"
+
+          # Patch version in workspace Cargo.toml + FE package.json.
+          sed -i "s/^version = \"$CURRENT\"/version = \"$NEXT\"/" Cargo.toml
+          # Also update the workspace member crates that inherit
+          # `version.workspace = true` — Cargo resolves the version
+          # from the root, so only the root needs the bump.
+          if [ -f apps/web/package.json ]; then
+            sed -i "s/\"version\": \"$CURRENT\"/\"version\": \"$NEXT\"/" apps/web/package.json
+          fi
+
+          git add Cargo.toml apps/web/package.json || true
+          git commit -m "chore: bump version to $NEXT [skip ci]" || true
+          git tag "v$NEXT"
+          git push origin main --tags
+
+  # ── 2. Build release binaries ───────────────────────────────
+  build:
+    needs: tag
+    if: needs.tag.outputs.skipped != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: agentgrove-linux-x64
+            ext: ""
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: agentgrove-macos-arm64
+            ext: ""
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: agentgrove-macos-x64
+            ext: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: agentgrove-windows-x64
+            ext: ".exe"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }} -p agentgrove-server
+
+      - name: Package binary
+        shell: bash
+        run: |
+          mkdir -p dist
+          BIN="target/${{ matrix.target }}/release/agentgrove${{ matrix.ext }}"
+          cp "$BIN" "dist/${{ matrix.artifact }}${{ matrix.ext }}"
+
+      - name: Install Node + build FE
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -C apps/web build
+      - name: Package FE dist
+        shell: bash
+        run: |
+          tar -czf "dist/${{ matrix.artifact }}-web.tar.gz" -C apps/web/dist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/
+
+  # ── 3. Create GitHub Release ────────────────────────────────
+  release:
+    needs: [tag, build]
+    if: needs.tag.outputs.skipped != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          set -euo pipefail
+          # Find the previous tag (the one before our new tag).
+          PREV=$(git tag --sort=-v:refname | head -2 | tail -1 || echo "")
+          if [ -z "$PREV" ] || [ "$PREV" = "${{ needs.tag.outputs.tag }}" ]; then
+            echo "body=Initial release 🎉" >> "$GITHUB_OUTPUT"
+          else
+            BODY=$(git log --oneline "$PREV".."${{ needs.tag.outputs.tag }}" --pretty=format:"- %s" | head -50)
+            # GitHub Actions multiline output.
+            {
+              echo "body<<EOF"
+              echo "$BODY"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.tag.outputs.tag }}
+          name: ${{ needs.tag.outputs.tag }}
+          body: ${{ steps.changelog.outputs.body }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
