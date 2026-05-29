@@ -32,6 +32,11 @@ export default function NotesPane() {
   const [loadedFor, setLoadedFor] = createSignal<string | null>(null);
   const [savedAt, setSavedAt] = createSignal<string | null>(null);
   const [saving, setSaving] = createSignal(false);
+  // Raw epoch ms of our last successful save. The cross-instance
+  // sync echo guard compares against this — `savedAt` above is a
+  // localised display string (e.g. "02:35 PM") that can't be
+  // parsed back into a millisecond value reliably.
+  let lastSavedMs = 0;
   const [err, setErr] = createSignal<string | null>(null);
   const [linkBarOpen, setLinkBarOpen] = createSignal(false);
   const [linkValue, setLinkValue] = createSignal("https://");
@@ -154,6 +159,7 @@ export default function NotesPane() {
     try {
       const html = editor.getHTML();
       await api.saveScratchpad(pid, html);
+      lastSavedMs = Date.now();
       setSavedAt(formatTime(new Date().toISOString()));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -170,16 +176,12 @@ export default function NotesPane() {
     if (frame.kind !== "scratchpad_updated") return;
     const pid = loadedFor();
     if (!pid || frame.project_id !== pid) return;
-    // If WE just saved (within the last 2 s) the frame is our
-    // own echo — skip the reload to avoid clobbering an in-
-    // flight edit. 2 s is generous enough to cover the BE
-    // round-trip + the WS replay back to us.
-    const last = savedAt();
-    if (last) {
-      const lastTs = new Date(last).getTime();
-      const remoteTs = new Date(frame.updated_at).getTime();
-      if (Math.abs(remoteTs - lastTs) < 2_000) return;
-    }
+    // If WE just saved (within the last 3 s) the frame is our
+    // own echo — skip the reload to avoid clobbering the user's
+    // in-flight edits. We compare against the raw epoch ms from
+    // our last successful PUT, NOT the formatted display string
+    // (`savedAt` is "02:35 PM" which can't round-trip).
+    if (lastSavedMs > 0 && Date.now() - lastSavedMs < 3_000) return;
     void loadForProject(pid);
   });
 
