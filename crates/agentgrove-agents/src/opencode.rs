@@ -147,20 +147,13 @@ impl AgentProvider for OpencodeProvider {
             version,
             default_model: DEFAULT_MODEL.to_string(),
             models,
-            // `opencode run --session <id>` exists, but opencode
-            // binds each session to a canonicalised project-path
-            // hash AND resumes the cwd from the session's project
-            // record (NOT from --cwd on the resume call). That
-            // breaks every worktree chat: opencode looks the
-            // session up against the worktree path, finds nothing,
-            // falls back to the original project root, and runs
-            // its tool calls there instead of the worktree we
-            // dispatched into. Until opencode honours the resume
-            // cwd we always start fresh — each turn re-establishes
-            // the prompt context from the chat history we hand it
-            // via stdin / the prompt arg, and tools land in the
-            // right tree.
-            supports_resume: false,
+            // Session resume is supported via `--session <id>`. We
+            // always pair it with `--dir <cwd>` on the spawn so
+            // opencode's cwd-rebinding (it normally resumes against
+            // the session's original project record) doesn't drift
+            // worktree chats into the wrong tree. See `spawn()` for
+            // the rationale + flag wiring.
+            supports_resume: true,
         }
     }
 
@@ -193,14 +186,19 @@ impl AgentProvider for OpencodeProvider {
         if opts.effort.is_some() {
             cmd.arg("--thinking");
         }
-        // Intentionally NOT passing `--session`: opencode resumes
-        // sessions against the project they were originally bound
-        // to (canonicalised path hash), ignoring `cwd`. Resuming a
-        // session created against the project root would land all
-        // subsequent tool calls in the project root instead of the
-        // worktree the user expects. See `detect()` for the full
-        // rationale.
-        let _ = opts.resume_session_id.as_deref();
+        // Always pin opencode's working directory via `--dir`.
+        // Without this `--session` resume would land tool calls in
+        // the directory the session was ORIGINALLY created against
+        // (opencode binds sessions to a canonicalised project-path
+        // hash and otherwise ignores the spawn cwd on resume). With
+        // `--dir` set, opencode honours it for both fresh and
+        // resumed sessions, so worktree-scoped chats stay scoped.
+        // We also keep `cmd.current_dir()` set below so non-flag
+        // path resolution (relative attachments, etc.) works.
+        cmd.arg("--dir").arg(&opts.cwd);
+        if let Some(session) = opts.resume_session_id.as_deref() {
+            cmd.arg("--session").arg(session);
+        }
         if opts.auto_approve_tools {
             // Same rationale as Claude: opencode's permission
             // prompts assume a TTY; we never give it one. Without
@@ -587,9 +585,10 @@ mod tests {
         assert_eq!(d.id, ProviderId::Opencode);
         assert_eq!(d.label, "opencode");
         assert_eq!(d.default_model, DEFAULT_MODEL);
-        // Opencode resume is disabled today — see the `detect`
-        // method docs for the cwd-rebinding rationale.
-        assert!(!d.supports_resume);
+        // Opencode resume is enabled, paired with `--dir <cwd>` to
+        // override its session-bound cwd. See `detect`/`spawn`
+        // docs for the full rationale.
+        assert!(d.supports_resume);
         // `available` / `version` / `path` are environment-dependent.
     }
 }
