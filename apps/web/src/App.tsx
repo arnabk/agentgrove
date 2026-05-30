@@ -1,11 +1,13 @@
-import { For, Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import { Dynamic } from "solid-js/web";
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import ChangesPanel from "./components/ChangesPanel";
 import CommandPalette from "./components/CommandPalette";
 import { DialogHost } from "./components/dialog";
 import LeftRail from "./components/LeftRail";
 import MemoryIndicator from "./components/MemoryIndicator";
+import RightSidebar from "./components/RightSidebar";
 import SettingsModal from "./components/SettingsModal";
+import TabStrip from "./components/TabStrip";
+import NewChatDialog from "./components/NewChatDialog";
 import Welcome from "./components/Welcome";
 import { installRouteSync } from "./lib/routeSync";
 import { installCrossInstanceSync } from "./lib/crossInstanceSync";
@@ -15,34 +17,65 @@ declareMemorySource("rail.projects", "Project + worktree state");
 import ChatPane from "./panes/ChatPane";
 import EditorPane from "./panes/EditorPane";
 import TerminalPane from "./panes/TerminalPane";
-import NotesPane from "./panes/NotesPane";
 import {
-  activePane,
+  activeTab,
+  addChatTab,
+  addTerminalTab,
   bootstrap,
   changesScope,
-  setActivePane,
+  currentScope,
+  isSidebarOpen,
   setSettingsOpen,
   setTheme,
   state,
+  toggleSidebar,
 } from "./stores/app";
-
-const PANES = {
-  chat: ChatPane,
-  editor: EditorPane,
-  terminal: TerminalPane,
-  notes: NotesPane,
-} as const;
-
-type PaneId = keyof typeof PANES;
-
-const PANE_META: Record<PaneId, { label: string; Icon: () => JSX.Element }> = {
-  chat: { label: "Chat", Icon: ChatIcon },
-  editor: { label: "Editor", Icon: EditorIcon },
-  terminal: { label: "Terminal", Icon: TerminalIcon },
-  notes: { label: "Notes", Icon: NotesIcon },
-};
+import { api } from "./api/client";
 
 export default function App() {
+  // NewChatDialog state — reused from LeftRail's pattern.
+  const [newChatFor, setNewChatFor] = createSignal<{
+    projectId: string;
+    worktreeId: string | null;
+    parentName: string;
+  } | null>(null);
+
+  function openNewChatDialog() {
+    const pid = state.selectedProjectId;
+    if (!pid) return;
+    const p = state.projects.find((x) => x.id === pid);
+    if (!p) return;
+    const wid = state.selectedWorktreeByProject[pid] ?? null;
+    setNewChatFor({
+      projectId: pid,
+      worktreeId: wid,
+      parentName: p.name,
+    });
+  }
+
+  async function openNewTerminal() {
+    const pid = state.selectedProjectId;
+    if (!pid) return;
+    try {
+      const t = await api.createTerminal({
+        cols: 80,
+        rows: 24,
+        project_id: pid,
+        ...(state.selectedWorktreeByProject[pid]
+          ? { worktree_id: state.selectedWorktreeByProject[pid]! }
+          : {}),
+      });
+      const scope = currentScope();
+      const termCount = scope?.tabs.filter((x) => x.kind === "terminal").length ?? 0;
+      addTerminalTab({
+        id: t.id,
+        cwd: t.cwd,
+        label: `term ${termCount + 1}`,
+      });
+    } catch {
+      // silently fail — user can retry
+    }
+  }
   onMount(async () => {
     await bootstrap();
   });
@@ -132,61 +165,66 @@ export default function App() {
                   </>
                 }
               >
-                <nav
-                  class="h-12 px-4 flex items-center gap-1.5 border-b border-border bg-transparent"
-                  data-testid="pane-tabs"
-                >
-                  <For each={Object.keys(PANES) as PaneId[]}>
-                    {(k) => (
-                      <button
-                        class="ag-btn ag-btn-ghost !py-1.5 !px-3 text-[12.5px]"
-                        classList={{
-                          "!bg-bg-3 !text-fg": activePane() === k,
-                        }}
-                        onClick={() => setActivePane(k)}
-                        data-testid={`tab-${k}`}
-                      >
-                        <span aria-hidden="true" class="text-fg-subtle inline-flex items-center">
-                          {PANE_META[k].Icon()}
-                        </span>
-                        <span>{PANE_META[k].label}</span>
-                      </button>
-                    )}
-                  </For>
-                  <div class="ml-auto flex items-center gap-2">
+                {/* Top bar: unified tab strip + settings + indicators */}
+                <div class="flex items-center border-b border-border bg-bg-1 shrink-0">
+                  <div class="flex-1 min-w-0 overflow-hidden">
+                    <TabStrip
+                      onNewChat={() => openNewChatDialog()}
+                      onNewTerminal={() => openNewTerminal()}
+                      onOpenFile={() => setPaletteOpen(true)}
+                    />
+                  </div>
+                  <div class="flex items-center gap-2 px-3 shrink-0">
+                    <button
+                      type="button"
+                      class="ag-btn ag-btn-ghost ag-btn-sm text-[11px]"
+                      onClick={toggleSidebar}
+                      title={isSidebarOpen() ? "Hide sidebar" : "Show sidebar"}
+                      data-testid="sidebar-toggle"
+                    >
+                      {isSidebarOpen() ? "▶" : "◀"}
+                    </button>
                     <SettingsButton />
                     <TopBarIndicators />
                   </div>
-                </nav>
-                <div
-                  class="flex-1 min-h-0 bg-transparent"
-                  data-testid={`pane-${activePane()}-host`}
-                >
-                  {/*
-                  All panes stay MOUNTED simultaneously and we toggle
-                  visibility via CSS. Unmounting on tab switch tore
-                  down each pane's local state — the chat composer
-                  draft, scroll position, file-tree expansion, etc.
-                  — which made simple "flip to terminal, come back"
-                  flows lose work the user didn't realise was
-                  in-flight. Keeping all panes mounted matches the
-                  TerminalPane's own internal tab strategy (hide
-                  via display:none) and trades a small memory cost
-                  for predictable persistence.
-                */}
-                  <div class="ag-pane h-full overflow-hidden relative">
-                    <For each={Object.keys(PANES) as PaneId[]}>
-                      {(k) => (
+                </div>
+
+                {/* Main content: active tab pane + right sidebar */}
+                <div class="flex-1 flex min-h-0">
+                  <div class="flex-1 min-w-0 relative">
+                    {/* Render the active tab's content. Each tab type
+                        gets its own host div keyed by tab.id so xterm /
+                        Tiptap / CodeMirror instances survive tab
+                        switches (display:none/block toggle). */}
+                    <For each={currentScope()?.tabs ?? []}>
+                      {(tab) => (
                         <div
                           class="absolute inset-0"
-                          style={{ display: activePane() === k ? "block" : "none" }}
-                          data-testid={`pane-mount-${k}`}
+                          style={{
+                            display: tab.id === (activeTab()?.id ?? null) ? "block" : "none",
+                          }}
+                          data-testid={`tab-host-${tab.id}`}
                         >
-                          <Dynamic component={PANES[k]} />
+                          <Show when={tab.kind === "chat"}>
+                            <ChatPane />
+                          </Show>
+                          <Show when={tab.kind === "terminal"}>
+                            <TerminalPane />
+                          </Show>
+                          <Show when={tab.kind === "editor"}>
+                            <EditorPane />
+                          </Show>
                         </div>
                       )}
                     </For>
+                    <Show when={(currentScope()?.tabs ?? []).length === 0}>
+                      <div class="absolute inset-0 flex items-center justify-center text-[13px] text-fg-subtle px-6 text-center">
+                        Click <span class="ag-kbd mx-1">+</span> in the tab strip or use the left
+                        rail to open a chat, terminal, or file.
+                      </div>
+                    </Show>
                   </div>
+                  <RightSidebar />
                 </div>
               </Show>
             </main>
@@ -194,6 +232,20 @@ export default function App() {
         </div>
       </Show>
       <SettingsModal />
+      <Show when={newChatFor()} keyed>
+        {(ctx) => (
+          <NewChatDialog
+            projectId={ctx.projectId}
+            worktreeId={ctx.worktreeId}
+            defaultTitle={`chat in ${ctx.parentName}`}
+            onCancel={() => setNewChatFor(null)}
+            onCreated={(chat) => {
+              addChatTab({ id: chat.id, title: chat.title });
+              setNewChatFor(null);
+            }}
+          />
+        )}
+      </Show>
       <Show when={changesScope()}>
         <ChangesPanel />
       </Show>
@@ -247,91 +299,6 @@ function SettingsButton() {
 }
 
 /** Lucide `message-square` — used for the Chat pane tab. */
-function ChatIcon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.8"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-/** Lucide `file-code-2` — used for the Editor pane tab. */
-function EditorIcon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.8"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4" />
-      <path d="M14 2v4a2 2 0 0 0 2 2h4" />
-      <path d="m5 12-3 3 3 3" />
-      <path d="m9 18 3-3-3-3" />
-    </svg>
-  );
-}
-
-/** Lucide `terminal-square` — used for the Terminal pane tab. */
-function TerminalIcon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.8"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <path d="m7 11 2-2-2-2" />
-      <path d="M11 13h4" />
-      <rect width="18" height="18" x="3" y="3" rx="2" />
-    </svg>
-  );
-}
-
-/** Lucide `notebook-pen` — used for the Notes pane tab. */
-function NotesIcon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="1.8"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.6" />
-      <path d="M2 6h4" />
-      <path d="M2 10h4" />
-      <path d="M2 14h4" />
-      <path d="M2 18h4" />
-      <path d="M21.4 4.6a2.1 2.1 0 1 1 3 3L16 16l-4 1 1-4z" />
-    </svg>
-  );
-}
-
 function GearIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
