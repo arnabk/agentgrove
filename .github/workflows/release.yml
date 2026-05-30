@@ -93,7 +93,7 @@ jobs:
             target: aarch64-apple-darwin
             artifact: agentgrove-macos-arm64
             ext: ""
-          - os: macos-latest
+          - os: macos-13
             target: x86_64-apple-darwin
             artifact: agentgrove-macos-x64
             ext: ""
