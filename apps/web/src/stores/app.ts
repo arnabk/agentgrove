@@ -34,49 +34,67 @@ export interface TerminalTab {
   label: string;
 }
 
-/** Chat tab — references a chat record on the BE. */
+// ---- Unified tab model ------------------------------------------------
+//
+// Every item the user works with in the main area is a "tab" in a
+// flat strip. No grouping by type — chats, terminals, and file
+// editors live side by side in the order the user opened them.
+// Notes are NOT a tab — they live in the always-visible right
+// sidebar.
+
+/** Discriminated union for the different tab types. Each variant
+ *  carries the minimal state the tab strip needs to render its
+ *  chip (icon + label) + the content pane needs to mount. */
+export type UnifiedTab =
+  | { kind: "chat"; id: string; title: string; draft?: string }
+  | { kind: "terminal"; id: string; cwd: string; label: string }
+  | { kind: "editor"; id: string; path: string; label: string };
+
+/** Legacy chat tab — kept for migration from the old layout blobs.
+ *  New code should use `UnifiedTab` exclusively. */
 export interface ChatTab {
   id: string;
   title: string;
-  /** Unsent composer draft for this chat. Persisted via the layout
-   *  write-through so it survives page reloads + scope switches.
-   *  Empty / missing means no draft. */
   draft?: string;
 }
 
-/** Workspace scope: chat/editor/terminal state. Owned by a scope key
+/** Workspace scope: unified tab state. Owned by a scope key
  *  (project, or worktree-of-project). */
 export interface Scope {
-  activePane: PaneId;
+  /** Flat list of open tabs in display order. Mixed types. */
+  tabs: UnifiedTab[];
+  /** ID of the currently-focused tab, or null when the strip is
+   *  empty. Must match one of `tabs[].id`. */
+  activeTab: string | null;
+  /** Whether the right sidebar (Notes + Queue) is visible. */
+  sidebarOpen: boolean;
 
-  /** Active file in the (single-instance) editor — absolute path. */
-  activeEditor: string | null;
-
-  terminals: TerminalTab[];
-  activeTerminal: string | null; // pty id
-
-  chats: ChatTab[];
-  activeChat: string | null; // chat id
-
-  /** Set to true after the first chat-tab reconciliation (either
-   *  bootstrap from BE or user-initiated open/close). Distinguishes
-   *  "never visited this scope" (hydrated=false → seed with all BE
-   *  chats on first visit) from "user closed every chat"
-   *  (hydrated=true, chats=[] → stay empty). Without this the
-   *  closed-last-chat → switch away → switch back flow resurrects
-   *  the closed chat because refreshScopeChats sees chats=[] and
-   *  re-bootstraps. */
+  // ---- Legacy fields kept for migration + backward compat ----
+  // The layout write-through still serialises these so an older FE
+  // reading the same blob doesn't crash. New code ignores them and
+  // reads from `tabs` + `activeTab` instead. They'll be dropped in
+  // a future cleanup pass once every user has migrated.
+  /** @deprecated Use tabs + activeTab. */
+  activePane?: PaneId;
+  /** @deprecated Use tabs filtered by kind=editor. */
+  activeEditor?: string | null;
+  /** @deprecated Use tabs filtered by kind=terminal. */
+  terminals?: TerminalTab[];
+  /** @deprecated Use tabs filtered by kind=terminal + activeTab. */
+  activeTerminal?: string | null;
+  /** @deprecated Use tabs filtered by kind=chat. */
+  chats?: ChatTab[];
+  /** @deprecated Use activeTab. */
+  activeChat?: string | null;
+  /** @deprecated Bootstrap tracking for chats. */
   chatsHydrated?: boolean;
 }
 
 function freshScope(): Scope {
   return {
-    activePane: "chat",
-    activeEditor: null,
-    terminals: [],
-    activeTerminal: null,
-    chats: [],
-    activeChat: null,
+    tabs: [],
+    activeTab: null,
+    sidebarOpen: true,
     chatsHydrated: false,
   };
 }
@@ -163,68 +181,155 @@ export function currentScope(): Scope | undefined {
   return state.byScope[key];
 }
 
-export function activePane(): PaneId {
-  return currentScope()?.activePane ?? "chat";
+// ---- Unified tab helpers -----------------------------------------------
+//
+// The new model: a flat `tabs: UnifiedTab[]` + `activeTab: string | null`.
+// Every chat, terminal, and file editor is a tab. Notes are NOT tabs —
+// they live in the always-visible right sidebar.
+
+/** The currently active tab object, or undefined. */
+export function activeTab(): UnifiedTab | undefined {
+  const scope = currentScope();
+  if (!scope?.activeTab) return undefined;
+  return scope.tabs.find((t) => t.id === scope.activeTab);
 }
 
-export function setActivePane(pane: PaneId) {
-  const key = currentScopeKey();
-  if (!key) return;
-  ensureScope(key);
-  setState("byScope", key, "activePane", pane);
-  scheduleScopeLayoutWrite(key);
+/** What "kind" of content the active tab shows. */
+export function activeTabKind(): UnifiedTab["kind"] | null {
+  return activeTab()?.kind ?? null;
 }
 
-// ---- editor (single file per scope) ------------------------------------
-
-export function selectFile(path: string) {
-  const key = currentScopeKey();
-  if (!key) return;
-  ensureScope(key);
-  setState("byScope", key, "activeEditor", path);
-  setState("byScope", key, "activePane", "editor");
-  scheduleScopeLayoutWrite(key);
-}
-
-export function selectedFilePath(): string | null {
-  return currentScope()?.activeEditor ?? null;
-}
-
-export function selectedChatId(): string | null {
-  return currentScope()?.activeChat ?? null;
-}
-
-// ---- chat tabs ---------------------------------------------------------
-
-export function addChatTab(chat: ChatTab): { ok: boolean; reason?: string } {
+/** Add a tab to the current scope. Activates it. Returns ok/reason
+ *  for consistency with the old API shape. */
+export function addTab(tab: UnifiedTab): { ok: boolean; reason?: string } {
   const key = currentScopeKey();
   if (!key) return { ok: false, reason: "no project selected" };
   ensureScope(key);
-  const scope = state.byScope[key]!;
-  if (scope.chats.find((c) => c.id === chat.id)) {
-    setState("byScope", key, "activeChat", chat.id);
-    scheduleScopeLayoutWrite(key);
-    return { ok: true };
-  }
-  // No per-scope chat cap: users can create as many chats as they want.
   setState(
     "byScope",
     key,
     produce((s) => {
-      s.chats.push(chat);
-      s.activeChat = chat.id;
-      s.activePane = "chat";
+      if (s.tabs.find((t) => t.id === tab.id)) {
+        // Already open — just activate.
+        s.activeTab = tab.id;
+        return;
+      }
+      s.tabs.push(tab);
+      s.activeTab = tab.id;
     }),
   );
   scheduleScopeLayoutWrite(key);
   return { ok: true };
 }
 
-/**
- * Replace the active scope's chat tabs with `chats`, preserving the
- * activeChat selection when possible. Used after refreshing the chat
- * list from the BE on scope switch.
- */
+/** Close a tab by id. Activates a neighbour if the closed tab was
+ *  active. Returns whether anything was removed. */
+export function closeTab(tabId: string): boolean {
+  const key = currentScopeKey();
+  if (!key) return false;
+  let removed = false;
+  setState(
+    "byScope",
+    key,
+    produce((s) => {
+      const idx = s.tabs.findIndex((t) => t.id === tabId);
+      if (idx < 0) return;
+      s.tabs.splice(idx, 1);
+      removed = true;
+      if (s.activeTab === tabId) {
+        s.activeTab = s.tabs[Math.min(idx, s.tabs.length - 1)]?.id ?? null;
+      }
+    }),
+  );
+  if (removed) scheduleScopeLayoutWrite(key);
+  return removed;
+}
+
+/** Switch focus to an existing tab. */
+export function setActiveTab(tabId: string) {
+  const key = currentScopeKey();
+  if (!key) return;
+  setState("byScope", key, "activeTab", tabId);
+  scheduleScopeLayoutWrite(key);
+}
+
+/** Toggle the right sidebar (Notes + Queue). */
+export function toggleSidebar() {
+  const key = currentScopeKey();
+  if (!key) return;
+  ensureScope(key);
+  setState(
+    "byScope",
+    key,
+    produce((s) => {
+      s.sidebarOpen = !s.sidebarOpen;
+    }),
+  );
+  scheduleScopeLayoutWrite(key);
+}
+
+/** Whether the right sidebar is open. */
+export function isSidebarOpen(): boolean {
+  return currentScope()?.sidebarOpen ?? true;
+}
+
+// ---- Backward-compat shims (delegate to unified tabs) -----------------
+//
+// These keep existing callers (ChatPane, TerminalPane, LeftRail, …)
+// working during the incremental migration. They'll be inlined or
+// deleted once every caller switches to addTab/closeTab/setActiveTab.
+
+/** @deprecated Use activeTab() filtered by kind. */
+export function activePane(): PaneId {
+  const tab = activeTab();
+  if (!tab) return "chat";
+  switch (tab.kind) {
+    case "chat":
+      return "chat";
+    case "terminal":
+      return "terminal";
+    case "editor":
+      return "editor";
+  }
+}
+
+/** @deprecated Use addTab + setActiveTab. */
+export function setActivePane(pane: PaneId) {
+  // Legacy: pane switcher is gone. This is a no-op now; callers
+  // that used it to switch panes should use setActiveTab instead.
+  void pane;
+}
+
+// ---- editor (opens as a tab now) ----------------------------------------
+
+export function selectFile(path: string) {
+  const label = path.split("/").pop() ?? path;
+  addTab({ kind: "editor", id: `file:${path}`, path, label });
+}
+
+export function selectedFilePath(): string | null {
+  const tab = activeTab();
+  if (tab?.kind === "editor") return tab.path;
+  return null;
+}
+
+export function selectedChatId(): string | null {
+  const tab = activeTab();
+  if (tab?.kind === "chat") return tab.id;
+  return null;
+}
+
+// ---- chat tab shims (delegate to unified tabs) -------------------------
+
+export function addChatTab(chat: ChatTab): { ok: boolean; reason?: string } {
+  return addTab({
+    kind: "chat",
+    id: chat.id,
+    title: chat.title,
+    ...(chat.draft ? { draft: chat.draft } : {}),
+  });
+}
+
 export function setScopeChats(chats: ChatTab[]) {
   const key = currentScopeKey();
   if (!key) return;
@@ -233,12 +338,32 @@ export function setScopeChats(chats: ChatTab[]) {
     "byScope",
     key,
     produce((s) => {
-      s.chats = chats;
+      // Remove chat tabs not in the new list.
+      const chatIds = new Set(chats.map((c) => c.id));
+      s.tabs = s.tabs.filter((t) => t.kind !== "chat" || chatIds.has(t.id));
+      // Add any new chats not already in tabs.
+      const existing = new Set(s.tabs.map((t) => t.id));
+      for (const c of chats) {
+        if (!existing.has(c.id)) {
+          s.tabs.push({
+            kind: "chat",
+            id: c.id,
+            title: c.title,
+            ...(c.draft ? { draft: c.draft } : {}),
+          });
+        } else {
+          // Update title + preserve draft from tab.
+          const tab = s.tabs.find((t) => t.id === c.id);
+          if (tab && tab.kind === "chat") {
+            tab.title = c.title;
+          }
+        }
+      }
       s.chatsHydrated = true;
-      if (s.activeChat && !chats.find((c) => c.id === s.activeChat)) {
-        s.activeChat = chats[0]?.id ?? null;
-      } else if (!s.activeChat && chats.length > 0) {
-        s.activeChat = chats[0]!.id;
+      // If active tab was a removed chat, pick the first chat or null.
+      if (s.activeTab && !s.tabs.find((t) => t.id === s.activeTab)) {
+        const firstChat = s.tabs.find((t) => t.kind === "chat");
+        s.activeTab = firstChat?.id ?? s.tabs[0]?.id ?? null;
       }
     }),
   );
@@ -246,34 +371,14 @@ export function setScopeChats(chats: ChatTab[]) {
 }
 
 export function closeChatTab(chatId: string) {
-  const key = currentScopeKey();
-  if (!key) return;
-  setState(
-    "byScope",
-    key,
-    produce((s) => {
-      const idx = s.chats.findIndex((c) => c.id === chatId);
-      if (idx < 0) return;
-      s.chats.splice(idx, 1);
-      if (s.activeChat === chatId) {
-        s.activeChat = s.chats[Math.min(idx, s.chats.length - 1)]?.id ?? null;
-      }
-    }),
-  );
-  scheduleScopeLayoutWrite(key);
+  closeTab(chatId);
 }
 
 export function setActiveChat(chatId: string) {
-  const key = currentScopeKey();
-  if (!key) return;
-  setState("byScope", key, "activeChat", chatId);
-  scheduleScopeLayoutWrite(key);
+  setActiveTab(chatId);
 }
 
-/** Persist an in-flight composer draft for `chatId`. Stored on the
- *  chat tab so each chat keeps its own draft across scope switches
- *  + reloads. The draft is dropped on successful send (caller
- *  passes `""`). */
+/** Persist an in-flight composer draft for `chatId`. */
 export function setChatDraft(chatId: string, draft: string) {
   const key = currentScopeKey();
   if (!key) return;
@@ -281,10 +386,8 @@ export function setChatDraft(chatId: string, draft: string) {
     "byScope",
     key,
     produce((s) => {
-      const tab = s.chats.find((c) => c.id === chatId);
-      if (!tab) return;
-      // Normalise so `""` clears the field entirely (avoids serialising
-      // empty strings into the layout blob on every keystroke).
+      const tab = s.tabs.find((t) => t.kind === "chat" && t.id === chatId);
+      if (!tab || tab.kind !== "chat") return;
       if (draft.length === 0) {
         delete tab.draft;
       } else {
@@ -299,58 +402,27 @@ export function setChatDraft(chatId: string, draft: string) {
 export function getChatDraft(chatId: string): string {
   const key = currentScopeKey();
   if (!key) return "";
-  const tab = state.byScope[key]?.chats.find((c) => c.id === chatId);
-  return tab?.draft ?? "";
+  const tab = state.byScope[key]?.tabs.find((t) => t.kind === "chat" && t.id === chatId);
+  return (tab as { draft?: string } | undefined)?.draft ?? "";
 }
 
-// ---- terminal tabs -----------------------------------------------------
+// ---- terminal tab shims (delegate to unified tabs) --------------------
 
 export function addTerminalTab(t: TerminalTab): { ok: boolean; reason?: string } {
-  const key = currentScopeKey();
-  if (!key) return { ok: false, reason: "no project selected" };
-  ensureScope(key);
-  const scope = state.byScope[key]!;
-  if (scope.terminals.find((x) => x.id === t.id)) {
-    setState("byScope", key, "activeTerminal", t.id);
-    scheduleScopeLayoutWrite(key);
-    return { ok: true };
-  }
-  setState(
-    "byScope",
-    key,
-    produce((s) => {
-      s.terminals.push(t);
-      s.activeTerminal = t.id;
-      s.activePane = "terminal";
-    }),
-  );
-  scheduleScopeLayoutWrite(key);
-  return { ok: true };
+  return addTab({
+    kind: "terminal",
+    id: t.id,
+    cwd: t.cwd,
+    label: t.label,
+  });
 }
 
 export function closeTerminalTab(id: string) {
-  const key = currentScopeKey();
-  if (!key) return;
-  setState(
-    "byScope",
-    key,
-    produce((s) => {
-      const idx = s.terminals.findIndex((x) => x.id === id);
-      if (idx < 0) return;
-      s.terminals.splice(idx, 1);
-      if (s.activeTerminal === id) {
-        s.activeTerminal = s.terminals[Math.min(idx, s.terminals.length - 1)]?.id ?? null;
-      }
-    }),
-  );
-  scheduleScopeLayoutWrite(key);
+  closeTab(id);
 }
 
 export function setActiveTerminal(id: string) {
-  const key = currentScopeKey();
-  if (!key) return;
-  setState("byScope", key, "activeTerminal", id);
-  scheduleScopeLayoutWrite(key);
+  setActiveTab(id);
 }
 
 // ---- project + worktree lifecycle --------------------------------------
@@ -458,11 +530,69 @@ async function hydrateLayoutFromBackend() {
     const snap = await api.getLayout();
     for (const s of snap.scopes) {
       const key = s.worktree_id ? `${s.project_id}::${s.worktree_id}` : s.project_id;
-      // Spread over a freshScope so any missing field gets a sane
-      // default — the BE's blob is the FE's shape, but tolerant
-      // hydration protects us across schema additions.
-      const incoming = s.blob as Partial<Scope>;
-      setState("byScope", key, { ...freshScope(), ...incoming });
+      const incoming = s.blob as Partial<Scope> & {
+        chats?: ChatTab[];
+        terminals?: TerminalTab[];
+        activeChat?: string | null;
+        activeTerminal?: string | null;
+        activeEditor?: string | null;
+        activePane?: PaneId;
+      };
+      const base = { ...freshScope(), ...incoming };
+
+      // ---- Migration: old layout → unified tabs ----
+      // Old blobs have `chats[]` + `terminals[]` + `activeEditor`
+      // + `activeChat` + `activeTerminal` as separate fields.
+      // If `tabs` is missing or empty AND the old fields have data,
+      // migrate into the unified model.
+      if (
+        (!base.tabs || base.tabs.length === 0) &&
+        ((incoming.chats && incoming.chats.length > 0) ||
+          (incoming.terminals && incoming.terminals.length > 0) ||
+          incoming.activeEditor)
+      ) {
+        const migrated: UnifiedTab[] = [];
+        // Chats first.
+        for (const c of incoming.chats ?? []) {
+          migrated.push({
+            kind: "chat",
+            id: c.id,
+            title: c.title,
+            ...(c.draft ? { draft: c.draft } : {}),
+          });
+        }
+        // Terminals.
+        for (const t of incoming.terminals ?? []) {
+          migrated.push({
+            kind: "terminal",
+            id: t.id,
+            cwd: t.cwd,
+            label: t.label,
+          });
+        }
+        // Editor (at most one in the old model).
+        if (incoming.activeEditor) {
+          const label = incoming.activeEditor.split("/").pop() ?? incoming.activeEditor;
+          migrated.push({
+            kind: "editor",
+            id: `file:${incoming.activeEditor}`,
+            path: incoming.activeEditor,
+            label,
+          });
+        }
+        base.tabs = migrated;
+        // Resolve activeTab from the old active* fields.
+        if (incoming.activeChat) {
+          base.activeTab = incoming.activeChat;
+        } else if (incoming.activeTerminal) {
+          base.activeTab = incoming.activeTerminal;
+        } else if (incoming.activeEditor) {
+          base.activeTab = `file:${incoming.activeEditor}`;
+        } else {
+          base.activeTab = migrated[0]?.id ?? null;
+        }
+      }
+      setState("byScope", key, base);
     }
   } catch {
     // Layout is best-effort — running without it just means a

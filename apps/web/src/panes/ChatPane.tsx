@@ -455,10 +455,7 @@ export default function ChatPane() {
           // Auto-reconnect with exponential backoff.
           reconnectTimer = setTimeout(() => {
             reconnectTimer = null;
-            reconnectDelay = Math.min(
-              reconnectDelay * 2,
-              RECONNECT_MAX,
-            );
+            reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX);
             connect();
           }, reconnectDelay);
         }

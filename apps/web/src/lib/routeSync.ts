@@ -94,7 +94,7 @@ export function installRouteSync() {
       // activeChat=null → route sync sees ?chat=<stale-id> →
       // re-instates the closed chat as active, resurrecting it.
       const scope = currentScope();
-      const inTabs = scope?.chats.some((c) => c.id === chat);
+      const inTabs = scope?.tabs.some((t) => t.id === chat);
       if (inTabs) {
         setActiveChat(chat);
       }

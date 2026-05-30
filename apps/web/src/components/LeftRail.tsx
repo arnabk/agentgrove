@@ -233,7 +233,7 @@ export default function LeftRail() {
         cwd: t.cwd,
         // Match TerminalPane's naming convention so labels stay
         // consistent regardless of where the terminal was created.
-        label: `term ${(scope?.terminals.length ?? 0) + 1}`,
+        label: `term ${(scope?.tabs.filter((t) => t.kind === "terminal").length ?? 0) + 1}`,
       };
       const res = addTerminalTab(tab);
       if (!res.ok) setErr(res.reason ?? `could not open terminal in ${label}`);
