@@ -216,6 +216,34 @@ export default function ChatPane() {
   const tabs = () => scope()?.chats ?? [];
   const activeId = () => selectedChatId();
 
+  /** Scan the active chat's events for the FIRST GitHub PR URL.
+   *  Returns `{ url, shortLabel }` or null. Used by the chat header
+   *  to render a clickable PR badge without any BE schema change —
+   *  purely derived from the agent's output. */
+  const detectedPr = createMemo(() => {
+    const PR_RE = /https?:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/;
+    for (const p of chatStore.prompts) {
+      for (const ev of p.events) {
+        const text =
+          ev.type === "token"
+            ? ev.text
+            : ev.type === "tool_result"
+              ? JSON.stringify(ev.result)
+              : "";
+        const m = PR_RE.exec(text);
+        if (m) {
+          return {
+            url: m[0],
+            repo: m[1],
+            number: m[2],
+            shortLabel: `#${m[2]}`,
+          };
+        }
+      }
+    }
+    return null;
+  });
+
   /** Refresh the chat list for the active scope from the BE.
    *
    *  Tabs in this scope are user-curated: closing a tab is a local
@@ -1036,6 +1064,20 @@ export default function ChatPane() {
               <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
             </Show>
           </button>
+        </Show>
+        {/* PR badge: auto-detected from agent output. Shows the PR
+            number as a clickable link that opens in a new tab. */}
+        <Show when={detectedPr()}>
+          <a
+            href={detectedPr()!.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="ml-1 ag-chip ag-chip-accent flex items-center gap-1 hover:bg-accent/20 text-[11px] font-mono"
+            title={`Open PR ${detectedPr()!.shortLabel} on GitHub`}
+            data-testid="chat-pr-badge"
+          >
+            <span>PR {detectedPr()!.shortLabel}</span>
+          </a>
         </Show>
         <Show when={err()}>
           <span

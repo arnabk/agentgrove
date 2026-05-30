@@ -221,13 +221,40 @@ fn settings_path(state_dir: &std::path::Path) -> PathBuf {
 /// ship. Bump (`"v2"`, ...) and add a new constant + matching batch
 /// in `seed_batches()` when shipping additional templates later.
 const PROMPT_SEED_V1: &str = "v1";
+const PROMPT_SEED_V2: &str = "v2";
 
 /// Every seed batch we know how to apply, in deterministic order.
 /// Each entry returns the templates for that batch — the read path
 /// merges them into the user's `prompts` list iff the batch id is
 /// not already in `applied_prompt_seeds`.
 fn seed_batches() -> Vec<(&'static str, Vec<PromptTemplate>)> {
-    vec![(PROMPT_SEED_V1, default_prompts())]
+    vec![
+        (PROMPT_SEED_V1, default_prompts()),
+        (PROMPT_SEED_V2, v2_prompts()),
+    ]
+}
+
+/// Second batch of default prompts (v2). Added post-launch.
+fn v2_prompts() -> Vec<PromptTemplate> {
+    vec![PromptTemplate {
+        id: "00000000-0000-4000-8000-000000000009".into(),
+        name: "Merge latest from remote".into(),
+        body: "Merge the latest changes from the remote tracking branch into \
+the current branch and resolve all merge conflicts.\n\n\
+Steps:\n\
+1. Run `git fetch origin` to pull the latest remote state.\n\
+2. Identify the remote tracking branch for the current branch \
+   (typically `origin/<current-branch>` or `origin/main`).\n\
+3. Run `git merge <tracking-branch>` to start the merge.\n\
+4. If there are conflicts, inspect each conflicted file, resolve \
+   them by keeping the correct combination of both sides, then \
+   `git add` the resolved files.\n\
+5. Complete the merge with `git commit`.\n\
+6. Push the result with `git push`.\n\n\
+If the merge is clean (no conflicts), just push. If conflicts \
+are complex, explain what you changed and why for each file."
+            .into(),
+    }]
 }
 
 /// Public re-entrant accessor: reads `settings.json` from `state_dir`

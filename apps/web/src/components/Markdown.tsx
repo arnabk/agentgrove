@@ -34,6 +34,17 @@ marked.use({
   breaks: true,
 });
 
+// Force every <a> rendered by the sanitized markdown to open in a
+// new tab. DOMPurify's afterSanitizeAttributes hook fires once per
+// element AFTER sanitization; we inject target + rel so no link
+// navigates away from the AgentGrove shell.
+DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (node.tagName === "A") {
+    node.setAttribute("target", "_blank");
+    node.setAttribute("rel", "noopener noreferrer");
+  }
+});
+
 interface Props {
   /** Raw markdown source. Empty string renders nothing. */
   source: string;
