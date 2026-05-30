@@ -1,6 +1,7 @@
 import { createEffect } from "solid-js";
 import { useLocation, useNavigate } from "@solidjs/router";
 import {
+  currentScope,
   currentWorktreeId,
   selectFile,
   selectProject,
@@ -88,7 +89,15 @@ export function installRouteSync() {
     }
     const chat = search.get("chat");
     if (chat && selectedChatId() !== chat) {
-      setActiveChat(chat);
+      // Only restore if the chat is still in the current scope's
+      // tab list. Without this check, closing the last tab →
+      // activeChat=null → route sync sees ?chat=<stale-id> →
+      // re-instates the closed chat as active, resurrecting it.
+      const scope = currentScope();
+      const inTabs = scope?.chats.some((c) => c.id === chat);
+      if (inTabs) {
+        setActiveChat(chat);
+      }
     }
     const file = search.get("file");
     if (file && file !== selectedFilePath()) {
