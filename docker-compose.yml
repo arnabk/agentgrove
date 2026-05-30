@@ -1,0 +1,35 @@
+# Isolated testing stack. Single container serves both BE API +
+# FE static files on port 4318. The host's dev instance
+# (:4317 / :5173) is completely untouched.
+#
+#   docker compose up -d          # build + start
+#   open http://localhost:4318     # test (FE + BE on same origin)
+#   docker compose down           # stop + remove
+#   docker compose down -v        # also wipe test data volume
+#
+# Data lives in a named Docker volume (`ag-test-data`), fully
+# isolated from the host's `.data/` directory.
+
+services:
+  agentgrove:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - AGENTGROVE_STATE_DIR=/home/agentgrove/.data
+      - AGENTGROVE_BIND=0.0.0.0
+      - AGENTGROVE_PORT=4317
+      # Serve the FE static bundle from the same process so the
+      # browser's same-origin default in api/client.ts works
+      # without any localStorage override. The BE's Axum router
+      # falls back to serving files from AGENTGROVE_STATIC_DIR
+      # for any path that doesn't match an /api/* or /ws route.
+      - AGENTGROVE_STATIC_DIR=/home/agentgrove/web-dist
+    ports:
+      - "4318:4317"
+    volumes:
+      - ag-test-data:/home/agentgrove/.data
+    restart: unless-stopped
+
+volumes:
+  ag-test-data:

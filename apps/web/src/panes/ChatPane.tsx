@@ -400,58 +400,85 @@ export default function ChatPane() {
     }
   }
 
-  // Subscribe to per-chat event stream. Tears down on chat switch.
+  // Subscribe to per-chat event stream with auto-reconnect.
+  // When the WS drops (BE restart, network blip, cargo-watch
+  // rebuild) we back off and re-establish so streaming resumes
+  // without the user having to reload the page.
   createEffect(() => {
     const id = activeId();
     if (!id) return;
     const url = wsUrlFor(`chat:${id}`);
     let socket: WebSocket | null = null;
     let closed = false;
-    try {
-      socket = new WebSocket(url);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-      return;
-    }
-    socket.addEventListener("message", (ev) => {
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let reconnectDelay = 1_000;
+    const RECONNECT_MAX = 10_000;
+
+    function connect() {
       if (closed) return;
-      // `queue_dispatched` is a hint from the BE that the queue
-      // popped an item and dispatched it as a new prompt. Use the
-      // SOFT reconcile path so we pick up the new prompt without
-      // wiping in-flight liveTokens / liveThinking buffers — those
-      // belong to the prompt the BE is now streaming, and a hard
-      // reload would discard partial tokens between WS deliveries.
       try {
-        if (typeof ev.data === "string") {
-          const parsed = JSON.parse(ev.data) as {
-            queue_dispatched?: string;
-            chat_idle?: boolean;
-          };
-          if (parsed.queue_dispatched) {
-            void reconcileChat();
-            return;
-          }
-          if (parsed.chat_idle) {
-            // BE finished the turn (and any auto-drain). Reconcile
-            // so the FE picks up the canonical persisted events
-            // even if a streaming frame got lost.
-            void reconcileChat();
-            return;
-          }
-        }
-      } catch {
-        // fall through to the normal event path
+        socket = new WebSocket(url);
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e));
+        return;
       }
-      const frame = parseWsFrame(ev.data);
-      if (!frame) return;
-      setChatStore(produce((s) => applyWsFrame(s, frame)));
-    });
-    socket.addEventListener("error", () => {
-      // BE will reconnect via our manual fetch on next interaction;
-      // don't surface transient WS hiccups as user errors.
-    });
+      socket.addEventListener("open", () => {
+        reconnectDelay = 1_000;
+      });
+      socket.addEventListener("message", (ev) => {
+        if (closed) return;
+        try {
+          if (typeof ev.data === "string") {
+            const parsed = JSON.parse(ev.data) as {
+              queue_dispatched?: string;
+              chat_idle?: boolean;
+            };
+            if (parsed.queue_dispatched) {
+              void reconcileChat();
+              return;
+            }
+            if (parsed.chat_idle) {
+              void reconcileChat();
+              return;
+            }
+          }
+        } catch {
+          // fall through to the normal event path
+        }
+        const frame = parseWsFrame(ev.data);
+        if (!frame) return;
+        setChatStore(produce((s) => applyWsFrame(s, frame)));
+      });
+      socket.addEventListener("close", () => {
+        socket = null;
+        if (!closed) {
+          // Auto-reconnect with exponential backoff.
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            reconnectDelay = Math.min(
+              reconnectDelay * 2,
+              RECONNECT_MAX,
+            );
+            connect();
+          }, reconnectDelay);
+        }
+      });
+      socket.addEventListener("error", () => {
+        // The close event fires right after error; reconnect
+        // happens there. Suppress user-facing noise.
+        try {
+          socket?.close();
+        } catch {
+          // ignore
+        }
+      });
+    }
+
+    connect();
+
     onCleanup(() => {
       closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       try {
         socket?.close();
       } catch {

@@ -184,5 +184,22 @@ pub fn build_router(state: AppState) -> Router {
         .allow_headers(Any)
         .allow_origin(Any);
 
-    api.layer(cors).with_state(state)
+    let router = api.layer(cors).with_state(state);
+
+    // Optional: serve a static FE bundle from `AGENTGROVE_STATIC_DIR`.
+    // When set, every request that doesn't match an API / WS route
+    // falls through to the SPA's `index.html` via
+    // `tower_http::services::ServeDir`. This lets a single Docker
+    // container serve both the API and the FE on the same port so
+    // the browser's same-origin default in `api/client.ts` works
+    // without any manual `ag-be` localStorage override.
+    if let Ok(dir) = std::env::var("AGENTGROVE_STATIC_DIR") {
+        let serve = tower_http::services::ServeDir::new(&dir)
+            .not_found_service(tower_http::services::ServeFile::new(
+                format!("{dir}/index.html"),
+            ));
+        router.fallback_service(serve)
+    } else {
+        router
+    }
 }
