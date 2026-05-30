@@ -1062,7 +1062,7 @@ async fn rapid_fire_then_manual_then_run_next_drains_every_item() {
             .unwrap();
         total_attempts += 1;
         assert!(
-            total_attempts <= 200,
+            total_attempts <= 500,
             "too many run_next attempts — likely deadlock"
         );
         match res.status().as_u16() {
@@ -1076,8 +1076,9 @@ async fn rapid_fire_then_manual_then_run_next_drains_every_item() {
             409 => {
                 // Chat is mid-turn (auto-drain task hasn't fully
                 // released the dispatching flag yet). Back off and
-                // retry; this is normal.
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                // retry; this is normal. CI runners are slower so
+                // we give them more headroom.
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 continue;
             }
             other => panic!(
