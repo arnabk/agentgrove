@@ -548,15 +548,27 @@ export default function ChatPane() {
     });
     if (!ok) return;
     closeChatTab(id);
-    // If we just closed the chat that was active, immediately
-    // clear the in-memory view so the timeline doesn't show stale
-    // content while the reactive effect chain catches up. Without
-    // this the user sees the just-closed chat's bubbles for one
-    // render frame (or longer if the effect microtask races).
+    // Immediately clear the in-memory view + strip the stale
+    // ?chat= from the URL. Without both steps:
+    //   1. The timeline shows the just-closed chat's bubbles for
+    //      one render frame (chatStore still populated).
+    //   2. The URL→store route sync reads ?chat=<stale-id>,
+    //      calls setActiveChat(<stale-id>), and re-instates the
+    //      closed chat — making it impossible to actually close.
+    //
+    // We clear the store + composer synchronously so the DOM
+    // update lands in the same frame as the tab removal, and we
+    // strip ?chat= from the URL before the route-sync effect
+    // gets a chance to re-read it.
     if (!activeId()) {
       setChatStore(freshChatStore());
       setInput("");
       composer?.setMarkdown("");
+      // Strip ?chat= from the URL so the route-sync URL→store
+      // effect doesn't resurrect the closed chat.
+      const url = new URL(window.location.href);
+      url.searchParams.delete("chat");
+      window.history.replaceState(null, "", url.pathname + url.search);
     }
   }
 
