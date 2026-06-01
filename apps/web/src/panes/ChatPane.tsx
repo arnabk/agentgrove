@@ -914,61 +914,57 @@ export default function ChatPane() {
 
   return (
     <section data-testid="chat-pane" class="flex flex-col h-full">
-      {/* Chat-specific status bar */}
-      <header
-        class="h-11 px-4 flex items-center gap-1.5 border-b border-border bg-bg-1 overflow-x-auto"
-        data-testid="chat-status-bar"
-      >
-        <span
-          class="text-[13px] font-semibold tracking-tight truncate max-w-[200px]"
-          title={chatStore.view?.title}
+      {/* Chat-specific status badges (queue + PR + error + settings).
+          Title is shown in the unified TabStrip — not repeated here. */}
+      <Show when={activeId() && ((queueSummary()?.total ?? 0) > 0 || detectedPr() || err())}>
+        <header
+          class="h-8 px-4 flex items-center gap-1.5 border-b border-border bg-bg-1 overflow-x-auto"
+          data-testid="chat-status-bar"
         >
-          {chatStore.view?.title}
-        </span>
-
-        {/* Queue status indicator. Moved from a toggle button to a
+          {/* Queue status indicator. Moved from a toggle button to a
             read-only badge now that the queue lives permanently in
             the RightSidebar. Highlights when active. */}
-        <Show when={activeId() && (queueSummary()?.total ?? 0) > 0}>
-          <div
-            class="ml-1 ag-chip flex items-center gap-1"
-            classList={{
-              "!border-accent": (queueSummary()?.running ?? 0) > 0,
-            }}
-            title={`Queue: ${queueSummary()?.pending ?? 0} pending, ${queueSummary()?.running ?? 0} running, ${queueSummary()?.total ?? 0} total`}
-            data-testid="chat-queue-badge"
-          >
-            <span class="text-fg-subtle">⏳ queue</span>
-            <span class="text-fg font-mono">{queueSummary()?.pending ?? 0}</span>
-            <Show when={(queueSummary()?.running ?? 0) > 0}>
-              <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-            </Show>
-          </div>
-        </Show>
-        {/* PR badge: auto-detected from agent output. Shows the PR
+          <Show when={activeId() && (queueSummary()?.total ?? 0) > 0}>
+            <div
+              class="ml-1 ag-chip flex items-center gap-1"
+              classList={{
+                "!border-accent": (queueSummary()?.running ?? 0) > 0,
+              }}
+              title={`Queue: ${queueSummary()?.pending ?? 0} pending, ${queueSummary()?.running ?? 0} running, ${queueSummary()?.total ?? 0} total`}
+              data-testid="chat-queue-badge"
+            >
+              <span class="text-fg-subtle">⏳ queue</span>
+              <span class="text-fg font-mono">{queueSummary()?.pending ?? 0}</span>
+              <Show when={(queueSummary()?.running ?? 0) > 0}>
+                <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+              </Show>
+            </div>
+          </Show>
+          {/* PR badge: auto-detected from agent output. Shows the PR
             number as a clickable link that opens in a new tab. */}
-        <Show when={detectedPr()}>
-          <a
-            href={detectedPr()!.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            class="ml-1 ag-chip ag-chip-accent flex items-center gap-1 hover:bg-accent/20 text-[11px] font-mono"
-            title={`Open PR ${detectedPr()!.shortLabel} on GitHub`}
-            data-testid="chat-pr-badge"
-          >
-            <span>PR {detectedPr()!.shortLabel}</span>
-          </a>
-        </Show>
-        <Show when={err()}>
-          <span
-            class="ml-auto text-[11.5px] text-danger"
-            data-testid="chat-error"
-            title={err() ?? ""}
-          >
-            {err()}
-          </span>
-        </Show>
-      </header>
+          <Show when={detectedPr()}>
+            <a
+              href={detectedPr()!.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="ml-1 ag-chip ag-chip-accent flex items-center gap-1 hover:bg-accent/20 text-[11px] font-mono"
+              title={`Open PR ${detectedPr()!.shortLabel} on GitHub`}
+              data-testid="chat-pr-badge"
+            >
+              <span>PR {detectedPr()!.shortLabel}</span>
+            </a>
+          </Show>
+          <Show when={err()}>
+            <span
+              class="ml-auto text-[11.5px] text-danger"
+              data-testid="chat-error"
+              title={err() ?? ""}
+            >
+              {err()}
+            </span>
+          </Show>
+        </header>
+      </Show>
 
       {/*
         Chat body: a horizontal split with the timeline + composer
