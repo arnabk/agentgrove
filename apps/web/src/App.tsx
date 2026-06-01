@@ -40,6 +40,16 @@ export default function App() {
     parentName: string;
   } | null>(null);
 
+  // Left rail collapse state (persisted to localStorage).
+  const [leftRailOpen, setLeftRailOpen] = createSignal(
+    localStorage.getItem("ag-left-rail-open") !== "0",
+  );
+  function toggleLeftRail() {
+    const next = !leftRailOpen();
+    setLeftRailOpen(next);
+    localStorage.setItem("ag-left-rail-open", next ? "1" : "0");
+  }
+
   function openNewChatDialog() {
     const pid = state.selectedProjectId;
     if (!pid) return;
@@ -144,7 +154,7 @@ export default function App() {
       <Show when={state.ready} fallback={<LoadingScreen />}>
         <div class="h-screen flex" data-testid="app-root" data-theme="dark">
           <div class="ag-shell flex-1 flex min-w-0 overflow-hidden">
-            <Show when={state.projects.length > 0} fallback={null}>
+            <Show when={state.projects.length > 0 && leftRailOpen()} fallback={null}>
               <LeftRail />
             </Show>
             <main class="flex-1 flex flex-col min-w-0 bg-transparent" data-testid="main-area">
@@ -167,6 +177,29 @@ export default function App() {
               >
                 {/* Top bar: unified tab strip + settings + indicators */}
                 <div class="flex items-center border-b border-border bg-bg-1 shrink-0">
+                  {/* Left rail toggle */}
+                  <button
+                    type="button"
+                    class="ag-btn ag-btn-ghost ag-btn-icon shrink-0 ml-1"
+                    onClick={toggleLeftRail}
+                    title={leftRailOpen() ? "Hide projects" : "Show projects"}
+                    data-testid="left-rail-toggle"
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <path d="M9 3v18" />
+                    </svg>
+                  </button>
                   <div class="flex-1 min-w-0 overflow-hidden">
                     <TabStrip
                       onNewChat={() => openNewChatDialog()}
