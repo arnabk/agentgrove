@@ -26,12 +26,10 @@ import ChatComposer, { type ChatComposerHandle } from "../components/ChatCompose
 import { ToolRail } from "./chat/ToolRail";
 import { useSyncSubscription } from "../lib/crossInstanceSync";
 import {
-  closeChatTab,
   currentScope,
   currentWorktreeId,
   getChatDraft,
   selectedChatId,
-  setActiveChat,
   setChatDraft,
   setScopeChats,
   state,
@@ -134,8 +132,6 @@ export default function ChatPane() {
   const [dragActive, setDragActive] = createSignal(false);
   // Inline rename state. `renamingId` is the chat being edited (or null);
   // `renameDraft` holds the in-flight input value.
-  const [renamingId, setRenamingId] = createSignal<string | null>(null);
-  const [renameDraft, setRenameDraft] = createSignal("");
   // Per-chat settings dialog (model / effort / slash commands).
   const [chatSettingsOpen, setChatSettingsOpen] = createSignal(false);
   // Slash-command menu. We open it as soon as the user types `/` at
@@ -557,66 +553,6 @@ export default function ChatPane() {
     recordMemoryUsage("chat.activeView", bytes);
   });
 
-  function startRename(id: string, current: string) {
-    setRenamingId(id);
-    setRenameDraft(current);
-  }
-
-  function cancelRename() {
-    setRenamingId(null);
-    setRenameDraft("");
-  }
-
-  async function commitRename(id: string, current: string) {
-    const next = renameDraft().trim();
-    cancelRename();
-    if (!next || next === current) return;
-    try {
-      const updated = await api.renameChat(id, next);
-      // Update local tab list + (if this is the active chat) the
-      // chat view so the provider chip / window header refresh.
-      setScopeChats(tabs().map((t) => (t.id === id ? { ...t, title: updated.title } : t)));
-      if (chatStore.view && chatStore.view.id === id) {
-        setChatStore("view", { ...chatStore.view, title: updated.title });
-      }
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  async function closeTab(id: string, title: string) {
-    const ok = await confirm({
-      title: `Close chat "${title}"?`,
-      body: "The chat tab will be removed from this view. The conversation history stays on the server and can be reopened from the project rail.",
-      confirmLabel: "Close",
-      testId: "confirm-close-chat",
-    });
-    if (!ok) return;
-    closeChatTab(id);
-    // Immediately clear the in-memory view + strip the stale
-    // ?chat= from the URL. Without both steps:
-    //   1. The timeline shows the just-closed chat's bubbles for
-    //      one render frame (chatStore still populated).
-    //   2. The URL→store route sync reads ?chat=<stale-id>,
-    //      calls setActiveChat(<stale-id>), and re-instates the
-    //      closed chat — making it impossible to actually close.
-    //
-    // We clear the store + composer synchronously so the DOM
-    // update lands in the same frame as the tab removal, and we
-    // strip ?chat= from the URL before the route-sync effect
-    // gets a chance to re-read it.
-    if (!activeId()) {
-      setChatStore(freshChatStore());
-      setInput("");
-      composer?.setMarkdown("");
-      // Strip ?chat= from the URL so the route-sync URL→store
-      // effect doesn't resurrect the closed chat.
-      const url = new URL(window.location.href);
-      url.searchParams.delete("chat");
-      window.history.replaceState(null, "", url.pathname + url.search);
-    }
-  }
-
   /** Hand a list of File objects to the BE. Successful uploads append
    *  to the pending-uploads list (rendered as chips). Failures bubble
    *  up to the error chip. */
@@ -978,84 +914,17 @@ export default function ChatPane() {
 
   return (
     <section data-testid="chat-pane" class="flex flex-col h-full">
-      {/* Tab strip */}
+      {/* Chat-specific status bar */}
       <header
-        class="h-11 px-2 flex items-center gap-1.5 border-b border-border bg-bg-1 overflow-x-auto"
-        data-testid="chat-tabs"
+        class="h-11 px-4 flex items-center gap-1.5 border-b border-border bg-bg-1 overflow-x-auto"
+        data-testid="chat-status-bar"
       >
-        <For each={tabs()}>
-          {(t) => (
-            <div
-              class="group inline-flex items-center gap-1 rounded-md border border-border bg-bg-2 pl-2 pr-1 py-1 text-[12px] cursor-pointer"
-              classList={{
-                "!border-accent !bg-accent-soft": t.id === activeId(),
-                "hover:bg-bg-3": t.id !== activeId() && renamingId() !== t.id,
-              }}
-              onClick={() => {
-                if (renamingId() !== t.id) setActiveChat(t.id);
-              }}
-              onDblClick={(e) => {
-                e.stopPropagation();
-                startRename(t.id, t.title);
-              }}
-              onKeyDown={(e) => {
-                // F2 starts rename when the tab is focused/active.
-                if (e.key === "F2" && t.id === activeId() && renamingId() !== t.id) {
-                  e.preventDefault();
-                  startRename(t.id, t.title);
-                }
-              }}
-              title={renamingId() === t.id ? "" : `${t.title} · double-click to rename`}
-              data-testid={`chat-tab-${t.id}`}
-              tabIndex={0}
-            >
-              <Show
-                when={renamingId() === t.id}
-                fallback={<span class="truncate max-w-[180px]">{t.title}</span>}
-              >
-                <input
-                  class="ag-input !py-0 !px-1 !h-6 !text-[12px] max-w-[180px]"
-                  value={renameDraft()}
-                  onInput={(e) => setRenameDraft(e.currentTarget.value)}
-                  onClick={(e) => e.stopPropagation()}
-                  onBlur={() => void commitRename(t.id, t.title)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      (e.currentTarget as HTMLInputElement).blur();
-                    } else if (e.key === "Escape") {
-                      e.preventDefault();
-                      cancelRename();
-                    }
-                  }}
-                  data-testid={`chat-rename-input-${t.id}`}
-                  ref={(el) => {
-                    // Focus + select on mount.
-                    queueMicrotask(() => {
-                      el.focus();
-                      el.select();
-                    });
-                  }}
-                />
-              </Show>
-              <Show when={renamingId() !== t.id}>
-                <button
-                  type="button"
-                  class="ml-1 px-1 text-fg-subtle hover:text-danger"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void closeTab(t.id, t.title);
-                  }}
-                  aria-label={`Close ${t.title}`}
-                  data-testid={`chat-close-${t.id}`}
-                  title="Close chat tab"
-                >
-                  ✕
-                </button>
-              </Show>
-            </div>
-          )}
-        </For>
+        <span
+          class="text-[13px] font-semibold tracking-tight truncate max-w-[200px]"
+          title={chatStore.view?.title}
+        >
+          {chatStore.view?.title}
+        </span>
 
         {/* Queue status indicator. Moved from a toggle button to a
             read-only badge now that the queue lives permanently in

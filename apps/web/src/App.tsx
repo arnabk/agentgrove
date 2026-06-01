@@ -177,12 +177,25 @@ export default function App() {
                   <div class="flex items-center gap-2 px-3 shrink-0">
                     <button
                       type="button"
-                      class="ag-btn ag-btn-ghost ag-btn-sm text-[11px]"
+                      class="ag-btn ag-btn-ghost ag-btn-icon"
                       onClick={toggleSidebar}
                       title={isSidebarOpen() ? "Hide sidebar" : "Show sidebar"}
                       data-testid="sidebar-toggle"
                     >
-                      {isSidebarOpen() ? "▶" : "◀"}
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                      >
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <path d="M15 3v18" />
+                      </svg>
                     </button>
                     <SettingsButton />
                     <TopBarIndicators />

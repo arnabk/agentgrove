@@ -190,17 +190,31 @@ export default function RightSidebar() {
 /** Small toggle button the App shell renders at the edge of the
  *  main area. Shows ◀ (collapse) when open, ▶ (expand) when
  *  collapsed. */
+/** Exported for callers that want the toggle in a different spot. */
 export function SidebarToggle() {
   return (
     <button
       type="button"
-      class="absolute right-0 top-1/2 -translate-y-1/2 translate-x-full z-20 bg-bg-2 border border-border rounded-r-md px-0.5 py-2 text-[10px] text-fg-subtle hover:text-fg hover:bg-bg-3"
+      class="absolute right-0 top-1/2 -translate-y-1/2 translate-x-full z-20 bg-bg-2 border border-border rounded-r-md p-1 text-fg-subtle hover:text-fg hover:bg-bg-3"
       onClick={toggleSidebar}
       title={isSidebarOpen() ? "Collapse sidebar" : "Expand sidebar"}
       aria-label={isSidebarOpen() ? "Collapse sidebar" : "Expand sidebar"}
-      data-testid="sidebar-toggle"
+      data-testid="sidebar-toggle-edge"
     >
-      {isSidebarOpen() ? "◀" : "▶"}
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <path d="M15 3v18" />
+      </svg>
     </button>
   );
 }
