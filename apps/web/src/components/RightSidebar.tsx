@@ -63,11 +63,18 @@ export default function RightSidebar() {
     localStorage.setItem(SIDEBAR_LS_KEY, String(width()));
   }
   const onWindowUp = () => {
-    if (!dragging()) return;
-    setDragging(false);
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-    localStorage.setItem(SIDEBAR_LS_KEY, String(width()));
+    if (dragging()) {
+      setDragging(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      localStorage.setItem(SIDEBAR_LS_KEY, String(width()));
+    }
+    if (divDragging()) {
+      setDivDragging(false);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      localStorage.setItem(DIVIDER_LS_KEY, String(notesPct()));
+    }
   };
   onMount(() => window.addEventListener("pointerup", onWindowUp));
   onCleanup(() => window.removeEventListener("pointerup", onWindowUp));
@@ -108,6 +115,15 @@ export default function RightSidebar() {
     localStorage.setItem(DIVIDER_LS_KEY, String(notesPct()));
   }
 
+  // Bind mousemove globally so dragging works even if the cursor
+  // leaves the tiny 6px handle while the button is down.
+  const onWindowMove = (ev: PointerEvent) => {
+    if (dragging()) onPointerMove(ev);
+    if (divDragging()) onDivMove(ev);
+  };
+  onMount(() => window.addEventListener("pointermove", onWindowMove));
+  onCleanup(() => window.removeEventListener("pointermove", onWindowMove));
+
   const chatId = () => selectedChatId();
 
   return (
@@ -127,7 +143,6 @@ export default function RightSidebar() {
           class="absolute top-0 left-0 h-full w-1.5 -ml-[3px] cursor-col-resize hover:bg-accent/30 active:bg-accent/50 transition-colors z-10 touch-none"
           classList={{ "!bg-accent/50": dragging() }}
           onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           data-testid="sidebar-resize"
         />
@@ -150,7 +165,6 @@ export default function RightSidebar() {
           class="h-1.5 cursor-row-resize hover:bg-accent/30 active:bg-accent/50 transition-colors touch-none shrink-0"
           classList={{ "!bg-accent/50": divDragging() }}
           onPointerDown={onDivDown}
-          onPointerMove={onDivMove}
           onPointerUp={onDivUp}
           data-testid="sidebar-divider"
         />

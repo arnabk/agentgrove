@@ -165,13 +165,6 @@ export default function ChatPane() {
     })();
   });
   // Queue drawer visibility. Persisted across reloads so users who
-  // rely on it don't have to re-open after every refresh.
-  const [queueOpen, setQueueOpen] = createSignal(
-    localStorage.getItem("ag-chat-queue-open") === "1",
-  );
-  createEffect(() => {
-    localStorage.setItem("ag-chat-queue-open", queueOpen() ? "1" : "0");
-  });
   // Lightweight queue summary used to drive the header badge. Polled
   // even while the drawer is closed so the count + status stay live.
   const [queueSummary, setQueueSummary] = createSignal<{
@@ -754,15 +747,14 @@ export default function ChatPane() {
         );
       } else {
         // Queued. Drop the placeholder (the message lives in the
-        // queue dock, not the timeline) and surface the dock so
-        // the user sees it landed.
+        // queue dock, not the timeline). Sidebar toggle state
+        // remains as the user left it.
         setChatStore(
           produce((s) => {
             const idx = s.prompts.findIndex((p) => p.id === tempId);
             if (idx >= 0) s.prompts.splice(idx, 1);
           }),
         );
-        if (!queueOpen()) setQueueOpen(true);
       }
     } catch (e) {
       // Remove the placeholder + restore the composer so the user
@@ -1065,21 +1057,16 @@ export default function ChatPane() {
           )}
         </For>
 
-        {/* Queue badge: always present while a chat is active so the
-            user can toggle the dock even when the queue is empty.
-            Highlights when items are pending / running so it
-            doubles as a status indicator. */}
-        <Show when={activeId()}>
-          <button
-            type="button"
-            class="ml-1 ag-chip flex items-center gap-1 hover:bg-bg-3"
+        {/* Queue status indicator. Moved from a toggle button to a
+            read-only badge now that the queue lives permanently in
+            the RightSidebar. Highlights when active. */}
+        <Show when={activeId() && (queueSummary()?.total ?? 0) > 0}>
+          <div
+            class="ml-1 ag-chip flex items-center gap-1"
             classList={{
               "!border-accent": (queueSummary()?.running ?? 0) > 0,
-              "!bg-accent-soft": queueOpen(),
             }}
-            onClick={() => setQueueOpen(!queueOpen())}
             title={`Queue: ${queueSummary()?.pending ?? 0} pending, ${queueSummary()?.running ?? 0} running, ${queueSummary()?.total ?? 0} total`}
-            aria-pressed={queueOpen()}
             data-testid="chat-queue-badge"
           >
             <span class="text-fg-subtle">⏳ queue</span>
@@ -1087,7 +1074,7 @@ export default function ChatPane() {
             <Show when={(queueSummary()?.running ?? 0) > 0}>
               <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
             </Show>
-          </button>
+          </div>
         </Show>
         {/* PR badge: auto-detected from agent output. Shows the PR
             number as a clickable link that opens in a new tab. */}
@@ -1440,20 +1427,6 @@ export default function ChatPane() {
             </form>
           </Show>
         </div>
-
-        {/* Queue dock — toggled by the chat-header badge. Renders as
-            the right column INSIDE the chat pane so it shares the
-            tab strip + composer surface with the rest of the chat.
-            QueueDrawer is now a misnomer (it used to overlay) — we
-            keep the import name for diff cleanliness; the component
-            itself was converted to an inline aside. */}
-        <Show when={activeId() && queueOpen()}>
-          <QueueDrawer
-            chatId={activeId()!}
-            open={queueOpen()}
-            onClose={() => setQueueOpen(false)}
-          />
-        </Show>
       </div>
 
       <Show when={chatSettingsOpen() && chat()}>
