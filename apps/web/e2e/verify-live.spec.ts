@@ -70,7 +70,7 @@ test.describe("live app", () => {
 
     // 4. Left rail + tabs appear once a project exists.
     await expect(page.getByTestId("left-rail")).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId("pane-tabs")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("tab-strip")).toBeVisible({ timeout: 15_000 });
     await shot("02-shell");
 
     // 5. No console errors (filter out benign WebSocket close

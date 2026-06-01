@@ -21,7 +21,7 @@ import Select from "../components/Select";
 import ChatSettingsDialog from "../components/ChatSettingsDialog";
 import { confirm } from "../components/dialog";
 import Markdown from "../components/Markdown";
-import QueueDrawer from "../components/QueueDrawer";
+
 import ChatComposer, { type ChatComposerHandle } from "../components/ChatComposer";
 import { ToolRail } from "./chat/ToolRail";
 import { useSyncSubscription } from "../lib/crossInstanceSync";

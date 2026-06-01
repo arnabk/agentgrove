@@ -1,5 +1,9 @@
 # AgentGrove
 
+[![CI](https://github.com/arnabk/agentgrove/actions/workflows/ci.yml/badge.svg)](https://github.com/arnabk/agentgrove/actions/workflows/ci.yml)
+[![Release](https://github.com/arnabk/agentgrove/actions/workflows/release.yml/badge.svg)](https://github.com/arnabk/agentgrove/actions/workflows/release.yml)
+[![Nightly](https://github.com/arnabk/agentgrove/actions/workflows/nightly.yml/badge.svg)](https://github.com/arnabk/agentgrove/actions/workflows/nightly.yml)
+
 High-performance, low-footprint, open-source local developer workspace.
 A project-centric environment that brings folders, editor, terminals,
 git diff, notes, prompt queues, and AI assistance together under one
