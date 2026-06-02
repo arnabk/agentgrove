@@ -251,11 +251,7 @@ impl QueueRepo {
     /// Update the body text of a pending queue item. Only pending
     /// items can be edited — running items are already in-flight.
     /// Returns whether a row was updated.
-    pub async fn update_body(
-        &self,
-        item_id: &str,
-        new_body: &str,
-    ) -> Result<bool, QueueError> {
+    pub async fn update_body(&self, item_id: &str, new_body: &str) -> Result<bool, QueueError> {
         let now_ms = Utc::now().timestamp_millis();
         let res = sqlx::query(
             "UPDATE queue_items SET body = ?1, updated_at = ?2 \
