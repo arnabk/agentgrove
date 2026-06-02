@@ -116,6 +116,12 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # Belt-and-suspenders: ensure the std library for the target is
+      # present. Cross-compiling the Intel mac binary on an arm64 runner
+      # otherwise fails with E0463 "can't find crate for core".
+      - name: Ensure target std is installed
+        run: rustup target add ${{ matrix.target }}
+
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} -p agentgrove-server
 
