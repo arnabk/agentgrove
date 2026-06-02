@@ -378,7 +378,7 @@ function QueueCard(props: {
       </header>
 
       <Show
-        when={props.expanded || split().body.length <= 240}
+        when={props.expanded || split().body.length <= 240 || editing()}
         fallback={
           <button
             type="button"
@@ -392,13 +392,74 @@ function QueueCard(props: {
         }
       >
         <div class="space-y-2">
-          <pre
-            class="text-[12.5px] text-fg leading-snug whitespace-pre-wrap font-sans"
-            data-testid={`queue-card-body-${props.item.id}`}
+          <Show
+            when={!editing()}
+            fallback={
+              <div class="space-y-2">
+                <textarea
+                  ref={(el) => (inputRef = el)}
+                  class="ag-input !py-1.5 !px-2 font-sans text-[12.5px] leading-snug w-full resize-none overflow-hidden"
+                  value={draft()}
+                  onInput={(e) => {
+                    setDraft(e.currentTarget.value);
+                    e.currentTarget.style.height = "0px";
+                    e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      commitEdit();
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      cancelEdit();
+                    }
+                  }}
+                  data-testid={`queue-card-edit-input-${props.item.id}`}
+                />
+                <div class="flex items-center justify-end gap-1">
+                  <button
+                    type="button"
+                    class="ag-btn ag-btn-ghost ag-btn-sm"
+                    onClick={cancelEdit}
+                    data-testid={`queue-card-edit-cancel-${props.item.id}`}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    class="ag-btn ag-btn-primary ag-btn-sm"
+                    onClick={commitEdit}
+                    data-testid={`queue-card-edit-save-${props.item.id}`}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            }
           >
-            {split().body || <em class="text-fg-subtle">(no text)</em>}
-          </pre>
-          <Show when={split().body.length > 240}>
+            <div
+              class="group/body relative"
+              onDblClick={startEdit}
+              title="Double-click to edit"
+            >
+              <pre
+                class="text-[12.5px] text-fg leading-snug whitespace-pre-wrap font-sans"
+                data-testid={`queue-card-body-${props.item.id}`}
+              >
+                {split().body || <em class="text-fg-subtle">(no text)</em>}
+              </pre>
+              <button
+                type="button"
+                class="absolute top-0 right-0 opacity-0 group-hover/body:opacity-100 p-1 text-fg-subtle hover:text-fg bg-bg-1 border border-border rounded shadow-sm"
+                onClick={startEdit}
+                aria-label="Edit item"
+                data-testid={`queue-card-edit-${props.item.id}`}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+              </button>
+            </div>
+          </Show>
+          <Show when={!editing() && split().body.length > 240}>
             <button
               type="button"
               class="text-[11px] text-fg-subtle hover:text-fg"
