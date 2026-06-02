@@ -1,10 +1,9 @@
-import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import { createStore } from "solid-js/store";
+import { createEffect, onCleanup, onMount } from "solid-js";
+
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { api } from "../api/client";
-import { confirm } from "../components/dialog";
 import { declareMemorySource, recordMemoryUsage } from "../lib/memory";
 
 declareMemorySource("terminal.scrollback", "Terminal scrollback");
@@ -19,12 +18,10 @@ function reportTerminalBytes(cache: Map<string, { lastBytes: number }>) {
   recordMemoryUsage("terminal.scrollback", total);
 }
 import {
-  addTerminalTab,
   closeTerminalTab,
   currentScope,
-  setActiveTerminal,
+  
   state,
-  type TerminalTab,
 } from "../stores/app";
 
 /**
@@ -60,39 +57,12 @@ const cache = new Map<string, CachedSession>();
 
 export default function TerminalPane() {
   let stage!: HTMLDivElement;
-  const [err, setErr] = createSignal<string | null>(null);
-  const [spawning, setSpawning] = createSignal(false);
   // sessionId -> exited
-  const [exitedMap, setExitedMap] = createStore<Record<string, boolean>>({});
 
   const scope = () => currentScope();
   const tabs = () => scope()?.terminals ?? [];
   const activeId = () => scope()?.activeTerminal ?? null;
 
-  async function spawn() {
-    const pid = state.selectedProjectId;
-    if (!pid) return;
-    setErr(null);
-    setSpawning(true);
-    try {
-      const t = await api.createTerminal({
-        cols: 80,
-        rows: 24,
-        project_id: pid,
-      });
-      const tab: TerminalTab = {
-        id: t.id,
-        cwd: t.cwd,
-        label: `term ${tabs().length + 1}`,
-      };
-      const res = addTerminalTab(tab);
-      if (!res.ok) setErr(res.reason ?? "could not open terminal");
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSpawning(false);
-    }
-  }
 
   /** Tear down BE session + FE cached xterm + tab row. Shared by
    *  the user-initiated close (with confirm) and the auto-close
@@ -116,20 +86,8 @@ export default function TerminalPane() {
       // even if BE fails to kill (already gone), drop the FE tab
     }
     closeTerminalTab(id);
-    setExitedMap(id, undefined as unknown as boolean);
   }
 
-  async function closeTab(id: string) {
-    const ok = await confirm({
-      title: "Close terminal",
-      body: "Kill this terminal session? The shell process will end.",
-      confirmLabel: "Close",
-      danger: true,
-      testId: "confirm-close-terminal",
-    });
-    if (!ok) return;
-    await destroyTab(id);
-  }
 
   /** Lazily create the cached xterm instance for a session id. */
   function ensureSession(id: string): CachedSession {
@@ -292,70 +250,11 @@ export default function TerminalPane() {
 
   return (
     <section data-testid="terminal-pane" class="flex flex-col h-full">
-      <header class="h-11 px-3 flex items-center gap-1.5 border-b border-border bg-bg-1 overflow-x-auto">
-        <For each={tabs()}>
-          {(t) => (
-            <div
-              class="group inline-flex items-center gap-1 rounded-md border border-border bg-bg-2 pl-2 pr-1 py-1 text-[12px] cursor-pointer"
-              classList={{
-                "!border-accent !bg-accent-soft": t.id === activeId(),
-                "hover:bg-bg-3": t.id !== activeId(),
-                "opacity-70": exitedMap[t.id] === true,
-              }}
-              onClick={() => setActiveTerminal(t.id)}
-              title={`${t.label} · ${t.cwd}${exitedMap[t.id] ? " · exited" : ""}`}
-              data-testid={`term-tab-${t.id}`}
-            >
-              <span class="font-mono">{t.label}</span>
-              <Show when={exitedMap[t.id]}>
-                <span
-                  class="ml-1 px-1.5 py-px rounded-sm bg-bg-3 text-fg-subtle text-[10px] uppercase tracking-wide"
-                  data-testid={`term-exited-${t.id}`}
-                >
-                  exited
-                </span>
-              </Show>
-              <button
-                type="button"
-                class="ml-1 px-1 text-fg-subtle hover:text-danger"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void closeTab(t.id);
-                }}
-                aria-label={`Close ${t.label}`}
-                data-testid={`term-close-${t.id}`}
-                title="Close terminal"
-              >
-                ✕
-              </button>
-            </div>
-          )}
-        </For>
-        <button
-          class="ag-btn ag-btn-ghost ag-btn-sm ml-1"
-          onClick={spawn}
-          disabled={spawning() || !state.selectedProjectId}
-          title="New terminal"
-          data-testid="term-spawn"
-        >
-          + New
-        </button>
-        <Show when={err()}>
-          <span
-            class="ml-auto text-[11.5px] text-danger"
-            data-testid="term-error"
-            title={err() ?? ""}
-          >
-            {err()}
-          </span>
-        </Show>
-      </header>
-      <div class="relative flex-1 bg-bg-1" ref={(el) => (stage = el)} data-testid="term-stage">
-        <Show when={tabs().length === 0}>
-          <div class="absolute inset-0 flex items-center justify-center text-fg-subtle text-[13px]">
-            Click <span class="mx-1 ag-kbd">+ New</span> to open a terminal in this project.
-          </div>
-        </Show>
+      <div
+        class="relative flex-1 bg-bg-1"
+        ref={(el) => (stage = el)}
+        data-testid="term-stage"
+      >
       </div>
     </section>
   );
