@@ -93,7 +93,11 @@ jobs:
             target: aarch64-apple-darwin
             artifact: agentgrove-macos-arm64
             ext: ""
-          - os: macos-13
+          # Cross-compile the Intel mac binary on an Apple Silicon
+          # runner. Dedicated macos-13 (x86) runners are scarce and
+          # frequently leave the release run queued indefinitely; the
+          # arm64 runner can target x86_64-apple-darwin just fine.
+          - os: macos-latest
             target: x86_64-apple-darwin
             artifact: agentgrove-macos-x64
             ext: ""
