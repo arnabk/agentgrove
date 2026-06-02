@@ -154,9 +154,17 @@ export const [changesScope, setChangesScope] = createSignal<ChangesScope | null>
 
 // ---- scope key + helpers -----------------------------------------------
 
-/** Encode (projectId, worktreeId|null) into the scope key. */
+/** Encode (projectId, worktreeId|null) into the scope key.
+ *
+ *  The separator is "::" and MUST match `writeScopeLayout`'s
+ *  `key.split("::")`. A previous single-":" here meant the layout
+ *  writer split worktree-scope keys wrong (projectId became
+ *  "pid:wid", worktreeId became ""), so worktree-scoped chats and
+ *  terminals were persisted under a bogus project and never came
+ *  back in the scope they were created in. Project + worktree ids are
+ *  UUIDs (no ":"), so "::" is unambiguous. */
 function makeKey(pid: string, wid: string | null): string {
-  return wid ? `${pid}:${wid}` : pid;
+  return wid ? `${pid}::${wid}` : pid;
 }
 
 /** Active scope key based on selectedProjectId + worktree-for-that-project. */
@@ -535,7 +543,12 @@ async function hydrateLayoutFromBackend() {
   try {
     const snap = await api.getLayout();
     for (const s of snap.scopes) {
-      const key = s.worktree_id ? `${s.project_id}::${s.worktree_id}` : s.project_id;
+      // Use the canonical scope-key encoding (makeKey) so hydrated tabs
+      // land under the SAME key currentScopeKey() reads. A divergent
+      // `${pid}::${wid}` here vs `${pid}:${wid}` in makeKey caused
+      // worktree-scoped chats/terminals to be written and read under
+      // different keys — they appeared to "not open in their project".
+      const key = makeKey(s.project_id, s.worktree_id ?? null);
       const incoming = s.blob as Partial<Scope> & {
         chats?: ChatTab[];
         terminals?: TerminalTab[];

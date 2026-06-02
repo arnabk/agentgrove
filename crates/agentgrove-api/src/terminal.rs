@@ -564,6 +564,15 @@ async fn terminal_socket(mut socket: WebSocket, state: AppState, id: String) {
         return;
     }
 
+    // Periodic check for shell exit. The PTY reader sets `exited` on EOF
+    // (Ctrl+D / `exit`) but the broadcast sender lives in the Session and
+    // isn't dropped until the session is killed, so the rx.recv() branch
+    // would otherwise never learn of the exit and the terminal would hang
+    // open. A short tick guarantees we notice the exit and tell the
+    // client within ~200 ms even when no further output arrives.
+    let mut exit_tick = tokio::time::interval(std::time::Duration::from_millis(200));
+    exit_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
     loop {
         tokio::select! {
             // PTY -> browser
@@ -590,6 +599,18 @@ async fn terminal_socket(mut socket: WebSocket, state: AppState, id: String) {
                         let _ = socket.send(Message::Text("{\"exited\":true}".into())).await;
                         break;
                     }
+                }
+            }
+            // Exit poll: detect Ctrl+D / `exit` / external kill.
+            _ = exit_tick.tick() => {
+                if state.terminals.is_exited(&id).unwrap_or(true) {
+                    // Flush any final bytes the reader appended just before
+                    // EOF so the client doesn't lose the shell's last line.
+                    if let Ok(tail) = rx.try_recv() {
+                        let _ = socket.send(Message::Binary(tail)).await;
+                    }
+                    let _ = socket.send(Message::Text("{\"exited\":true}".into())).await;
+                    break;
                 }
             }
             // browser -> PTY

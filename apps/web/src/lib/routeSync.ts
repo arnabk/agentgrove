@@ -2,6 +2,7 @@ import { createEffect } from "solid-js";
 import { useLocation, useNavigate } from "@solidjs/router";
 import {
   currentScope,
+  currentScopeKey,
   currentWorktreeId,
   selectFile,
   selectProject,
@@ -181,7 +182,7 @@ export function installRouteSync() {
     if (!state.ready) return;
     const pid = state.selectedProjectId;
     const wid = currentWorktreeId();
-    const pane = state.byScope[currentScopeKeyOrEmpty()]?.activePane ?? "chat";
+    const pane = state.byScope[currentScopeKey() ?? ""]?.activePane ?? "chat";
     const chat = selectedChatId();
     const file = selectedFilePath();
 
@@ -207,13 +208,6 @@ function isPaneId(s: string): s is PaneId {
 
 function hasProject(id: string): boolean {
   return state.projects.some((p) => p.id === id);
-}
-
-function currentScopeKeyOrEmpty(): string {
-  const pid = state.selectedProjectId;
-  if (!pid) return "";
-  const wid = currentWorktreeId();
-  return wid ? `${pid}::${wid}` : pid;
 }
 
 function buildUrl(

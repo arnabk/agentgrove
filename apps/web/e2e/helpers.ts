@@ -46,24 +46,26 @@ export async function bootstrapWithChat(page: Page): Promise<string> {
   // avoid coupling to a specific project id.
   await page.locator('[data-testid^="new-chat-"]').first().click();
   await page.locator('button:has-text("Create chat")').click();
-  await expect(page.getByTestId("chat-input")).toBeVisible();
+  await expect(page.locator('[data-testid="chat-input"]:visible')).toBeVisible();
   return await activeChatId(page);
 }
 
-/** Active chat id derived from the rendered `chat-tab-<id>` testid.
- *  The tab strip can carry multiple tabs across runs (dev DB
- *  persists everything); we pick the one with the active marker
- *  (`!border-accent` class) rather than the first one so freshly-
- *  created chats are returned even when older tabs sit to the
- *  left. */
+/** Active chat id. The unified tab strip renders every tab as
+ *  `tab-<id>` (chats, terminals, editors share the row). The active
+ *  chat is reflected in the URL as `?chat=<id>`, which is the most
+ *  reliable source — the dev DB persists many tabs across runs, so we
+ *  can't just take the first/last tab. We fall back to the
+ *  accent-highlighted tab if the URL has no chat param yet. */
 export async function activeChatId(page: Page): Promise<string> {
+  const fromUrl = new URL(page.url()).searchParams.get("chat");
+  if (fromUrl) return fromUrl;
   return await page.evaluate(() => {
-    const tabs = Array.from(
-      document.querySelectorAll('[data-testid^="chat-tab-"]'),
+    const tabs = Array.from(document.querySelectorAll('[data-testid^="tab-"]')).filter((el) =>
+      /^tab-[0-9a-f-]{8,}$/i.test(el.getAttribute("data-testid") ?? ""),
     ) as HTMLElement[];
     if (tabs.length === 0) throw new Error("no chat tabs");
     const active = tabs.find((t) => t.className.includes("border-accent")) ?? tabs[tabs.length - 1];
-    return active!.getAttribute("data-testid")!.replace("chat-tab-", "");
+    return active!.getAttribute("data-testid")!.replace("tab-", "");
   });
 }
 
@@ -77,7 +79,10 @@ export async function activeChatId(page: Page): Promise<string> {
  *  lets `scheduleScopeLayoutWrite` debounce (~400 ms) flush the
  *  draft to the BE before the test does anything reload-shaped. */
 export async function typeIntoComposer(page: Page, text: string) {
-  const editable = page.locator('[data-testid="chat-input"]');
+  // Only the active tab's pane is display:block, so :visible scopes us to
+  // the composer the user is actually looking at — the dev DB can leave
+  // several hidden chat panes (and their chat-input nodes) mounted.
+  const editable = page.locator('[data-testid="chat-input"]:visible');
   await editable.click();
   await page.keyboard.type(text);
   await page.waitForTimeout(600);
@@ -87,7 +92,7 @@ export async function typeIntoComposer(page: Page, text: string) {
  *  gesture is Ctrl/Cmd+A then Backspace; this works on every
  *  supported OS and keeps the editor's history intact. */
 export async function clearComposer(page: Page) {
-  const editable = page.locator('[data-testid="chat-input"]');
+  const editable = page.locator('[data-testid="chat-input"]:visible');
   await editable.click();
   const isMac = process.platform === "darwin";
   await page.keyboard.press(isMac ? "Meta+a" : "Control+a");
@@ -96,7 +101,7 @@ export async function clearComposer(page: Page) {
 
 /** Submit the composer via plain Enter (the routing the user sees). */
 export async function submitComposer(page: Page) {
-  const editable = page.locator('[data-testid="chat-input"]');
+  const editable = page.locator('[data-testid="chat-input"]:visible');
   await editable.press("Enter");
 }
 
@@ -104,7 +109,11 @@ export async function submitComposer(page: Page) {
  *  per-block trailing newlines for stable matching. */
 export async function readComposer(page: Page): Promise<string> {
   return await page.evaluate(() => {
-    const root = document.querySelector('[data-testid="chat-input"]') as HTMLElement | null;
+    const inputs = Array.from(
+      document.querySelectorAll('[data-testid="chat-input"]'),
+    ) as HTMLElement[];
+    // Pick the visible composer (active tab); fall back to the first.
+    const root = inputs.find((el) => el.offsetParent !== null) ?? inputs[0] ?? null;
     if (!root) return "";
     return (root.innerText ?? "").trim();
   });

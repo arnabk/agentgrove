@@ -42,13 +42,17 @@ async function seedBackend(page: Page) {
  *  last tab when no marker is found — covers the rare race where
  *  the tab is rendered before its selected state lands. */
 async function activeChatId(page: Page): Promise<string> {
+  // The active chat is reflected in the URL (?chat=<id>); the unified
+  // tab strip renders tabs as `tab-<id>`, not `chat-tab-<id>`.
+  const fromUrl = new URL(page.url()).searchParams.get("chat");
+  if (fromUrl) return fromUrl;
   return await page.evaluate(() => {
-    const tabs = Array.from(
-      document.querySelectorAll('[data-testid^="chat-tab-"]'),
+    const tabs = Array.from(document.querySelectorAll('[data-testid^="tab-"]')).filter((el) =>
+      /^tab-[0-9a-f-]{8,}$/i.test(el.getAttribute("data-testid") ?? ""),
     ) as HTMLElement[];
     if (tabs.length === 0) throw new Error("no chat tabs");
     const active = tabs.find((t) => t.className.includes("border-accent")) ?? tabs[tabs.length - 1];
-    return active!.getAttribute("data-testid")!.replace("chat-tab-", "");
+    return active!.getAttribute("data-testid")!.replace("tab-", "");
   });
 }
 
@@ -76,7 +80,7 @@ async function bootstrap(page: Page): Promise<string> {
   // avoid coupling to a specific project / worktree id.
   await page.locator('[data-testid^="new-chat-"]').first().click();
   await page.locator('button:has-text("Create chat")').click();
-  await expect(page.getByTestId("chat-input")).toBeVisible();
+  await expect(page.locator('[data-testid="chat-input"]:visible')).toBeVisible();
   return await activeChatId(page);
 }
 
@@ -85,7 +89,7 @@ async function bootstrap(page: Page): Promise<string> {
  *  treats the editable as a non-input element. Click + keyboard.type
  *  matches the user-flow exactly. */
 async function send(page: Page, text: string) {
-  const editable = page.locator('[data-testid="chat-input"]');
+  const editable = page.locator('[data-testid="chat-input"]:visible');
   await editable.click();
   // Clear any leftover text from a prior call in this test (the
   // composer is persisted as a draft so previous sends in the
@@ -104,7 +108,7 @@ async function send(page: Page, text: string) {
  *  textarea version did, so we drive the keyboard via Playwright
  *  the same way a fast typist would. */
 async function rapidFire(page: Page, count: number, prefix = "rapid") {
-  const editable = page.locator('[data-testid="chat-input"]');
+  const editable = page.locator('[data-testid="chat-input"]:visible');
   await editable.click();
   const isMac = process.platform === "darwin";
   for (let i = 0; i < count; i++) {
