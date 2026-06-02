@@ -51,7 +51,7 @@ $fePort = $bePort
 $ready = $false
 for ($i = 0; $i -lt 30; $i++) {
     try {
-        $feRes = Invoke-WebRequest -Uri "http://localhost:$fePort" -TimeoutSec 1 -UseBasicParsing -ErrorAction SilentlyContinue
+        $feRes = Invoke-WebRequest -Uri "http://127.0.0.1:$fePort" -TimeoutSec 1 -UseBasicParsing -ErrorAction SilentlyContinue
         $beRes = Invoke-WebRequest -Uri "http://127.0.0.1:$bePort/health" -TimeoutSec 1 -UseBasicParsing -ErrorAction SilentlyContinue
         if ($feRes -and $beRes) {
             $ready = $true
@@ -69,15 +69,17 @@ if (-not $ready) {
     Get-Content $beLog -Tail 30 -ErrorAction SilentlyContinue
     Write-Output "--- backend log (stderr) ---"
     Get-Content $beErrLog -Tail 30 -ErrorAction SilentlyContinue
-    Write-Output "--- frontend log ---"
-    Get-Content $feLog -Tail 30
+    if (Test-Path $feLog) {
+        Write-Output "--- frontend log ---"
+        Get-Content $feLog -Tail 30 -ErrorAction SilentlyContinue
+    }
     Stop-Process -Id $beProcess.Id -Force -ErrorAction SilentlyContinue
     
     exit 1
 }
 
 Write-Output "[live] running browser tests..."
-$env:BASE_URL = "http://localhost:$fePort"
+$env:BASE_URL = "http://127.0.0.1:$fePort"
 $env:PW_LIVE = "1"
 $env:AGENTGROVE_BE_URL = "http://127.0.0.1:$bePort"
 $env:REPO_ROOT = $repoRoot
