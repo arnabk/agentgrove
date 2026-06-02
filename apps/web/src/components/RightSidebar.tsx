@@ -1,5 +1,5 @@
 import { createSignal, Show, onMount, onCleanup } from "solid-js";
-import NotesPane from "../panes/NotesPane";
+import NotesPane, { notesSaving, notesSavedAt, notesErr } from "../panes/NotesPane";
 import QueueDrawer from "./QueueDrawer";
 import { isSidebarOpen, toggleSidebar, selectedChatId } from "../stores/app";
 
@@ -149,8 +149,23 @@ export default function RightSidebar() {
 
         {/* Notes section (top) */}
         <div class="overflow-hidden flex flex-col" style={{ height: `${notesPct()}%` }}>
-          <header class="h-8 px-3 flex items-center border-b border-border bg-bg-1 text-[12px] font-semibold text-fg-muted shrink-0">
+          <header class="h-8 px-3 flex items-center gap-2 border-b border-border bg-bg-1 text-[12px] font-semibold text-fg-muted shrink-0">
             Notes
+            <div class="ml-auto flex items-center gap-2 text-[11px] font-normal text-fg-subtle">
+              <Show when={notesSaving()}>
+                <span data-testid="notes-saving">saving…</span>
+              </Show>
+              <Show when={!notesSaving() && notesSavedAt()}>
+                <span class="ag-chip ag-chip-success" data-testid="notes-saved-at">
+                  saved {notesSavedAt()}
+                </span>
+              </Show>
+              <Show when={notesErr()}>
+                <span class="text-danger" data-testid="notes-error" title={notesErr() ?? ""}>
+                  save failed
+                </span>
+              </Show>
+            </div>
           </header>
           <div class="flex-1 min-h-0 overflow-y-auto">
             <NotesPane />

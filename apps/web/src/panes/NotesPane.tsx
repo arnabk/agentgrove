@@ -26,18 +26,25 @@ import { useSyncSubscription } from "../lib/crossInstanceSync";
  * Switching projects swaps the document; the unsaved buffer for the
  * previous project flushes before the swap.
  */
+// Save status is rendered by the parent (RightSidebar) on the "Notes"
+// title row, not in this pane's toolbar. Module-level signals let the
+// title header subscribe without threading props up through the tree.
+export const [notesSavedAt, setNotesSavedAt] = createSignal<string | null>(null);
+export const [notesSaving, setNotesSaving] = createSignal(false);
+export const [notesErr, setNotesErr] = createSignal<string | null>(null);
+
 export default function NotesPane() {
   let host!: HTMLDivElement;
   let editor: Editor | null = null;
   const [loadedFor, setLoadedFor] = createSignal<string | null>(null);
-  const [savedAt, setSavedAt] = createSignal<string | null>(null);
-  const [saving, setSaving] = createSignal(false);
+  const setSavedAt = setNotesSavedAt;
+  const setSaving = setNotesSaving;
   // Raw epoch ms of our last successful save. The cross-instance
-  // sync echo guard compares against this — `savedAt` above is a
+  // sync echo guard compares against this — the displayed savedAt is a
   // localised display string (e.g. "02:35 PM") that can't be
   // parsed back into a millisecond value reliably.
   let lastSavedMs = 0;
-  const [err, setErr] = createSignal<string | null>(null);
+  const setErr = setNotesErr;
   const [linkBarOpen, setLinkBarOpen] = createSignal(false);
   const [linkValue, setLinkValue] = createSignal("https://");
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -78,7 +85,7 @@ export default function NotesPane() {
       ],
       editorProps: {
         attributes: {
-          class: "ag-prose px-6 py-5 focus:outline-none min-h-full",
+          class: "ag-prose pl-10 pr-6 py-5 focus:outline-none min-h-full",
           spellcheck: "true",
         },
       },
@@ -321,22 +328,6 @@ export default function NotesPane() {
           <ToolBtn label={<UndoIcon />} title="Undo (⌘Z)" onClick={() => chain()?.undo().run()} />
           <ToolBtn label={<RedoIcon />} title="Redo (⌘⇧Z)" onClick={() => chain()?.redo().run()} />
         </ToolbarGroup>
-
-        <div class="ml-auto flex items-center gap-2 text-[11px] text-fg-subtle">
-          <Show when={saving()}>
-            <span data-testid="notes-saving">saving…</span>
-          </Show>
-          <Show when={!saving() && savedAt()}>
-            <span class="ag-chip ag-chip-success" data-testid="notes-saved-at">
-              saved {savedAt()}
-            </span>
-          </Show>
-          <Show when={err()}>
-            <span class="text-danger" data-testid="notes-error" title={err() ?? ""}>
-              save failed
-            </span>
-          </Show>
-        </div>
       </header>
 
       <Show when={linkBarOpen()}>

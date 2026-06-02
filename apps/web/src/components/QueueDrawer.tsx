@@ -437,11 +437,7 @@ function QueueCard(props: {
               </div>
             }
           >
-            <div
-              class="group/body relative"
-              onDblClick={startEdit}
-              title="Double-click to edit"
-            >
+            <div class="group/body relative" onDblClick={startEdit} title="Double-click to edit">
               <pre
                 class="text-[12.5px] text-fg leading-snug whitespace-pre-wrap font-sans"
                 data-testid={`queue-card-body-${props.item.id}`}
@@ -455,7 +451,19 @@ function QueueCard(props: {
                 aria-label="Edit item"
                 data-testid={`queue-card-edit-${props.item.id}`}
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path>
+                </svg>
               </button>
             </div>
           </Show>

@@ -128,6 +128,9 @@ html {
 body {
   background-color: var(--ag-bg);
   color: var(--ag-fg);
+  /* Fixed base size. App-wide scaling is handled by `zoom` on the
+     root (see app.ts applySettings), so font-size here must NOT also
+     reference --ag-font-size or it double-counts the user's size. */
   font-size: 15px;
   line-height: 1.55;
   position: relative;
@@ -613,18 +616,29 @@ textarea::placeholder {
 /* ---------- Tiptap Global Drag Handle ----------------------------------- */
 
 .drag-handle {
+  /* The plugin positions the handle using viewport-relative
+     getBoundingClientRect coordinates written to style.top/left. With
+     `position: absolute` (the plugin default) those coords are wrong
+     because the handle's offset parent is the positioned right sidebar
+     (and the root has CSS `zoom`). `fixed` anchors top/left to the
+     viewport, which is exactly what the plugin computes. */
+  position: fixed !important;
+  /* Cancel the root CSS `zoom` (see app.ts). The plugin writes
+     viewport-pixel coords to top/left; without this they'd be scaled
+     by the zoom factor and the handle would drift onto the text. */
+  zoom: var(--ag-zoom-inv, 1);
   display: flex;
   align-items: center;
   justify-content: center;
   width: 24px;
   height: 24px;
+  /* Always clearly visible, brighter on hover. */
+  opacity: 0.55;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' width='10' height='10'%3E%3Cpath d='M3 2a1 1 0 110-2 1 1 0 010 2zm4 0a1 1 0 110-2 1 1 0 010 2zm-4 4a1 1 0 110-2 1 1 0 010 2zm4 0a1 1 0 110-2 1 1 0 010 2zm-4 4a1 1 0 110-2 1 1 0 010 2zm4 0a1 1 0 110-2 1 1 0 010 2z' fill='rgba(255, 255, 255, 0.4)'/%3E%3C/svg%3E");
   background-size: 10px;
   background-repeat: no-repeat;
   background-position: center;
   cursor: grab;
-  /* Make the handle always slightly visible, full opacity on hover */
-  opacity: 0.15;
   transition: opacity 0.1s ease;
   border-radius: 4px;
 }
@@ -644,7 +658,8 @@ textarea::placeholder {
 
 .ag-prose {
   color: var(--ag-fg);
-  font-size: 15px;
+  /* Inherit body's 15px base; the root `zoom` scales it app-wide. */
+  font-size: inherit;
   line-height: 1.6;
 }
 .ag-prose:focus {

@@ -698,7 +698,12 @@ export function applySettings(s: UserSettings) {
   // a true "make everything bigger/smaller" knob without
   // rewriting every size class to em/rem.
   const baseSize = 15; // matches DEFAULT_FONT_SIZE
-  root.style.zoom = `${fontSize / baseSize}`;
+  const zoom = fontSize / baseSize;
+  root.style.zoom = `${zoom}`;
+  // Expose the inverse so position:fixed overlays that the Tiptap
+  // drag-handle plugin places using viewport-pixel coords can cancel
+  // out the root zoom (otherwise their left/top get multiplied by it).
+  root.style.setProperty("--ag-zoom-inv", `${baseSize / fontSize}`);
   if (s.theme) {
     if (state.themes.length > 0) setTheme(s.theme);
     else setState("themeId", s.theme);
