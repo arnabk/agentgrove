@@ -7,6 +7,9 @@ Set-Location $repoRoot
 
 $logDir = Join-Path $repoRoot ".data\logs"
 $beLog = Join-Path $logDir "live-backend.log"
+# Start-Process refuses to redirect stdout and stderr to the same file,
+# so the backend's stderr gets its own log.
+$beErrLog = Join-Path $logDir "live-backend.err.log"
 $feLog = Join-Path $logDir "live-frontend.log"
 $pwLog = Join-Path $logDir "live-playwright.log"
 
@@ -40,7 +43,7 @@ $env:AGENTGROVE_BIND = "127.0.0.1"
 $env:AGENTGROVE_PORT = $bePort
 $env:AGENTGROVE_ENABLE_FAKE = "1"
 $env:AGENTGROVE_STATIC_DIR = Join-Path $repoRoot "apps\web\dist"
-$beProcess = Start-Process -NoNewWindow -FilePath ".\target\release\agentgrove.exe" -RedirectStandardOutput $beLog -RedirectStandardError $beLog -PassThru
+$beProcess = Start-Process -NoNewWindow -FilePath ".\target\release\agentgrove.exe" -RedirectStandardOutput $beLog -RedirectStandardError $beErrLog -PassThru
 
 $fePort = $bePort
 
@@ -62,8 +65,10 @@ for ($i = 0; $i -lt 30; $i++) {
 
 if (-not $ready) {
     Write-Output "ERROR: Servers failed to start."
-    Write-Output "--- backend log ---"
-    Get-Content $beLog -Tail 30
+    Write-Output "--- backend log (stdout) ---"
+    Get-Content $beLog -Tail 30 -ErrorAction SilentlyContinue
+    Write-Output "--- backend log (stderr) ---"
+    Get-Content $beErrLog -Tail 30 -ErrorAction SilentlyContinue
     Write-Output "--- frontend log ---"
     Get-Content $feLog -Tail 30
     Stop-Process -Id $beProcess.Id -Force -ErrorAction SilentlyContinue
