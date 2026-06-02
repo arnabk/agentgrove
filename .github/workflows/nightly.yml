@@ -28,7 +28,7 @@ jobs:
       - run: pnpm -C apps/web exec playwright install --with-deps chromium
       - name: Live E2E (POSIX)
         if: runner.os != 'Windows'
-        run: bash scripts/test-live.sh
+        run: bash scripts/verify.sh
       - name: Live E2E (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

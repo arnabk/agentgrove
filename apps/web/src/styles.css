@@ -90,7 +90,8 @@ body,
 }
 
 body {
-  overflow-x: auto;
+  overflow: hidden;
+  height: 100vh;
 }
 
 html {
@@ -617,35 +618,28 @@ textarea::placeholder {
   justify-content: center;
   width: 24px;
   height: 24px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' width='10' height='10'%3E%3Cpath d='M3 2a1 1 0 110-2 1 1 0 010 2zm4 0a1 1 0 110-2 1 1 0 010 2zm-4 4a1 1 0 110-2 1 1 0 010 2zm4 0a1 1 0 110-2 1 1 0 010 2zm-4 4a1 1 0 110-2 1 1 0 010 2zm4 0a1 1 0 110-2 1 1 0 010 2z' fill='rgba(255, 255, 255, 0.3)'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' width='10' height='10'%3E%3Cpath d='M3 2a1 1 0 110-2 1 1 0 010 2zm4 0a1 1 0 110-2 1 1 0 010 2zm-4 4a1 1 0 110-2 1 1 0 010 2zm4 0a1 1 0 110-2 1 1 0 010 2zm-4 4a1 1 0 110-2 1 1 0 010 2zm4 0a1 1 0 110-2 1 1 0 010 2z' fill='rgba(255, 255, 255, 0.4)'/%3E%3C/svg%3E");
   background-size: 10px;
   background-repeat: no-repeat;
   background-position: center;
   cursor: grab;
-  opacity: 0;
+  /* Make the handle always slightly visible, full opacity on hover */
+  opacity: 0.15;
   transition: opacity 0.1s ease;
+  border-radius: 4px;
 }
 
 .drag-handle:active {
   cursor: grabbing;
 }
 
-.ag-prose:hover .drag-handle {
+.drag-handle:hover {
+  background-color: var(--ag-bg-3);
   opacity: 1;
 }
 
-.ProseMirror-selectednode {
-  outline: 2px solid var(--ag-accent) !important;
-  outline-offset: 2px;
-  transition: outline 0.15s ease-in-out;
-}
-
-.drag-handle {
-  /* Override the default injected styles to match our theme */
-  border-radius: 4px;
-}
-.drag-handle:hover {
-  background-color: var(--ag-bg-3);
+.ag-prose:hover .drag-handle {
+  opacity: 0.8;
 }
 
 .ag-prose {

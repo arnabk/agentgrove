@@ -323,3 +323,30 @@ pub async fn cancel(
         }
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateItemBody {
+    pub body: String,
+}
+
+/// `PATCH /api/chats/:chat_id/queue/:item_id` — update the text of a
+/// pending queue item. Only pending items can be edited (running items
+/// are already in-flight). Files / attachments in the body trailer
+/// are left intact; the FE replaces only the text portion.
+pub async fn update_item(
+    State(state): State<AppState>,
+    Path((_chat_id, item_id)): Path<(String, String)>,
+    Json(body): Json<UpdateItemBody>,
+) -> Result<StatusCode, StatusCode> {
+    if body.body.trim().is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    match state.queue_store.update_body(&item_id, &body.body).await {
+        Ok(true) => Ok(StatusCode::NO_CONTENT),
+        Ok(false) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            tracing::warn!(item_id, error = %e, "queue update_body failed");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}

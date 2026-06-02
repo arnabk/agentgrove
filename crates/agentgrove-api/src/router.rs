@@ -80,7 +80,10 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/chats/:id/queue/mode", post(queue::set_mode))
         .route("/api/chats/:id/queue/next", post(queue::run_next))
-        .route("/api/chats/:chat_id/queue/:item_id", delete(queue::cancel))
+        .route(
+            "/api/chats/:chat_id/queue/:item_id",
+            delete(queue::cancel).patch(queue::update_item),
+        )
         // Notes (chat-scoped, legacy)
         .route("/api/chats/:id/notes", get(notes::list).post(notes::add))
         .route("/api/chats/:chat_id/notes/:note_id", delete(notes::delete))

@@ -84,6 +84,19 @@ export default function QueueDock(props: Props) {
     }
   }
 
+  async function updateItemBody(item: QueueItem, body: string) {
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.updateQueueItem(props.chatId, item.id, body);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function toggleExpanded(id: string) {
     setExpanded((s) => {
       const next = new Set(s);
@@ -269,16 +282,17 @@ export default function QueueDock(props: Props) {
               </p>
             }
           >
-            <For each={items()}>
-              {(it) => (
-                <QueueCard
-                  item={it}
-                  expanded={expanded().has(it.id)}
-                  onToggle={() => toggleExpanded(it.id)}
-                  onCancel={() => void cancel(it)}
-                />
-              )}
-            </For>
+              <For each={items()}>
+                {(item) => (
+                  <QueueCard
+                    item={item}
+                    expanded={expanded().has(item.id)}
+                    onToggle={() => toggleExpanded(item.id)}
+                    onCancel={() => void cancel(item)}
+                    onUpdate={(body) => void updateItemBody(item, body)}
+                  />
+                )}
+              </For>
           </Show>
         </div>
       </aside>
@@ -297,8 +311,39 @@ function QueueCard(props: {
   expanded: boolean;
   onToggle: () => void;
   onCancel: () => void;
+  onUpdate: (body: string) => void;
 }) {
   const split = createMemo(() => splitBodyAndAttachments(props.item.body));
+  const [editing, setEditing] = createSignal(false);
+  const [draft, setDraft] = createSignal("");
+  let inputRef: HTMLTextAreaElement | undefined;
+
+  function startEdit() {
+    setDraft(split().body);
+    setEditing(true);
+    queueMicrotask(() => {
+      if (inputRef) {
+        inputRef.focus();
+        inputRef.style.height = "0px";
+        inputRef.style.height = `${inputRef.scrollHeight}px`;
+      }
+    });
+  }
+
+  function commitEdit() {
+    const newBody = draft();
+    setEditing(false);
+    if (newBody !== split().body) {
+      const full = split().rawSuffix
+        ? `${newBody}\n\n${split().rawSuffix}`
+        : newBody;
+      props.onUpdate(full);
+    }
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+  }
 
   return (
     <article
@@ -400,6 +445,36 @@ interface ParsedAttachment {
 interface SplitResult {
   body: string;
   attachments: ParsedAttachment[];
+  rawSuffix?: string;
+}
+
+const ATTACHMENT_MARKER =
+  "Attached files (absolute paths, read with your Read tool):";
+
+function splitBodyAndAttachments(raw: string): SplitResult {
+  const idx = raw.indexOf(ATTACHMENT_MARKER);
+  if (idx < 0) {
+    return { body: raw, attachments: [] };
+  }
+  const body = raw.slice(0, idx).trimEnd();
+  const rawSuffix = raw.slice(idx);
+  const trailer = raw.slice(idx + ATTACHMENT_MARKER.length);
+  const attachments: ParsedAttachment[] = [];
+  for (const line of trailer.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("- ")) continue;
+    const rest = trimmed.slice(2);
+    // "PATH (MIME)" or just "PATH"
+    const mimeMatch = rest.match(/^(.*) \(([^)]+)\)$/);
+    if (mimeMatch && mimeMatch[2]) {
+      attachments.push({ path: mimeMatch[1]!, mime: mimeMatch[2] });
+    } else if (mimeMatch) {
+      attachments.push({ path: mimeMatch[1]! });
+    } else {
+      attachments.push({ path: rest });
+    }
+  }
+  return { body, attachments, rawSuffix };
 }
 
 /** Split a queue-item body into the visible prompt text + the
@@ -414,31 +489,6 @@ interface SplitResult {
  *
  *  Parsing is forgiving: if no trailer is present, the whole body
  *  is returned verbatim. */
-function splitBodyAndAttachments(raw: string): SplitResult {
-  const marker = /\n\nAttached files \([^)]*\):\n/;
-  const m = raw.match(marker);
-  if (!m || m.index === undefined) {
-    return { body: raw, attachments: [] };
-  }
-  const body = raw.slice(0, m.index);
-  const tail = raw.slice(m.index + m[0].length);
-  const attachments: ParsedAttachment[] = [];
-  for (const line of tail.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("- ")) continue;
-    const rest = trimmed.slice(2);
-    // "PATH (MIME)" or just "PATH"
-    const mimeMatch = rest.match(/^(.*) \(([^)]+)\)$/);
-    if (mimeMatch && mimeMatch[2]) {
-      attachments.push({ path: mimeMatch[1]!, mime: mimeMatch[2] });
-    } else if (mimeMatch) {
-      attachments.push({ path: mimeMatch[1]! });
-    } else {
-      attachments.push({ path: rest });
-    }
-  }
-  return { body, attachments };
-}
 
 function basename(p: string): string {
   const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));

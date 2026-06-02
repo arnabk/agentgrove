@@ -463,6 +463,11 @@ export const api = {
     req<void>(`/api/chats/${encodeURIComponent(chatId)}/queue/${encodeURIComponent(itemId)}`, {
       method: "DELETE",
     }),
+  updateQueueItem: (chatId: string, itemId: string, body: string) =>
+    req<void>(`/api/chats/${encodeURIComponent(chatId)}/queue/${encodeURIComponent(itemId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ body }),
+    }),
   // Notes
   listNotes: (chatId: string) => req<Note[]>(`/api/chats/${encodeURIComponent(chatId)}/notes`),
   addNote: (chatId: string, body: string) =>

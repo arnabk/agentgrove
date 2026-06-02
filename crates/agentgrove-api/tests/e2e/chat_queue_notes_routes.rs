@@ -1424,3 +1424,45 @@ async fn stop_turn_unknown_chat_returns_404() {
         .unwrap();
     assert_eq!(res.status(), 404);
 }
+
+#[tokio::test]
+async fn queue_item_patch_updates_body() {
+    let h = BeHarness::start().await;
+    let chat_id = make_chat(&h, "patch", "fake", "echo").await;
+
+    // Flip to manual so item stays in queue.
+    let _ = h
+        .post_auth(&format!("/api/chats/{chat_id}/queue/mode"))
+        .json(&json!({"mode": "manual"}))
+        .send()
+        .await
+        .unwrap();
+
+    let res = h
+        .post_auth(&format!("/api/chats/{chat_id}/queue"))
+        .json(&json!({"body": "orig"}))
+        .send()
+        .await
+        .unwrap();
+    let item: Value = res.json().await.unwrap();
+    let item_id = item["id"].as_str().unwrap();
+
+    let patch = h
+        .patch(&format!("/api/chats/{chat_id}/queue/{item_id}"))
+        .json(&json!({"body": "new text"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(patch.status(), 204);
+
+    let q: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}/queue"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let updated = &q["items"].as_array().unwrap()[0];
+    assert_eq!(updated["body"], "new text");
+}

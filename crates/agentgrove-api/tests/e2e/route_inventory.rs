@@ -37,6 +37,7 @@ fn expected_routes() -> BTreeSet<&'static str> {
         "POST /api/chats/{id}/queue/mode",
         "POST /api/chats/{id}/queue/next",
         "DELETE /api/chats/{chat_id}/queue/{item_id}",
+        "PATCH /api/chats/{chat_id}/queue/{item_id}",
         "GET /api/chats/{id}/notes",
         "POST /api/chats/{id}/notes",
         "DELETE /api/chats/{chat_id}/notes/{note_id}",
