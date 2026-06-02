@@ -157,17 +157,21 @@ export default function RightSidebar() {
           </div>
         </div>
 
-        {/* Horizontal divider handle */}
+        {/* Horizontal divider handle. Added a visible inner border
+            so there's a clear separation between Notes and Queue. */}
         <div
           role="separator"
           aria-orientation="horizontal"
           aria-label="Resize notes / queue split"
-          class="h-1.5 cursor-row-resize hover:bg-accent/30 active:bg-accent/50 transition-colors touch-none shrink-0"
+          class="relative h-1.5 cursor-row-resize hover:bg-accent/30 active:bg-accent/50 transition-colors touch-none shrink-0"
           classList={{ "!bg-accent/50": divDragging() }}
           onPointerDown={onDivDown}
           onPointerUp={onDivUp}
           data-testid="sidebar-divider"
-        />
+        >
+          {/* Visible line in the center of the drag area */}
+          <div class="absolute top-1/2 left-0 right-0 h-[1px] -translate-y-1/2 bg-border pointer-events-none" />
+        </div>
 
         {/* Queue section (bottom) */}
         <div class="overflow-hidden flex flex-col" style={{ height: `${100 - notesPct()}%` }}>
