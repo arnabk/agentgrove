@@ -155,7 +155,17 @@ export default function App() {
         </div>
       </Show>
       <Show when={state.ready} fallback={<LoadingScreen />}>
-        <div class="h-screen flex" data-testid="app-root" data-theme="dark">
+        {/* The root CSS `zoom` (see app.ts) scales 100vh too, so a plain
+            h-screen renders taller than the real viewport and pushes
+            content (e.g. the chat composer) off-screen. Counter the zoom
+            with --ag-zoom-inv so the app shell is exactly one viewport
+            tall after scaling. */}
+        <div
+          class="flex"
+          style={{ height: "calc(100dvh * var(--ag-zoom-inv, 1))" }}
+          data-testid="app-root"
+          data-theme="dark"
+        >
           <div class="ag-shell flex-1 flex min-w-0 overflow-hidden">
             <Show when={state.projects.length > 0 && leftRailOpen()} fallback={null}>
               <LeftRail />
@@ -239,7 +249,12 @@ export default function App() {
 
                 {/* Main content: active tab pane + right sidebar */}
                 <div class="flex-1 flex min-h-0">
-                  <div class="flex-1 min-w-0 relative">
+                  {/* min-h-0 + overflow-hidden keep this column bounded to
+                      the row height. Without min-h-0 the absolutely-
+                      positioned tab host resolves against a container that
+                      grows to its content's natural height, pushing the
+                      chat composer below the viewport (no place to type). */}
+                  <div class="flex-1 min-w-0 min-h-0 relative overflow-hidden">
                     {/* Render the active tab's content. Each tab type
                         gets its own host div keyed by tab.id so xterm /
                         Tiptap / CodeMirror instances survive tab
