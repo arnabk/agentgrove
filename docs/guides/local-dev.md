@@ -30,20 +30,37 @@ Every recipe in the `justfile` has a documented equivalent under
 `scripts/`. Use `scripts/<name>.sh` on Unix or `scripts/<name>.ps1` on
 Windows.
 
-## Rust toolchain notes (macOS)
+## Rust toolchain notes (Linux, macOS, Windows)
 
-If you previously installed Rust via Homebrew (`brew install rust`),
-that ships an older cargo at `/opt/homebrew/bin/cargo` which will shadow
-rustup. AgentGrove pins a newer toolchain in `rust-toolchain.toml` and
-some transitive dependencies require Cargo 1.85+.
+AgentGrove pins its Rust toolchain in `rust-toolchain.toml`, and some
+transitive dependencies require a recent edition (Cargo/rustc 1.85+).
+[rustup](https://rustup.rs) reads that pin and uses the right version
+automatically on every platform — **provided the `cargo`/`rustc` on your
+`PATH` are rustup's shims** and not a separate, older Rust install.
+
+A non-rustup toolchain ahead of rustup on `PATH` will shadow the pin and
+the build fails with `feature \`edition2024\` is required` or
+`failed to parse manifest ...`. This is not OS-specific; common culprits:
+
+- **Linux** — a distro package (`apt install cargo` / `dnf install cargo`)
+  at `/usr/bin/cargo`.
+- **macOS** — Homebrew Rust (`brew install rust`) at `/opt/homebrew/bin/cargo`.
+- **Windows** — a standalone Rust installer instead of `rustup`.
 
 The bundled scripts under `scripts/` (used by `just start`, `just dev-be`,
-etc.) automatically prepend the rustup toolchain to `PATH`, so they work
-regardless of brew Rust being installed.
+`scripts/verify.sh`, etc.) already prepend the rustup toolchain to `PATH`,
+so they work regardless of which other Rust is installed.
 
-If you run `cargo` directly and hit `feature \`edition2024\` is required`,
-either:
+If you run `cargo` directly and hit the error, do any one of:
 
-- prepend rustup to your shell PATH:
-  `export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`
-- or remove the brew rust: `brew uninstall rust`.
+- **Recommended:** install Rust only via rustup and remove the other one
+  (`brew uninstall rust`, `apt remove cargo`, uninstall the standalone
+  Windows package), so rustup is the only Rust on `PATH`.
+- Put rustup's shim dir first on `PATH`:
+  - Linux/macOS: `export PATH="$HOME/.cargo/bin:$PATH"` (ahead of
+    `/usr/bin`, `/opt/homebrew/bin`, …).
+  - Windows (PowerShell): ensure `%USERPROFILE%\.cargo\bin` precedes other
+    Rust entries in your `Path`.
+- Or invoke the pinned toolchain explicitly without changing `PATH`:
+  `rustup run "$(rustup show active-toolchain | cut -d' ' -f1)" cargo build`
+  (equivalent to `cargo +<pinned-version> build`).

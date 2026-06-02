@@ -5,17 +5,65 @@ this whole page before opening a PR.
 
 ## Prerequisites
 
-- Rust stable (1.83+). Install via [rustup](https://rustup.rs).
+- Rust, installed via [rustup](https://rustup.rs) (Linux, macOS, and Windows).
+  The exact version is pinned in [`rust-toolchain.toml`](../rust-toolchain.toml);
+  rustup downloads and uses it automatically the first time you run `cargo`
+  in this repo, on every platform — you do **not** install a specific version
+  by hand. See the note below if you hit a `failed to parse manifest` error.
 - Node 20+ (24 recommended). We recommend [nvm](https://github.com/nvm-sh/nvm)
   on Unix or [nvm-windows](https://github.com/coreybutler/nvm-windows).
 - pnpm 9+ (`corepack enable pnpm`).
-- `just` task runner: `brew install just`, `cargo install just`, or
+- `just` task runner: `cargo install just`, `winget install --id Casey.Just`
+  (Windows), `brew install just` (macOS), or
   [other installers](https://github.com/casey/just#installation).
 - Git 2.40+.
 
 Optional but recommended:
 
 - `cargo-llvm-cov`, `cargo-mutants`, `cargo-audit`, `cargo-deny`.
+
+### Use the rustup-managed toolchain (all platforms)
+
+This repo pins its Rust toolchain in `rust-toolchain.toml`, and some
+dependencies require a recent edition (rustc ≥ 1.85). rustup honours that
+pin automatically — **as long as the `cargo`/`rustc` on your `PATH` are the
+rustup shims**, not a separate, older install.
+
+If a non-rustup Rust is ahead of rustup on your `PATH`, the build fails with
+something like:
+
+```
+error: failed to download `hashbrown vX.Y.Z`
+Caused by: failed to parse manifest ... (edition 2024 / rust-version ...)
+```
+
+That older toolchain can't read a newer crate manifest. This is not
+platform-specific — it happens with a distro package on Linux (`apt`/`dnf`
+`cargo`), a standalone installer on Windows, or Homebrew's `cargo` on macOS
+shadowing rustup. Fix it the same way everywhere:
+
+1. Check which toolchain you're actually using:
+
+   ```sh
+   cargo --version
+   rustc --version
+   rustup show        # shows the pinned/active toolchain
+   ```
+
+2. Make sure rustup's shim directory comes first on `PATH`:
+   - Linux/macOS: `~/.cargo/bin` should precede any other Rust dir (e.g.
+     `/opt/homebrew/bin`, `/usr/bin`). Adjust your shell rc accordingly.
+   - Windows: `%USERPROFILE%\.cargo\bin` should precede other Rust entries.
+
+3. Or invoke the pinned toolchain explicitly without touching `PATH`:
+
+   ```sh
+   rustup run "$(rustup show active-toolchain | cut -d' ' -f1)" cargo build
+   ```
+
+   (Equivalent to `cargo +<pinned-version> build`.)
+
+Prefer installing Rust **only** via rustup so this can't happen.
 
 ## Setup
 
