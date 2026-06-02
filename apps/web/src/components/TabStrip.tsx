@@ -16,13 +16,7 @@ import { confirm } from "./dialog";
  * Notes buttons) — pane types are now just tab types.
  */
 
-export default function TabStrip(props: {
-  /** Called when user clicks "+ New" dropdown items. Terminal creation
-   *  lives in the per-project left rail, so it's intentionally not a
-   *  middle-section action here. */
-  onNewChat: () => void;
-  onOpenFile: () => void;
-}) {
+export default function TabStrip() {
   const tabs = () => currentScope()?.tabs ?? [];
   const active = () => activeTab()?.id ?? null;
 
@@ -142,38 +136,9 @@ export default function TabStrip(props: {
         )}
       </For>
 
-      {/* + dropdown */}
-      <div class="relative ml-1 group/plus">
-        <button
-          class="ag-btn ag-btn-ghost ag-btn-sm text-[11px]"
-          disabled={!state.selectedProjectId}
-          data-testid="tab-add"
-        >
-          +
-        </button>
-        <div class="hidden group-hover/plus:block absolute left-0 top-full mt-1 bg-bg-1 border border-border rounded-lg shadow-xl z-30 min-w-[140px] py-1">
-          <button
-            type="button"
-            class="w-full text-left px-3 py-1.5 text-[12px] hover:bg-bg-2 flex items-center gap-2"
-            onClick={() => props.onNewChat()}
-            data-testid="tab-add-chat"
-          >
-            {icon("chat")} New chat
-          </button>
-          <button
-            type="button"
-            class="w-full text-left px-3 py-1.5 text-[12px] hover:bg-bg-2 flex items-center gap-2"
-            onClick={() => props.onOpenFile()}
-            data-testid="tab-add-file"
-          >
-            {icon("editor")} Open file
-          </button>
-        </div>
-      </div>
-
       <Show when={tabs().length === 0 && state.selectedProjectId}>
         <span class="text-[11px] text-fg-subtle ml-2">
-          Click + to open a chat, terminal, or file
+          Use the left rail to open a chat, terminal, or file
         </span>
       </Show>
     </header>

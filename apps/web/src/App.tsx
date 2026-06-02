@@ -7,7 +7,6 @@ import MemoryIndicator from "./components/MemoryIndicator";
 import RightSidebar from "./components/RightSidebar";
 import SettingsModal from "./components/SettingsModal";
 import TabStrip from "./components/TabStrip";
-import NewChatDialog from "./components/NewChatDialog";
 import Welcome from "./components/Welcome";
 import { installRouteSync } from "./lib/routeSync";
 import { installCrossInstanceSync } from "./lib/crossInstanceSync";
@@ -19,7 +18,6 @@ import EditorPane from "./panes/EditorPane";
 import TerminalPane from "./panes/TerminalPane";
 import {
   activeTab,
-  addChatTab,
   bootstrap,
   changesScope,
   currentScope,
@@ -33,13 +31,6 @@ import {
 } from "./stores/app";
 
 export default function App() {
-  // NewChatDialog state — reused from LeftRail's pattern.
-  const [newChatFor, setNewChatFor] = createSignal<{
-    projectId: string;
-    worktreeId: string | null;
-    parentName: string;
-  } | null>(null);
-
   // Left rail collapse state (persisted to localStorage).
   const [leftRailOpen, setLeftRailOpen] = createSignal(
     localStorage.getItem("ag-left-rail-open") !== "0",
@@ -48,19 +39,6 @@ export default function App() {
     const next = !leftRailOpen();
     setLeftRailOpen(next);
     localStorage.setItem("ag-left-rail-open", next ? "1" : "0");
-  }
-
-  function openNewChatDialog() {
-    const pid = state.selectedProjectId;
-    if (!pid) return;
-    const p = state.projects.find((x) => x.id === pid);
-    if (!p) return;
-    const wid = state.selectedWorktreeByProject[pid] ?? null;
-    setNewChatFor({
-      projectId: pid,
-      worktreeId: wid,
-      parentName: p.name,
-    });
   }
 
   onMount(async () => {
@@ -214,10 +192,7 @@ export default function App() {
                     </svg>
                   </button>
                   <div class="flex-1 min-w-0 overflow-hidden">
-                    <TabStrip
-                      onNewChat={() => openNewChatDialog()}
-                      onOpenFile={() => setPaletteOpen(true)}
-                    />
+                    <TabStrip />
                   </div>
                   <div class="flex items-center gap-2 px-3 shrink-0">
                     <button
@@ -295,20 +270,6 @@ export default function App() {
         </div>
       </Show>
       <SettingsModal />
-      <Show when={newChatFor()} keyed>
-        {(ctx) => (
-          <NewChatDialog
-            projectId={ctx.projectId}
-            worktreeId={ctx.worktreeId}
-            defaultTitle={`chat in ${ctx.parentName}`}
-            onCancel={() => setNewChatFor(null)}
-            onCreated={(chat) => {
-              addChatTab({ id: chat.id, title: chat.title });
-              setNewChatFor(null);
-            }}
-          />
-        )}
-      </Show>
       <Show when={changesScope()}>
         <ChangesPanel />
       </Show>

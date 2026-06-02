@@ -201,7 +201,19 @@ export default function ChangesPanel() {
       aria-label="Changes"
     >
       <div class="absolute inset-0 bg-black/60" onClick={() => setChangesScope(null)} />
-      <aside class="relative w-[96vw] h-[92vh] max-w-[1800px] bg-bg-1 border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden">
+      {/* Size against the *real* viewport. The root CSS `zoom` (see
+          app.ts) scales vw/vh units too, so a plain 96vw/92vh overlay
+          grows ~zoom× larger than the screen at bigger font sizes and
+          its top (the title) gets pushed above the viewport. Multiply by
+          --ag-zoom-inv so the panel is 96vw × 92vh of the actual screen
+          after zoom. */}
+      <aside
+        class="relative max-w-[1800px] bg-bg-1 border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden"
+        style={{
+          width: "calc(96vw * var(--ag-zoom-inv, 1))",
+          height: "calc(92vh * var(--ag-zoom-inv, 1))",
+        }}
+      >
         <header class="min-h-11 shrink-0 px-4 py-2 flex items-center gap-2 flex-wrap border-b border-border bg-bg-1">
           <h3 class="text-[13.5px] font-semibold tracking-tight shrink-0">Changes</h3>
           <Show when={changesScope()}>
