@@ -84,8 +84,12 @@ $env:PW_LIVE = "1"
 $env:AGENTGROVE_BE_URL = "http://127.0.0.1:$bePort"
 $env:REPO_ROOT = $repoRoot
 
-# Need to capture output
-pnpm -C apps/web exec playwright test --reporter=line 2>&1 | Tee-Object -FilePath $pwLog
+# Run the same scoped live acceptance spec the POSIX legs run via
+# scripts/verify.sh, so all three nightly OS legs exercise an
+# identical surface. The broader e2e suite (chat/queue/pane specs)
+# is covered by the dedicated FE jobs; mirroring verify.sh here keeps
+# the cross-platform leg apples-to-apples.
+pnpm -C apps/web exec playwright test e2e/verify-live.spec.ts --reporter=line 2>&1 | Tee-Object -FilePath $pwLog
 $pwExit = $LASTEXITCODE
 
 Stop-Process -Id $beProcess.Id -Force -ErrorAction SilentlyContinue
