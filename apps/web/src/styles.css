@@ -609,7 +609,44 @@ textarea::placeholder {
   background-color: var(--ag-bg-1) !important;
 }
 
-/* ---------- Notes: rich-text editor styling ------------------------------ */
+/* ---------- Tiptap Global Drag Handle ----------------------------------- */
+
+.drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' width='10' height='10'%3E%3Cpath d='M3 2a1 1 0 110-2 1 1 0 010 2zm4 0a1 1 0 110-2 1 1 0 010 2zm-4 4a1 1 0 110-2 1 1 0 010 2zm4 0a1 1 0 110-2 1 1 0 010 2zm-4 4a1 1 0 110-2 1 1 0 010 2zm4 0a1 1 0 110-2 1 1 0 010 2z' fill='rgba(255, 255, 255, 0.3)'/%3E%3C/svg%3E");
+  background-size: 10px;
+  background-repeat: no-repeat;
+  background-position: center;
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.ag-prose:hover .drag-handle {
+  opacity: 1;
+}
+
+.ProseMirror-selectednode {
+  outline: 2px solid var(--ag-accent) !important;
+  outline-offset: 2px;
+  transition: outline 0.15s ease-in-out;
+}
+
+.drag-handle {
+  /* Override the default injected styles to match our theme */
+  border-radius: 4px;
+}
+.drag-handle:hover {
+  background-color: var(--ag-bg-3);
+}
 
 .ag-prose {
   color: var(--ag-fg);
