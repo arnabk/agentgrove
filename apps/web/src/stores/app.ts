@@ -644,6 +644,40 @@ export function setTheme(themeId: string) {
   localStorage.setItem("ag-theme", themeId);
 }
 
+/** Dynamically inject a Google Fonts stylesheet so the user's
+ *  chosen font renders without requiring a pre-bundled web font.
+ *  Idempotent: calling twice with the same family is a no-op. */
+const loadedFonts = new Set<string>();
+function loadGoogleFont(family: string) {
+  // Extract the first quoted font name from the CSS stack.
+  const match = family.match(/"([^"]+)"/);
+  const name = match ? match[1] : family.split(",")[0]!.trim();
+  if (!name || loadedFonts.has(name)) return;
+  loadedFonts.add(name);
+  // Skip system / generic families.
+  const skip = [
+    "ui-sans-serif",
+    "system-ui",
+    "-apple-system",
+    "Segoe UI",
+    "Roboto",
+    "sans-serif",
+    "ui-monospace",
+    "SFMono-Regular",
+    "Menlo",
+    "Consolas",
+    "monospace",
+    "Inter",
+    "JetBrains Mono",
+  ];
+  if (skip.includes(name)) return;
+  const encoded = encodeURIComponent(name);
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = `https://fonts.googleapis.com/css2?family=${encoded}:wght@300;400;500;600;700&display=swap`;
+  document.head.appendChild(link);
+}
+
 export function applySettings(s: UserSettings) {
   const root = document.documentElement;
   const uiFont = s.ui_font ?? DEFAULT_UI_FONT;
@@ -651,11 +685,20 @@ export function applySettings(s: UserSettings) {
   const fontSize = s.font_size ?? DEFAULT_FONT_SIZE;
   root.style.setProperty("--ag-font-ui", uiFont);
   root.style.setProperty("--ag-font-mono", monoFont);
+  loadGoogleFont(uiFont);
+  loadGoogleFont(monoFont);
   // Expose the base UI size as both an explicit var (consumed by panels
   // that opt-in via em-relative sizing) and as the root font-size so
   // any rem-based styles also pick it up.
   root.style.setProperty("--ag-font-size", `${fontSize}px`);
-  root.style.fontSize = `${fontSize}px`;
+  // Scale the entire UI proportionally. Components use hardcoded
+  // Tailwind pixel sizes (text-[13px], text-[12px], etc.) that
+  // don't respond to root font-size. CSS `zoom` on the root
+  // scales EVERYTHING including those px values, giving the user
+  // a true "make everything bigger/smaller" knob without
+  // rewriting every size class to em/rem.
+  const baseSize = 15; // matches DEFAULT_FONT_SIZE
+  root.style.zoom = `${fontSize / baseSize}`;
   if (s.theme) {
     if (state.themes.length > 0) setTheme(s.theme);
     else setState("themeId", s.theme);
@@ -673,27 +716,46 @@ export async function saveSettings(patch: UserSettings) {
   }
 }
 
+// Popular free developer UI fonts. Each is available from Google
+// Fonts (loaded on demand via the `loadGoogleFont` helper below)
+// or commonly pre-installed on developer machines. The fallback
+// chain ensures a clean render even if the font hasn't loaded yet.
 export const FONT_FAMILY_PRESETS: { label: string; value: string }[] = [
   { label: "Inter (default)", value: DEFAULT_UI_FONT },
   {
     label: "System",
     value: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
   },
+  { label: "Geist", value: '"Geist", Inter, system-ui, sans-serif' },
   { label: "IBM Plex Sans", value: '"IBM Plex Sans", Inter, system-ui, sans-serif' },
+  { label: "Nunito Sans", value: '"Nunito Sans", Inter, system-ui, sans-serif' },
+  { label: "Open Sans", value: '"Open Sans", Inter, system-ui, sans-serif' },
+  { label: "Outfit", value: '"Outfit", Inter, system-ui, sans-serif' },
+  { label: "Plus Jakarta Sans", value: '"Plus Jakarta Sans", Inter, system-ui, sans-serif' },
+  { label: "Poppins", value: '"Poppins", Inter, system-ui, sans-serif' },
+  { label: "Roboto", value: '"Roboto", Inter, system-ui, sans-serif' },
   { label: "Source Sans 3", value: '"Source Sans 3", Inter, system-ui, sans-serif' },
+  { label: "Space Grotesk", value: '"Space Grotesk", Inter, system-ui, sans-serif' },
+  { label: "Work Sans", value: '"Work Sans", Inter, system-ui, sans-serif' },
 ];
 
+// Popular free monospace / code fonts.
 export const MONO_FAMILY_PRESETS: { label: string; value: string }[] = [
   { label: "JetBrains Mono (default)", value: DEFAULT_MONO_FONT },
-  {
-    label: "Fira Code",
-    value: '"Fira Code", "JetBrains Mono", ui-monospace, Menlo, monospace',
-  },
+  { label: "Cascadia Code", value: '"Cascadia Code", ui-monospace, Menlo, monospace' },
+  { label: "Fira Code", value: '"Fira Code", ui-monospace, Menlo, monospace' },
+  { label: "Geist Mono", value: '"Geist Mono", ui-monospace, Menlo, monospace' },
   { label: "IBM Plex Mono", value: '"IBM Plex Mono", ui-monospace, Menlo, monospace' },
+  { label: "Inconsolata", value: '"Inconsolata", ui-monospace, Menlo, monospace' },
+  { label: "Iosevka", value: '"Iosevka", ui-monospace, Menlo, monospace' },
+  { label: "Monaspace Neon", value: '"Monaspace Neon", ui-monospace, Menlo, monospace' },
+  { label: "Roboto Mono", value: '"Roboto Mono", ui-monospace, Menlo, monospace' },
   { label: "Source Code Pro", value: '"Source Code Pro", ui-monospace, Menlo, monospace' },
+  { label: "Ubuntu Mono", value: '"Ubuntu Mono", ui-monospace, Menlo, monospace' },
+  { label: "Victor Mono", value: '"Victor Mono", ui-monospace, Menlo, monospace' },
 ];
 
-export const FONT_SIZES: number[] = [12, 13, 14, 15, 16, 17, 18];
+export const FONT_SIZES: number[] = [10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24];
 
 export function selectChat(id: string) {
   setActiveChat(id);
