@@ -15,7 +15,7 @@
 //      — i.e. we DIDN'T regress to Dynamic-style remount.
 
 import { test, expect } from "@playwright/test";
-import { BASE, seedBackend, REPO_ROOT } from "./helpers";
+import { BASE, BE_URL, seedBackend, REPO_ROOT } from "./helpers";
 
 test.describe("pane mount strategy", () => {
   test.beforeEach(async ({ page }) => {
@@ -25,10 +25,11 @@ test.describe("pane mount strategy", () => {
 
     const hasProject = await page.locator("[data-testid='left-rail']").count();
     if (hasProject === 0) {
-      await page.getByTestId("welcome-add-folder").click();
-      await page.getByTestId("welcome-name").fill("self");
-      await page.getByTestId("welcome-root").fill(REPO_ROOT);
-      await page.getByTestId("welcome-submit").click();
+      await fetch(`${BE_URL}/api/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "self", root: REPO_ROOT }),
+      });
     }
     await expect(page.getByTestId("left-rail")).toBeVisible({ timeout: 15_000 });
   });

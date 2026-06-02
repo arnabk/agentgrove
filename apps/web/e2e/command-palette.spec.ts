@@ -11,7 +11,7 @@
 //   4. Esc closes.
 
 import { test, expect } from "@playwright/test";
-import { BASE, REPO_ROOT, seedBackend } from "./helpers";
+import { BASE, BE_URL, REPO_ROOT, seedBackend } from "./helpers";
 
 test.describe("command palette (Cmd+P)", () => {
   test.beforeEach(async ({ page }) => {
@@ -23,10 +23,11 @@ test.describe("command palette (Cmd+P)", () => {
     // something to index. The repo itself works as the test project.
     const hasProject = await page.locator("[data-testid='left-rail']").count();
     if (hasProject === 0) {
-      await page.getByTestId("welcome-add-folder").click();
-      await page.getByTestId("welcome-name").fill("self");
-      await page.getByTestId("welcome-root").fill(REPO_ROOT);
-      await page.getByTestId("welcome-submit").click();
+      await fetch(`${BE_URL}/api/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "self", root: REPO_ROOT }),
+      });
     }
     await expect(page.getByTestId("left-rail")).toBeVisible({ timeout: 15_000 });
   });
