@@ -137,6 +137,12 @@ export const [state, setState] = createStore<AppState>({
 /** Visibility of the global Settings modal. */
 export const [settingsOpen, setSettingsOpen] = createSignal(false);
 
+/** Transient, dismissable navigation error (e.g. the user used the
+ *  browser back button to land on a project/worktree that no longer
+ *  exists). Rendered as a toast in App.tsx; cleared on dismiss or the
+ *  next successful navigation. */
+export const [routeError, setRouteError] = createSignal<string | null>(null);
+
 /** Scope passed to the Changes (git diff) overlay. `null` means closed. */
 export interface ChangesScope {
   /** Absolute path to the working tree (project root or worktree path). */

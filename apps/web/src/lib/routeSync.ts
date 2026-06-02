@@ -10,6 +10,7 @@ import {
   selectedFilePath,
   setActiveChat,
   setActivePane,
+  setRouteError,
   state,
 } from "../stores/app";
 import type { PaneId } from "../stores/app";
@@ -70,6 +71,37 @@ export function installRouteSync() {
       targetProject = segments[1]!;
       if (segments[2] === "w" && segments[3]) {
         targetWorktree = segments[3]!;
+      }
+    }
+
+    // Guard against navigating (e.g. via browser back/forward) to a
+    // project that no longer exists — a deleted project or a stale
+    // history entry from a previous BE database. Selecting a phantom
+    // id leaves the app in a broken, empty state. Instead, surface an
+    // error and redirect to a valid scope (the current selection if
+    // still valid, else the first project, else the landing page).
+    if (targetProject && !state.projects.some((p) => p.id === targetProject)) {
+      setRouteError("That project no longer exists — taking you back.");
+      const fallback =
+        (state.selectedProjectId &&
+          state.projects.some((p) => p.id === state.selectedProjectId) &&
+          state.selectedProjectId) ||
+        state.projects[0]?.id ||
+        null;
+      navigate(fallback ? `/p/${fallback}` : "/", { replace: true });
+      return;
+    }
+
+    // Validate the worktree too: an unknown worktree id for a valid
+    // project should fall back to the project root rather than a dead
+    // scope. worktrees may not be loaded yet, so only reject when we
+    // have the list and the id is absent from it.
+    if (targetProject && targetWorktree) {
+      const wts = state.worktrees[targetProject];
+      if (wts && !wts.some((w) => w.id === targetWorktree)) {
+        setRouteError("That worktree no longer exists — showing the project root.");
+        navigate(`/p/${targetProject}`, { replace: true });
+        return;
       }
     }
 

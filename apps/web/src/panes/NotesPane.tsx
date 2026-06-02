@@ -48,6 +48,23 @@ export default function NotesPane() {
   const [linkBarOpen, setLinkBarOpen] = createSignal(false);
   const [linkValue, setLinkValue] = createSignal("https://");
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  // Data-loss guards. A save must only ever persist content that the
+  // user actually edited — never the transient empty doc that exists
+  // while a project's scratchpad is still loading, and never content
+  // belonging to a different project than the one we're saving to.
+  //
+  //  - loadingPid: set while loadForProject is mid-flight; blocks saves
+  //    so a load race can't PUT an empty/stale doc.
+  //  - loadedBody: the exact HTML we last loaded from (or saved to) the
+  //    BE for loadedFor(). A save is skipped when the editor still
+  //    matches this baseline (nothing changed) so switching projects or
+  //    re-mounting never rewrites an untouched doc.
+  let loadingPid: string | null = null;
+  let loadedBody = "";
+  // A bare-empty tiptap document. Used to refuse clobbering a non-empty
+  // remote with an empty buffer that the user never intentionally
+  // produced (e.g. content cleared by a project swap mid-flush).
+  const EMPTY_DOC = "<p></p>";
 
   onMount(() => {
     editor = new Editor({
@@ -132,14 +149,22 @@ export default function NotesPane() {
     setErr(null);
     setSavedAt(null);
     if (!pid) {
+      loadingPid = null;
+      loadedBody = "";
       editor?.commands.clearContent(false);
       editor?.setEditable(false);
       setLoadedFor(null);
       return;
     }
+    // Block saves until the fetched content is in the editor — without
+    // this an autosave fired during the load could PUT the empty doc.
+    loadingPid = pid;
     try {
       const pad = await api.getScratchpad(pid);
       const newBody = pad.body || "";
+      // Remember the loaded baseline so flushSave can tell a genuine
+      // edit apart from an untouched doc (and never re-save the latter).
+      loadedBody = newBody || EMPTY_DOC;
       // Skip the DOM replacement when the content hasn't changed —
       // a no-op setContent still resets ProseMirror's selection
       // (jumping the cursor to the end on every autosave echo).
@@ -171,6 +196,10 @@ export default function NotesPane() {
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      // Only release the save lock if we're still the in-flight load
+      // (a newer project swap may have superseded us).
+      if (loadingPid === pid) loadingPid = null;
     }
   }
 
@@ -185,11 +214,26 @@ export default function NotesPane() {
   async function flushSave() {
     const pid = loadedFor();
     if (!pid || !editor) return;
+    // Never save while a project's content is still loading — the
+    // editor may hold the transient empty/previous doc.
+    if (loadingPid !== null) return;
+    const html = editor.getHTML();
+    // Nothing changed since we loaded/last saved — skip. This stops a
+    // project swap or re-mount from rewriting an untouched document.
+    if (html === loadedBody) return;
+    // Refuse to clobber a non-empty remote with an empty buffer UNLESS
+    // the user is actively editing this doc (editor focused). A clear
+    // that happens while the editor is unfocused is a project-swap /
+    // re-mount race, not an intentional delete — bail out to protect
+    // the notes. A focused empty doc is a real "select-all + delete".
+    if (html === EMPTY_DOC && loadedBody !== EMPTY_DOC && !editor.isFocused) {
+      return;
+    }
     setSaving(true);
     setErr(null);
     try {
-      const html = editor.getHTML();
       await api.saveScratchpad(pid, html);
+      loadedBody = html;
       lastSavedMs = Date.now();
       setSavedAt(formatTime(new Date().toISOString()));
     } catch (e) {

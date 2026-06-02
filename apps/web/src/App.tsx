@@ -20,17 +20,17 @@ import TerminalPane from "./panes/TerminalPane";
 import {
   activeTab,
   addChatTab,
-  addTerminalTab,
   bootstrap,
   changesScope,
   currentScope,
   isSidebarOpen,
+  routeError,
+  setRouteError,
   setSettingsOpen,
   setTheme,
   state,
   toggleSidebar,
 } from "./stores/app";
-import { api } from "./api/client";
 
 export default function App() {
   // NewChatDialog state — reused from LeftRail's pattern.
@@ -63,29 +63,6 @@ export default function App() {
     });
   }
 
-  async function openNewTerminal() {
-    const pid = state.selectedProjectId;
-    if (!pid) return;
-    try {
-      const t = await api.createTerminal({
-        cols: 80,
-        rows: 24,
-        project_id: pid,
-        ...(state.selectedWorktreeByProject[pid]
-          ? { worktree_id: state.selectedWorktreeByProject[pid]! }
-          : {}),
-      });
-      const scope = currentScope();
-      const termCount = scope?.tabs.filter((x) => x.kind === "terminal").length ?? 0;
-      addTerminalTab({
-        id: t.id,
-        cwd: t.cwd,
-        label: `term ${termCount + 1}`,
-      });
-    } catch {
-      // silently fail — user can retry
-    }
-  }
   onMount(async () => {
     await bootstrap();
   });
@@ -149,8 +126,34 @@ export default function App() {
   onMount(() => document.addEventListener("keydown", onKey));
   onCleanup(() => document.removeEventListener("keydown", onKey));
 
+  // Auto-dismiss the navigation error toast after a few seconds.
+  createEffect(() => {
+    if (!routeError()) return;
+    const t = setTimeout(() => setRouteError(null), 4000);
+    onCleanup(() => clearTimeout(t));
+  });
+
   return (
     <>
+      {/* Transient navigation error toast (e.g. back-button to a
+          project/worktree that no longer exists). Auto-dismissable. */}
+      <Show when={routeError()}>
+        <div
+          class="fixed top-3 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-3 px-4 py-2 rounded-lg bg-danger text-white shadow-xl text-[13px]"
+          role="alert"
+          data-testid="route-error-toast"
+        >
+          <span>{routeError()}</span>
+          <button
+            type="button"
+            class="opacity-80 hover:opacity-100"
+            onClick={() => setRouteError(null)}
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      </Show>
       <Show when={state.ready} fallback={<LoadingScreen />}>
         <div class="h-screen flex" data-testid="app-root" data-theme="dark">
           <div class="ag-shell flex-1 flex min-w-0 overflow-hidden">
@@ -203,7 +206,6 @@ export default function App() {
                   <div class="flex-1 min-w-0 overflow-hidden">
                     <TabStrip
                       onNewChat={() => openNewChatDialog()}
-                      onNewTerminal={() => openNewTerminal()}
                       onOpenFile={() => setPaletteOpen(true)}
                     />
                   </div>

@@ -55,8 +55,20 @@ export default function TerminalPane() {
   // sessionId -> exited
 
   const scope = () => currentScope();
-  const tabs = () => scope()?.terminals ?? [];
-  const activeId = () => scope()?.activeTerminal ?? null;
+  // Read from the unified tab model. Terminals used to live in their
+  // own `scope.terminals` / `scope.activeTerminal` fields, but the app
+  // migrated to a single `tabs[]` + `activeTab`. The old fields are no
+  // longer maintained, so reading them left this pane empty (the PTY
+  // was created on the BE but no xterm ever mounted). Derive the
+  // terminal sessions and active id from the unified tabs instead.
+  const tabs = () => (scope()?.tabs ?? []).filter((t) => t.kind === "terminal");
+  const activeId = () => {
+    const active = scope()?.activeTab ?? null;
+    if (!active) return null;
+    // Only treat the active tab as "the terminal" when it actually is
+    // one; otherwise no terminal is foregrounded (e.g. a chat is active).
+    return tabs().some((t) => t.id === active) ? active : null;
+  };
 
   /** Tear down BE session + FE cached xterm + tab row. Shared by
    *  the user-initiated close (with confirm) and the auto-close

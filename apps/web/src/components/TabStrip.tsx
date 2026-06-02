@@ -17,9 +17,10 @@ import { confirm } from "./dialog";
  */
 
 export default function TabStrip(props: {
-  /** Called when user clicks "+ New" dropdown items. */
+  /** Called when user clicks "+ New" dropdown items. Terminal creation
+   *  lives in the per-project left rail, so it's intentionally not a
+   *  middle-section action here. */
   onNewChat: () => void;
-  onNewTerminal: () => void;
   onOpenFile: () => void;
 }) {
   const tabs = () => currentScope()?.tabs ?? [];
@@ -158,14 +159,6 @@ export default function TabStrip(props: {
             data-testid="tab-add-chat"
           >
             {icon("chat")} New chat
-          </button>
-          <button
-            type="button"
-            class="w-full text-left px-3 py-1.5 text-[12px] hover:bg-bg-2 flex items-center gap-2"
-            onClick={() => props.onNewTerminal()}
-            data-testid="tab-add-terminal"
-          >
-            {icon("terminal")} New terminal
           </button>
           <button
             type="button"
