@@ -17,12 +17,7 @@ function reportTerminalBytes(cache: Map<string, { lastBytes: number }>) {
   for (const sess of cache.values()) total += sess.lastBytes * 2;
   recordMemoryUsage("terminal.scrollback", total);
 }
-import {
-  closeTerminalTab,
-  currentScope,
-  
-  state,
-} from "../stores/app";
+import { closeTerminalTab, currentScope, state } from "../stores/app";
 
 /**
  * Per-scope terminal pane.
@@ -63,7 +58,6 @@ export default function TerminalPane() {
   const tabs = () => scope()?.terminals ?? [];
   const activeId = () => scope()?.activeTerminal ?? null;
 
-
   /** Tear down BE session + FE cached xterm + tab row. Shared by
    *  the user-initiated close (with confirm) and the auto-close
    *  triggered when the shell exits cleanly via Ctrl+D / `exit`. */
@@ -87,7 +81,6 @@ export default function TerminalPane() {
     }
     closeTerminalTab(id);
   }
-
 
   /** Lazily create the cached xterm instance for a session id. */
   function ensureSession(id: string): CachedSession {
@@ -254,8 +247,7 @@ export default function TerminalPane() {
         class="relative flex-1 bg-bg-1"
         ref={(el) => (stage = el)}
         data-testid="term-stage"
-      >
-      </div>
+      ></div>
     </section>
   );
 }

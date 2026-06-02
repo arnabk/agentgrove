@@ -282,17 +282,17 @@ export default function QueueDock(props: Props) {
               </p>
             }
           >
-              <For each={items()}>
-                {(item) => (
-                  <QueueCard
-                    item={item}
-                    expanded={expanded().has(item.id)}
-                    onToggle={() => toggleExpanded(item.id)}
-                    onCancel={() => void cancel(item)}
-                    onUpdate={(body) => void updateItemBody(item, body)}
-                  />
-                )}
-              </For>
+            <For each={items()}>
+              {(item) => (
+                <QueueCard
+                  item={item}
+                  expanded={expanded().has(item.id)}
+                  onToggle={() => toggleExpanded(item.id)}
+                  onCancel={() => void cancel(item)}
+                  onUpdate={(body) => void updateItemBody(item, body)}
+                />
+              )}
+            </For>
           </Show>
         </div>
       </aside>
@@ -334,9 +334,7 @@ function QueueCard(props: {
     const newBody = draft();
     setEditing(false);
     if (newBody !== split().body) {
-      const full = split().rawSuffix
-        ? `${newBody}\n\n${split().rawSuffix}`
-        : newBody;
+      const full = split().rawSuffix ? `${newBody}\n\n${split().rawSuffix}` : newBody;
       props.onUpdate(full);
     }
   }
@@ -448,8 +446,7 @@ interface SplitResult {
   rawSuffix?: string;
 }
 
-const ATTACHMENT_MARKER =
-  "Attached files (absolute paths, read with your Read tool):";
+const ATTACHMENT_MARKER = "Attached files (absolute paths, read with your Read tool):";
 
 function splitBodyAndAttachments(raw: string): SplitResult {
   const idx = raw.indexOf(ATTACHMENT_MARKER);
