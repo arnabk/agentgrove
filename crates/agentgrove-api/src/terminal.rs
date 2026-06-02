@@ -7,8 +7,12 @@
 
 use crate::state::AppState;
 use axum::{
-    extract::{Path, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path, State,
+    },
     http::StatusCode,
+    response::IntoResponse,
     Json,
 };
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
@@ -17,6 +21,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -92,6 +97,12 @@ pub struct Session {
     worktree_id: Option<String>,
     /// Set when the PTY reader sees EOF (shell exit / `Ctrl+D`).
     exited: AtomicBool,
+    /// Live output stream. The PTY reader thread broadcasts every
+    /// chunk it reads here the instant it arrives, so a connected
+    /// WebSocket can push output to the browser with ~zero latency
+    /// instead of the FE polling `/history` every 200 ms. Late
+    /// joiners replay `history` first, then attach to this stream.
+    output: broadcast::Sender<Vec<u8>>,
 }
 
 #[derive(Default)]
@@ -153,6 +164,11 @@ impl TerminalManager {
             .try_clone_reader()
             .map_err(|e| std::io::Error::other(e.to_string()))?;
 
+        // Bounded so a stalled subscriber can't grow memory unboundedly;
+        // if a slow WS lags past the buffer it simply gets a Lagged error
+        // and re-syncs from `history` on its next read. 1024 chunks of up
+        // to 4 KB is plenty of headroom for a momentary stall.
+        let (output_tx, _) = broadcast::channel::<Vec<u8>>(1024);
         let session = Arc::new(Session {
             cwd: cwd.to_string_lossy().into_owned(),
             cols: Mutex::new(cols),
@@ -164,6 +180,7 @@ impl TerminalManager {
             project_id: project_id.clone(),
             worktree_id: worktree_id.clone(),
             exited: AtomicBool::new(false),
+            output: output_tx,
         });
 
         let id = Uuid::now_v7().to_string();
@@ -174,12 +191,19 @@ impl TerminalManager {
                 match reader.read(&mut buf) {
                     Ok(0) => break, // EOF — shell exited
                     Ok(n) => {
-                        let mut h = sess_for_reader.history.lock().unwrap();
-                        h.extend_from_slice(&buf[..n]);
-                        if h.len() > 200_000 {
-                            let drop = h.len() - 200_000;
-                            h.drain(..drop);
+                        let chunk = &buf[..n];
+                        {
+                            let mut h = sess_for_reader.history.lock().unwrap();
+                            h.extend_from_slice(chunk);
+                            if h.len() > 200_000 {
+                                let drop = h.len() - 200_000;
+                                h.drain(..drop);
+                            }
                         }
+                        // Push to live subscribers immediately. Ignore the
+                        // error when there are no receivers (nobody has the
+                        // terminal open) — `history` still has the bytes.
+                        let _ = sess_for_reader.output.send(chunk.to_vec());
                     }
                     Err(_) => break,
                 }
@@ -240,6 +264,28 @@ impl TerminalManager {
         drop(map);
         let _ = sess.writer.lock().unwrap().write_all(data);
         Some(())
+    }
+
+    /// Attach a live output stream for `id`. Returns the current
+    /// scrollback (so the caller can replay it before going live) and a
+    /// receiver that yields every subsequent chunk the PTY emits. Used
+    /// by the terminal WebSocket for zero-latency streaming.
+    pub fn subscribe(&self, id: &str) -> Option<(Vec<u8>, broadcast::Receiver<Vec<u8>>)> {
+        let map = self.sessions.lock().unwrap();
+        let sess = map.get(id)?.clone();
+        drop(map);
+        // Subscribe BEFORE snapshotting history so no chunk slips through
+        // the gap between the snapshot and the subscription.
+        let rx = sess.output.subscribe();
+        let history = sess.history.lock().unwrap().clone();
+        Some((history, rx))
+    }
+
+    /// Whether the session exists and its shell has exited.
+    pub fn is_exited(&self, id: &str) -> Option<bool> {
+        let map = self.sessions.lock().unwrap();
+        let sess = map.get(id)?;
+        Some(sess.exited.load(Ordering::SeqCst))
     }
 
     pub fn resize(&self, id: &str, cols: u16, rows: u16) -> Option<()> {
@@ -472,4 +518,109 @@ pub async fn status(
         .status(&id)
         .map(Json)
         .ok_or(StatusCode::NOT_FOUND)
+}
+
+/// Bidirectional terminal WebSocket: `GET /api/terminals/:id/ws`.
+///
+/// This is the fast path that makes the terminal feel native. The
+/// server streams PTY output to the browser as binary frames the
+/// instant it's produced (no 200 ms polling), and the browser sends
+/// keystrokes back as frames that are written straight to the PTY (no
+/// per-keystroke HTTP round-trip). The HTTP `/write` + `/history`
+/// endpoints remain for compatibility / fallback.
+///
+/// Protocol:
+///   - Server -> client: binary frames carry raw PTY bytes. A single
+///     text frame `{"exited":true}` is sent when the shell ends.
+///   - Client -> server: binary or text frames are written verbatim to
+///     the PTY stdin. A text frame `{"resize":{"cols":N,"rows":M}}`
+///     resizes the PTY.
+pub async fn ws(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| terminal_socket(socket, state, id))
+}
+
+async fn terminal_socket(mut socket: WebSocket, state: AppState, id: String) {
+    // Attach to the live stream + grab the current scrollback. If the
+    // session is gone, tell the client and close.
+    let Some((history, mut rx)) = state.terminals.subscribe(&id) else {
+        let _ = socket
+            .send(Message::Text("{\"error\":\"no such terminal\"}".into()))
+            .await;
+        return;
+    };
+
+    // Replay scrollback so a (re)connecting client sees the existing
+    // buffer before live bytes start flowing.
+    if !history.is_empty() && socket.send(Message::Binary(history)).await.is_err() {
+        return;
+    }
+    // If the shell already exited, notify and close after replay.
+    if state.terminals.is_exited(&id).unwrap_or(true) {
+        let _ = socket.send(Message::Text("{\"exited\":true}".into())).await;
+        return;
+    }
+
+    loop {
+        tokio::select! {
+            // PTY -> browser
+            msg = rx.recv() => {
+                match msg {
+                    Ok(bytes) => {
+                        if socket.send(Message::Binary(bytes)).await.is_err() { break; }
+                    }
+                    // Lagged: the subscriber fell behind the broadcast
+                    // buffer. Re-sync by sending the whole current ring,
+                    // then keep streaming.
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        if let Some((hist, new_rx)) = state.terminals.subscribe(&id) {
+                            rx = new_rx;
+                            if !hist.is_empty()
+                                && socket.send(Message::Binary(hist)).await.is_err()
+                            {
+                                break;
+                            }
+                        }
+                    }
+                    // Sender dropped: session killed. Notify + close.
+                    Err(broadcast::error::RecvError::Closed) => {
+                        let _ = socket.send(Message::Text("{\"exited\":true}".into())).await;
+                        break;
+                    }
+                }
+            }
+            // browser -> PTY
+            client_msg = socket.recv() => {
+                match client_msg {
+                    Some(Ok(Message::Binary(data))) => {
+                        state.terminals.write(&id, &data);
+                    }
+                    Some(Ok(Message::Text(text))) => {
+                        // A resize control frame, or raw text input.
+                        if let Some((cols, rows)) = parse_resize(&text) {
+                            state.terminals.resize(&id, cols, rows);
+                        } else {
+                            state.terminals.write(&id, text.as_bytes());
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Err(_)) => break,
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+/// Parse a `{"resize":{"cols":N,"rows":M}}` control frame. Returns
+/// `None` for any other text (treated as raw stdin).
+fn parse_resize(text: &str) -> Option<(u16, u16)> {
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
+    let r = v.get("resize")?;
+    let cols: u64 = r.get("cols").and_then(serde_json::Value::as_u64)?;
+    let rows: u64 = r.get("rows").and_then(serde_json::Value::as_u64)?;
+    Some((cols as u16, rows as u16))
 }

@@ -3,7 +3,7 @@ import { createEffect, onCleanup, onMount } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { api } from "../api/client";
+import { api, openTerminalWs } from "../api/client";
 import { declareMemorySource, recordMemoryUsage } from "../lib/memory";
 
 declareMemorySource("terminal.scrollback", "Terminal scrollback");
@@ -43,7 +43,12 @@ interface CachedSession {
   term: Terminal;
   fit: FitAddon;
   host: HTMLDivElement;
-  poll: { stop: boolean };
+  /** Live socket carrying PTY output (in) + keystrokes (out). */
+  ws: WebSocket;
+  /** Set when we deliberately tear the session down so the socket's
+   *  close handler doesn't try to reconnect. */
+  closing: boolean;
+  /** Running total of bytes received — drives the memory accountant. */
   lastBytes: number;
 }
 
@@ -76,7 +81,12 @@ export default function TerminalPane() {
   async function destroyTab(id: string) {
     const c = cache.get(id);
     if (c) {
-      c.poll.stop = true;
+      c.closing = true;
+      try {
+        c.ws.close();
+      } catch {
+        // ignore
+      }
       try {
         c.term.dispose();
       } catch {
@@ -117,45 +127,51 @@ export default function TerminalPane() {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
-    term.onData((d) => void api.writeTerminal(id, d));
-    const poll = { stop: false };
-    const session: CachedSession = { term, fit, host, poll, lastBytes: 0 };
+
+    // Open the bidirectional stream. Output arrives as binary frames and
+    // is written straight to xterm (no polling); keystrokes are sent back
+    // over the same socket (no per-keystroke HTTP). This is what makes
+    // the terminal feel native — round-trip latency is just the loopback
+    // socket, and output renders the instant the PTY emits it.
+    const ws = openTerminalWs(id);
+    const session: CachedSession = { term, fit, host, ws, closing: false, lastBytes: 0 };
     cache.set(id, session);
-    // Poll BE history + status loop. History pulls new bytes from the
-    // PTY's ring buffer. Status reports whether the shell has exited so
-    // the tab can render an "exited" chip without forcing a close.
-    // Delta-poll loop. Per tick (~200ms) we ask the BE only for
-    // bytes appended since our last known total; the response also
-    // carries the exit flag, so there's no separate status call.
-    // The old approach pulled the ENTIRE ring buffer (up to
-    // 200 KB) every 200ms which made the terminal feel laggy on
-    // long-running shells — fast-typing latency was visibly worse
-    // because every keystroke's render was racing the next poll.
-    void (async () => {
-      while (!poll.stop) {
-        try {
-          const delta = await api.terminalHistoryDelta(id, session.lastBytes);
-          if (delta.bytes.length > 0) {
-            term.write(delta.bytes);
-          }
-          // Always adopt the BE total — covers the case where the
-          // ring dropped bytes off the front (our `since` fell off
-          // the buffer and the BE returned the whole remaining
-          // ring; `total` may be lower than our previous lastBytes).
-          if (delta.total !== session.lastBytes) {
-            session.lastBytes = delta.total;
-            reportTerminalBytes(cache);
-          }
-          if (delta.exited) {
-            await destroyTab(id);
-            break;
-          }
-        } catch {
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 200));
+
+    // Keystrokes / pastes -> PTY. Send raw bytes so control sequences
+    // (arrows, Ctrl-C, etc.) pass through untouched.
+    term.onData((d) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(d);
+      } else {
+        // Socket not up yet (or reconnecting) — fall back to HTTP so a
+        // keystroke is never silently dropped.
+        void api.writeTerminal(id, d);
       }
-    })();
+    });
+
+    ws.onmessage = (ev) => {
+      if (typeof ev.data === "string") {
+        // Control frame. The only one we emit is {"exited":true}.
+        try {
+          const msg = JSON.parse(ev.data) as { exited?: boolean };
+          if (msg.exited) void destroyTab(id);
+        } catch {
+          // Non-JSON text is unexpected; ignore.
+        }
+        return;
+      }
+      // Binary PTY output.
+      const bytes = new Uint8Array(ev.data as ArrayBuffer);
+      term.write(bytes);
+      session.lastBytes += bytes.byteLength;
+      reportTerminalBytes(cache);
+    };
+
+    ws.onclose = () => {
+      // If we didn't close it ourselves, the shell/connection ended.
+      if (!session.closing) void destroyTab(id);
+    };
+
     return session;
   }
 

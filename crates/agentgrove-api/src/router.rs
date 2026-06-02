@@ -119,6 +119,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/terminals/:id/resize", post(terminal::resize))
         .route("/api/terminals/:id/history", get(terminal::history))
         .route("/api/terminals/:id/status", get(terminal::status))
+        // Live bidirectional stream — the fast path for a native-feeling
+        // terminal (output pushed instantly, input sent without HTTP).
+        .route("/api/terminals/:id/ws", get(terminal::ws))
         // Filesystem browser (for folder picker)
         .route("/api/fs/home", get(fsapi::home))
         .route("/api/fs/browse", get(fsapi::browse))

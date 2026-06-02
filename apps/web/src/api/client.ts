@@ -728,3 +728,15 @@ export function openWs(topic: string): WebSocket {
   url.searchParams.set("topic", topic);
   return new WebSocket(url.toString());
 }
+
+/** Open the bidirectional terminal WebSocket for a session. Output
+ *  streams as binary frames; keystrokes are sent back over the same
+ *  socket. This is the low-latency path that replaces HTTP polling. */
+export function openTerminalWs(id: string): WebSocket {
+  const url = new URL(baseUrl() || window.location.origin);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = `/api/terminals/${encodeURIComponent(id)}/ws`;
+  const ws = new WebSocket(url.toString());
+  ws.binaryType = "arraybuffer";
+  return ws;
+}
