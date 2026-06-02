@@ -51,6 +51,16 @@ export function installRouteSync() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // The exact `pathname + search` of the last URL the store->URL effect
+  // wrote. The URL->store effect uses this to ignore its own echo: when
+  // the user activates a tab, the store changes, store->URL writes the
+  // new ?chat, and that location change must NOT bounce back through
+  // URL->store and re-apply the *previous* ?chat (which reverted tab
+  // activation — new chats appeared to "not open"). URL changes from
+  // the browser back/forward buttons won't match this value, so genuine
+  // navigations still flow through.
+  let selfWrittenUrl: string | null = null;
+
   // --- URL -> store ---
   //
   // Reactively read `location.pathname` + search params and reflect
@@ -59,9 +69,21 @@ export function installRouteSync() {
   // URL (the FE writes through to the URL only when ready is true
   // too, so the initial deep-linked URL is what we apply on first
   // visit).
+  // Remembers the last scope segment (/p/<pid>[/w/<wid>]) we ran the
+  // existence check against, so validation+redirect happens once per
+  // scope change rather than on every effect re-run. Without this the
+  // guard re-fired whenever ?chat / ?pane / ?file changed (or when
+  // state.projects/worktrees updated reactively), and a transient
+  // mismatch produced a navigate → URL change → re-run → navigate loop
+  // ("Too many redirects").
+  let lastValidatedScope = "";
   createEffect(() => {
     if (!state.ready) return;
     const path = location.pathname;
+    const here = path + location.search;
+    // Ignore our own store->URL write — applying it back into the store
+    // is a no-op at best and a revert race at worst (see selfWrittenUrl).
+    if (here === selfWrittenUrl) return;
     const segments = path.split("/").filter(Boolean);
 
     // Path: /p/<pid>[/w/<wid>]
@@ -74,34 +96,43 @@ export function installRouteSync() {
       }
     }
 
-    // Guard against navigating (e.g. via browser back/forward) to a
-    // project that no longer exists — a deleted project or a stale
-    // history entry from a previous BE database. Selecting a phantom
-    // id leaves the app in a broken, empty state. Instead, surface an
-    // error and redirect to a valid scope (the current selection if
-    // still valid, else the first project, else the landing page).
-    if (targetProject && !state.projects.some((p) => p.id === targetProject)) {
-      setRouteError("That project no longer exists — taking you back.");
-      const fallback =
-        (state.selectedProjectId &&
-          state.projects.some((p) => p.id === state.selectedProjectId) &&
-          state.selectedProjectId) ||
-        state.projects[0]?.id ||
-        null;
-      navigate(fallback ? `/p/${fallback}` : "/", { replace: true });
-      return;
-    }
+    const scopeSig = `${targetProject ?? ""}::${targetWorktree ?? ""}`;
+    // Only run the (potentially redirecting) existence validation when
+    // the scope segment of the path actually changed. ?chat/?pane/?file
+    // changes and unrelated store updates must not re-trigger it.
+    if (scopeSig !== lastValidatedScope) {
+      lastValidatedScope = scopeSig;
 
-    // Validate the worktree too: an unknown worktree id for a valid
-    // project should fall back to the project root rather than a dead
-    // scope. worktrees may not be loaded yet, so only reject when we
-    // have the list and the id is absent from it.
-    if (targetProject && targetWorktree) {
-      const wts = state.worktrees[targetProject];
-      if (wts && !wts.some((w) => w.id === targetWorktree)) {
-        setRouteError("That worktree no longer exists — showing the project root.");
-        navigate(`/p/${targetProject}`, { replace: true });
+      // Guard against navigating (e.g. via browser back/forward) to a
+      // project that no longer exists — a deleted project or a stale
+      // history entry from a previous BE database. Selecting a phantom
+      // id leaves the app in a broken, empty state. Instead, surface an
+      // error and redirect to a valid scope. Only do this once projects
+      // have actually loaded, so we don't redirect during the initial
+      // hydration window when the list is briefly empty.
+      if (targetProject && state.projects.length > 0 && !hasProject(targetProject)) {
+        setRouteError("That project no longer exists — taking you back.");
+        const fallback =
+          (state.selectedProjectId &&
+            hasProject(state.selectedProjectId) &&
+            state.selectedProjectId) ||
+          state.projects[0]?.id ||
+          null;
+        navigate(fallback ? `/p/${fallback}` : "/", { replace: true });
         return;
+      }
+
+      // Validate the worktree too: an unknown worktree id for a valid
+      // project should fall back to the project root. worktrees may not
+      // be loaded yet, so only reject when we have the list and the id
+      // is genuinely absent from it.
+      if (targetProject && targetWorktree && hasProject(targetProject)) {
+        const wts = state.worktrees[targetProject];
+        if (wts && wts.length > 0 && !wts.some((w) => w.id === targetWorktree)) {
+          setRouteError("That worktree no longer exists — showing the project root.");
+          navigate(`/p/${targetProject}`, { replace: true });
+          return;
+        }
       }
     }
 
@@ -161,6 +192,9 @@ export function installRouteSync() {
     // file swaps stay on the same entry to keep the back button
     // useful (one click escapes the project, not five panes deep).
     const scopeChanged = pid !== lastProject || wid !== lastWorktree;
+    // Record the URL we're about to write so the URL->store effect can
+    // recognise (and ignore) its own echo.
+    selfWrittenUrl = url;
     navigate(url, { replace: !scopeChanged });
     lastProject = pid;
     lastWorktree = wid;
@@ -169,6 +203,10 @@ export function installRouteSync() {
 
 function isPaneId(s: string): s is PaneId {
   return ["chat", "editor", "terminal", "notes"].includes(s);
+}
+
+function hasProject(id: string): boolean {
+  return state.projects.some((p) => p.id === id);
 }
 
 function currentScopeKeyOrEmpty(): string {
