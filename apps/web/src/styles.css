@@ -482,7 +482,15 @@ textarea::placeholder {
   }
 }
 .ag-select-option {
-  display: flex;
+  /* Three columns — label | hint | check — so the hint and check line
+     up vertically across every row regardless of label length. A flex
+     row with `margin-left:auto` on the hint made the hint float to a
+     different x on each row (whatever the label width left over), so
+     the middle "→ latest" / alias column never aligned. The menu sizes
+     to `width: max-content`, so the label column (1fr) stretches to the
+     longest label and the hint column starts at a single shared x. */
+  display: grid;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
@@ -498,6 +506,13 @@ textarea::placeholder {
      fit the longest option via `width: max-content` below. */
   white-space: nowrap;
 }
+/* Hint column: right-aligned to a shared trailing edge. Each option is
+   its own grid, so the hint's LEFT x would still vary with its text
+   width — but pinning the RIGHT edge (just before the check column)
+   gives a single clean vertical line for the hint column. */
+.ag-select-option > .ag-select-hint {
+  justify-self: end;
+}
 .ag-select-option:hover,
 .ag-select-option[data-active="true"] {
   background-color: var(--ag-bg-3);
@@ -507,7 +522,7 @@ textarea::placeholder {
   color: var(--ag-fg);
 }
 .ag-select-option-check {
-  margin-left: auto;
+  /* Grid places this in the last column; no margin trick needed. */
   color: var(--ag-accent);
   opacity: 0;
 }

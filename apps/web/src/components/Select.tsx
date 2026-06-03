@@ -218,9 +218,10 @@ export default function Select(props: SelectProps) {
                   onClick={() => pick(opt.value)}
                 >
                   <span class="truncate">{opt.label}</span>
-                  <Show when={opt.hint}>
-                    <span class="ml-auto text-fg-subtle text-[12px]">{opt.hint}</span>
-                  </Show>
+                  {/* Always render the hint cell (empty when absent) so the
+                      grid keeps three columns and the hint + check line up
+                      across every row. */}
+                  <span class="ag-select-hint text-fg-subtle text-[12px]">{opt.hint ?? ""}</span>
                   <Check />
                 </div>
               )}
