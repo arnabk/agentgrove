@@ -267,6 +267,37 @@ export function setActiveTab(tabId: string) {
   scheduleScopeLayoutWrite(key);
 }
 
+/** Rename a tab's display title. Chats carry `title`, terminals and
+ *  editors carry `label`; we set whichever the tab kind uses. The new
+ *  name is persisted with the scope layout, and for chats it's also
+ *  pushed to the BE so the title survives a fresh hydrate / other
+ *  clients. A blank name is ignored (keeps the previous title). */
+export function renameTab(tabId: string, rawTitle: string) {
+  const key = currentScopeKey();
+  if (!key) return;
+  const title = rawTitle.trim();
+  if (!title) return;
+  let kind: UnifiedTab["kind"] | null = null;
+  setState(
+    "byScope",
+    key,
+    produce((s) => {
+      const tab = s.tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      kind = tab.kind;
+      if (tab.kind === "chat") tab.title = title;
+      else tab.label = title;
+    }),
+  );
+  scheduleScopeLayoutWrite(key);
+  // Persist chat titles server-side so they're authoritative.
+  if (kind === "chat") {
+    void api.renameChat(tabId, title).catch(() => {
+      // Best-effort: the local + layout state already reflect the rename.
+    });
+  }
+}
+
 /** Toggle the right sidebar (Notes + Queue). */
 export function toggleSidebar() {
   const key = currentScopeKey();

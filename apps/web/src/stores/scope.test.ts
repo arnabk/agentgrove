@@ -5,6 +5,7 @@ import {
   selectProject,
   selectWorktree,
   addTab,
+  renameTab,
   currentScope,
   currentScopeKey,
 } from "./app";
@@ -113,5 +114,30 @@ describe("scope tab placement", () => {
     const [projectId, worktreeId] = key.split("::");
     expect(projectId).toBe(pid);
     expect(worktreeId).toBe(wid);
+  });
+
+  it("renames a chat tab's title and a terminal tab's label", () => {
+    const pid = "88888888-8888-8888-8888-888888888888";
+    selectProject(pid);
+    addTab({ kind: "chat", id: "chat-r", title: "chat in self" });
+    addTab({ kind: "terminal", id: "term-r", cwd: "/p", label: "term 1" });
+
+    renameTab("chat-r", "Infra cost chat");
+    renameTab("term-r", "build shell");
+
+    const byId = (id: string) => currentScope()?.tabs.find((t) => t.id === id);
+    expect((byId("chat-r") as { title: string }).title).toBe("Infra cost chat");
+    expect((byId("term-r") as { label: string }).label).toBe("build shell");
+  });
+
+  it("ignores a blank rename (keeps the previous title)", () => {
+    const pid = "99999999-9999-9999-9999-999999999999";
+    selectProject(pid);
+    addTab({ kind: "chat", id: "chat-b", title: "keep me" });
+
+    renameTab("chat-b", "   ");
+
+    const tab = currentScope()?.tabs.find((t) => t.id === "chat-b");
+    expect((tab as { title: string }).title).toBe("keep me");
   });
 });

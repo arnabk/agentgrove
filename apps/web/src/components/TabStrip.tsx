@@ -1,8 +1,9 @@
-import { For, Show } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
 import {
   activeTab,
   closeTab,
   setActiveTab,
+  renameTab,
   currentScope,
   type UnifiedTab,
   state,
@@ -14,11 +15,21 @@ import { confirm } from "./dialog";
  * editor). Each chip shows a type icon + label + close button.
  * The strip replaces the old pane-switcher (Chat/Editor/Terminal/
  * Notes buttons) — pane types are now just tab types.
+ *
+ * Double-click a tab (or use its rename affordance) to rename it.
  */
 
 export default function TabStrip() {
   const tabs = () => currentScope()?.tabs ?? [];
   const active = () => activeTab()?.id ?? null;
+
+  // Id of the tab currently being renamed inline, or null.
+  const [editingId, setEditingId] = createSignal<string | null>(null);
+
+  function commitRename(tabId: string, value: string) {
+    renameTab(tabId, value);
+    setEditingId(null);
+  }
 
   async function close(tab: UnifiedTab) {
     if (tab.kind === "terminal") {
@@ -115,11 +126,34 @@ export default function TabStrip() {
               "hover:bg-bg-3": t.id !== active(),
             }}
             onClick={() => setActiveTab(t.id)}
-            title={`${t.kind}: ${label(t)}`}
+            onDblClick={(e) => {
+              e.stopPropagation();
+              setEditingId(t.id);
+            }}
+            title={`${t.kind}: ${label(t)} — double-click to rename`}
             data-testid={`tab-${t.id}`}
           >
             <span class="text-fg-subtle shrink-0">{icon(t.kind)}</span>
-            <span class="truncate">{label(t)}</span>
+            <Show when={editingId() === t.id} fallback={<span class="truncate">{label(t)}</span>}>
+              <input
+                class="bg-transparent border-b border-accent outline-none w-28 text-[11.5px]"
+                value={label(t)}
+                autofocus
+                onClick={(e) => e.stopPropagation()}
+                onBlur={(e) => commitRename(t.id, e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commitRename(t.id, e.currentTarget.value);
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setEditingId(null);
+                  }
+                }}
+                data-testid={`tab-rename-input-${t.id}`}
+              />
+            </Show>
             <button
               type="button"
               class="ml-0.5 px-0.5 text-fg-subtle hover:text-danger opacity-0 group-hover:opacity-100"
