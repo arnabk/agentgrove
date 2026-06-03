@@ -257,8 +257,7 @@ export default function App() {
                     </For>
                     <Show when={(currentScope()?.tabs ?? []).length === 0}>
                       <div class="absolute inset-0 flex items-center justify-center text-[13px] text-fg-subtle px-6 text-center">
-                        Click <span class="ag-kbd mx-1">+</span> in the tab strip or use the left
-                        rail to open a chat, terminal, or file.
+                        Use a project row in the left rail to open a chat, terminal, or file.
                       </div>
                     </Show>
                   </div>

@@ -9,8 +9,15 @@
 //   5. The diff host is present (will be empty when no file is
 //      selected, populated when one is).
 
-import { test, expect } from "@playwright/test";
+import { test, expect, Page } from "@playwright/test";
 import { BASE, BE_URL, REPO_ROOT, seedBackend } from "./helpers";
+
+/** Open the Changes panel for the first project. "View changes" lives
+ *  in the project row's overflow (kebab) menu, so we open that first. */
+async function openChanges(page: Page) {
+  await page.locator('[data-testid^="project-menu-"]').first().click();
+  await page.locator('[data-testid^="changes-"]').first().click();
+}
 
 test.describe("changes dialog", () => {
   test.beforeEach(async ({ page }) => {
@@ -32,13 +39,8 @@ test.describe("changes dialog", () => {
   });
 
   test("opens, shows scope label, closes via ✕", async ({ page }) => {
-    // The icon's testid is `changes-<projectId>`; we don't know the
-    // id without inspecting the rail, so we click the first match.
-    await page
-      .locator('[data-testid^="changes-"]')
-      .filter({ hasNot: page.locator("text=close") })
-      .first()
-      .click();
+    // "View changes" lives in the project row's kebab menu.
+    await openChanges(page);
     await expect(page.getByTestId("changes-panel")).toBeVisible();
     await expect(page.getByTestId("changes-scope")).toBeVisible();
     await page.getByTestId("changes-close").click();
@@ -46,14 +48,14 @@ test.describe("changes dialog", () => {
   });
 
   test("closes on Escape", async ({ page }) => {
-    await page.locator('[data-testid^="changes-"]').first().click();
+    await openChanges(page);
     await expect(page.getByTestId("changes-panel")).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("changes-panel")).toHaveCount(0);
   });
 
   test("closes when the backdrop is clicked", async ({ page }) => {
-    await page.locator('[data-testid^="changes-"]').first().click();
+    await openChanges(page);
     const panel = page.getByTestId("changes-panel");
     await expect(panel).toBeVisible();
     // The backdrop sits behind the centred dialog inside the same

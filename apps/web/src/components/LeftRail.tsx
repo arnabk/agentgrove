@@ -104,6 +104,35 @@ export default function LeftRail() {
   }
   const [newChatFor, setNewChatFor] = createSignal<NewChatCtx | null>(null);
 
+  // Which project/worktree row's overflow (kebab) menu is open, keyed by
+  // the row id, or null. The secondary actions (changes, worktree,
+  // history, settings, remove) live in this menu so each row shows only
+  // a couple of quick-create icons + a kebab — nothing clips when the
+  // rail is narrowed; the project name truncates instead.
+  const [openMenuFor, setOpenMenuFor] = createSignal<string | null>(null);
+  onMount(() => {
+    // Close the menu on a click that lands OUTSIDE the kebab button + its
+    // dropdown, or on Escape. We test the event target rather than relying
+    // on stopPropagation: Solid delegates events to the document root, so
+    // a `stopPropagation()` in a Solid onClick won't reliably stop this
+    // natively-registered listener — checking the target is robust.
+    const onDocClick = (e: MouseEvent) => {
+      if (openMenuFor() === null) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('[data-testid^="project-menu-"]')) return;
+      setOpenMenuFor(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenMenuFor(null);
+    };
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onKey);
+    onCleanup(() => {
+      document.removeEventListener("click", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    });
+  });
+
   // Per-project expansion. Independent of selection — many can be open.
   const [expanded, setExpanded] = createStore<Record<string, true>>(loadExpanded());
   const isExpanded = (id: string) => Boolean(expanded[id]);
@@ -463,10 +492,12 @@ export default function LeftRail() {
                     {isWorktree ? <WorktreeIcon /> : <FolderIcon />}
                     <span class="truncate text-[0.97em] min-w-0 flex-1">{p.name}</span>
 
-                    {/* Right-edge cluster: chips + action icons.
-                        flex-nowrap + shrink-0 keep these on the same line; the
-                        project name above absorbs any width shortage via min-w-0. */}
-                    <div class="flex items-center gap-1 shrink-0 flex-nowrap">
+                    {/* Right-edge cluster: branch chip + two quick-create
+                        actions + an overflow (kebab) menu for the rest.
+                        Only these few items stay inline, so the cluster
+                        never outgrows the row — the project name truncates
+                        via min-w-0 instead of the icons clipping. */}
+                    <div class="flex items-center gap-0.5 shrink-0 flex-nowrap">
                       {/* Worktree branch */}
                       <Show when={isWorktree && p.current_branch}>
                         <span
@@ -477,24 +508,7 @@ export default function LeftRail() {
                         </span>
                       </Show>
 
-                      {/* Regular git repo: show branch only. Remote state is
-                          implicit via the visible "+ worktree" icon on the
-                          right (only shown when has_remote is true). */}
-                      <Show when={!isWorktree && p.is_git && p.current_branch}>
-                        <span
-                          class="ag-chip font-mono !text-[0.7em] !py-[1px] whitespace-nowrap"
-                          title={
-                            p.has_remote
-                              ? `Branch ${p.current_branch} · remotes: ${(p.remotes ?? []).join(", ") || "yes"}`
-                              : `Branch ${p.current_branch}`
-                          }
-                        >
-                          ⎇ {p.current_branch}
-                        </span>
-                      </Show>
-
-                      {/* + chat (icon-only). Creates a new chat scoped to
-                          this project's root and switches to the Chat pane. */}
+                      {/* + chat (quick action, always inline). */}
                       <button
                         type="button"
                         class="shrink-0 p-1 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
@@ -509,10 +523,7 @@ export default function LeftRail() {
                         <ChatPlusIcon />
                       </button>
 
-                      {/* + terminal (icon-only). Spawns a shell cwd'd
-                          at the project root and switches to the
-                          Terminal pane. Parallel surface to "new chat" so
-                          the row reads "two things you can create here". */}
+                      {/* + terminal (quick action, always inline). */}
                       <button
                         type="button"
                         class="shrink-0 p-1 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
@@ -527,88 +538,103 @@ export default function LeftRail() {
                         <TerminalPlusIcon />
                       </button>
 
-                      {/* Changes (git diff) — opens the right-side
-                          Changes panel scoped to this project root.
-                          Only meaningful for git-tracked projects. */}
-                      <Show when={p.is_git}>
+                      {/* Overflow menu: changes, worktree, history,
+                          settings, remove. Absolutely-positioned dropdown
+                          so it never clips, even on a narrow rail. */}
+                      <div class="relative shrink-0">
                         <button
                           type="button"
                           class="shrink-0 p-1 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
+                          classList={{ "!text-fg !bg-bg-3": openMenuFor() === p.id }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setChangesScope({ path: p.root, label: p.name });
+                            setOpenMenuFor(openMenuFor() === p.id ? null : p.id);
                           }}
-                          aria-label={`View changes in ${p.name}`}
-                          title="View changes"
-                          data-testid={`changes-${p.id}`}
+                          aria-label={`More actions for ${p.name}`}
+                          aria-haspopup="menu"
+                          aria-expanded={openMenuFor() === p.id}
+                          title="More actions"
+                          data-testid={`project-menu-${p.id}`}
                         >
-                          <DiffIcon />
+                          <KebabIcon />
                         </button>
-                      </Show>
-
-                      {/* + worktree (icon-only). Only for projects with a remote.
-                          Always visible (not hover-only) so users can find it
-                          without hunting. */}
-                      <Show when={p.has_remote}>
-                        <button
-                          type="button"
-                          class="shrink-0 p-1 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setWtFor(p.id);
-                          }}
-                          aria-label={`New worktree in ${p.name}`}
-                          title="New worktree"
-                          data-testid={`new-worktree-${p.id}`}
-                        >
-                          <BranchPlusIcon />
-                        </button>
-                        <button
-                          type="button"
-                          class="shrink-0 p-1 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setHistoryFor(p.id);
-                          }}
-                          aria-label={`Worktree history for ${p.name}`}
-                          title="Worktree history"
-                          data-testid={`worktree-history-${p.id}`}
-                        >
-                          <HistoryIcon />
-                        </button>
-                      </Show>
-
-                      {/* Per-project settings (pre-worktree script,
-                          future fields). Opens the same icon-set
-                          regardless of whether worktrees are enabled
-                          — the script applies on first creation, so
-                          surfacing it for repos that don't yet have a
-                          remote would only mislead users. We gate it
-                          on `is_git` instead. */}
-                      <Show when={p.is_git}>
-                        <button
-                          type="button"
-                          class="shrink-0 p-1 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSettingsFor(p);
-                          }}
-                          aria-label={`Project settings for ${p.name}`}
-                          title="Project settings"
-                          data-testid={`project-settings-${p.id}`}
-                        >
-                          <GearIcon />
-                        </button>
-                      </Show>
-
-                      <button
-                        onClick={(e) => deleteProject(p.id, e)}
-                        class="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 text-fg-subtle hover:text-danger hover:bg-bg-2 transition-opacity"
-                        aria-label={`Remove project ${p.name}`}
-                        title="Remove"
-                      >
-                        <XIcon />
-                      </button>
+                        <Show when={openMenuFor() === p.id}>
+                          <div
+                            role="menu"
+                            class="absolute right-0 top-full mt-1 z-30 min-w-[170px] py-1 rounded-lg border border-border bg-bg-1 shadow-xl text-[12.5px]"
+                            onClick={(e) => e.stopPropagation()}
+                            data-testid={`project-menu-list-${p.id}`}
+                          >
+                            <Show when={p.is_git}>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                onClick={() => {
+                                  setOpenMenuFor(null);
+                                  setChangesScope({ path: p.root, label: p.name });
+                                }}
+                                data-testid={`changes-${p.id}`}
+                              >
+                                <DiffIcon /> View changes
+                              </button>
+                            </Show>
+                            <Show when={p.has_remote}>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                onClick={() => {
+                                  setOpenMenuFor(null);
+                                  setWtFor(p.id);
+                                }}
+                                data-testid={`new-worktree-${p.id}`}
+                              >
+                                <BranchPlusIcon /> New worktree
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                onClick={() => {
+                                  setOpenMenuFor(null);
+                                  setHistoryFor(p.id);
+                                }}
+                                data-testid={`worktree-history-${p.id}`}
+                              >
+                                <HistoryIcon /> Worktree history
+                              </button>
+                            </Show>
+                            <Show when={p.is_git}>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                onClick={() => {
+                                  setOpenMenuFor(null);
+                                  setSettingsFor(p);
+                                }}
+                                data-testid={`project-settings-${p.id}`}
+                              >
+                                <GearIcon /> Project settings
+                              </button>
+                            </Show>
+                            <div class="my-1 border-t border-border" />
+                            <button
+                              type="button"
+                              role="menuitem"
+                              class="w-full text-left px-3 py-1.5 flex items-center gap-2 text-danger hover:bg-bg-2"
+                              onClick={(e) => {
+                                setOpenMenuFor(null);
+                                deleteProject(p.id, e);
+                              }}
+                              data-testid={`remove-project-${p.id}`}
+                            >
+                              <XIcon /> Remove project
+                            </button>
+                          </div>
+                        </Show>
+                      </div>
                     </div>
                   </div>
 
@@ -739,45 +765,81 @@ export default function LeftRail() {
                                   >
                                     <TerminalPlusIcon />
                                   </button>
-                                  {/* Changes for this worktree */}
-                                  <button
-                                    type="button"
-                                    class="shrink-0 p-0.5 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setChangesScope({ path: w.path, label: w.branch });
-                                    }}
-                                    aria-label={`View changes in worktree ${w.branch}`}
-                                    title="View changes"
-                                    data-testid={`changes-wt-${w.id}`}
-                                  >
-                                    <DiffIcon />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setRenameFor({
-                                        projectId: p.id,
-                                        worktreeId: w.id,
-                                        currentBranch: w.branch,
-                                      });
-                                    }}
-                                    class="opacity-0 group-hover:opacity-100 text-fg-subtle hover:text-accent p-0.5"
-                                    aria-label={`Rename worktree ${w.branch}`}
-                                    title="Rename"
-                                    data-testid={`rename-wt-${w.id}`}
-                                  >
-                                    <PencilIcon />
-                                  </button>
-                                  <button
-                                    onClick={(e) => deleteWorktree(p.id, w.id, e)}
-                                    class="opacity-0 group-hover:opacity-100 text-fg-subtle hover:text-danger p-0.5"
-                                    aria-label={`Remove worktree ${w.branch}`}
-                                    title="Remove"
-                                  >
-                                    <XIcon />
-                                  </button>
+                                  {/* Overflow menu: changes, rename, remove.
+                                      Keyed `wt:<id>` so it doesn't collide
+                                      with a project row's menu key. */}
+                                  <div class="relative shrink-0">
+                                    <button
+                                      type="button"
+                                      class="shrink-0 p-0.5 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
+                                      classList={{
+                                        "!text-fg !bg-bg-3": openMenuFor() === `wt:${w.id}`,
+                                      }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setOpenMenuFor(
+                                          openMenuFor() === `wt:${w.id}` ? null : `wt:${w.id}`,
+                                        );
+                                      }}
+                                      aria-label={`More actions for worktree ${w.branch}`}
+                                      aria-haspopup="menu"
+                                      aria-expanded={openMenuFor() === `wt:${w.id}`}
+                                      title="More actions"
+                                      data-testid={`project-menu-wt-${w.id}`}
+                                    >
+                                      <KebabIcon />
+                                    </button>
+                                    <Show when={openMenuFor() === `wt:${w.id}`}>
+                                      <div
+                                        role="menu"
+                                        class="absolute right-0 top-full mt-1 z-30 min-w-[160px] py-1 rounded-lg border border-border bg-bg-1 shadow-xl text-[12.5px]"
+                                        onClick={(e) => e.stopPropagation()}
+                                        data-testid={`project-menu-list-wt-${w.id}`}
+                                      >
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                          onClick={() => {
+                                            setOpenMenuFor(null);
+                                            setChangesScope({ path: w.path, label: w.branch });
+                                          }}
+                                          data-testid={`changes-wt-${w.id}`}
+                                        >
+                                          <DiffIcon /> View changes
+                                        </button>
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                          onClick={() => {
+                                            setOpenMenuFor(null);
+                                            setRenameFor({
+                                              projectId: p.id,
+                                              worktreeId: w.id,
+                                              currentBranch: w.branch,
+                                            });
+                                          }}
+                                          data-testid={`rename-wt-${w.id}`}
+                                        >
+                                          <PencilIcon /> Rename
+                                        </button>
+                                        <div class="my-1 border-t border-border" />
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 text-danger hover:bg-bg-2"
+                                          onClick={(e) => {
+                                            setOpenMenuFor(null);
+                                            deleteWorktree(p.id, w.id, e);
+                                          }}
+                                          data-testid={`remove-wt-${w.id}`}
+                                        >
+                                          <XIcon /> Remove worktree
+                                        </button>
+                                      </div>
+                                    </Show>
+                                  </div>
                                 </div>
 
                                 {/* Inline file tree rooted at the
@@ -1037,6 +1099,16 @@ function GearIcon() {
         stroke-width="1.4"
         stroke-linejoin="round"
       />
+    </svg>
+  );
+}
+
+function KebabIcon() {
+  return (
+    <svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="12" cy="5" r="1.6" />
+      <circle cx="12" cy="12" r="1.6" />
+      <circle cx="12" cy="19" r="1.6" />
     </svg>
   );
 }
