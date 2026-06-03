@@ -1637,6 +1637,16 @@ function PromptRow(props: {
   // users don't want them in the way. Sticky to true once expanded.
   const [thinkingOpen, setThinkingOpen] = createSignal(false);
 
+  // Very long user messages (e.g. a pasted transcript) would otherwise
+  // render as one giant bubble that fills the whole timeline. Collapse
+  // them to a capped height with a "Show more" toggle. We gate on a
+  // simple length heuristic so normal messages are never affected.
+  const userIsLong = () => {
+    const c = props.prompt.content ?? "";
+    return c.length > 1200 || c.split("\n").length > 16;
+  };
+  const [userExpanded, setUserExpanded] = createSignal(false);
+
   return (
     <article class="space-y-3 group py-4" data-testid={`prompt-${props.prompt.id}`}>
       {/*
@@ -1649,9 +1659,28 @@ function PromptRow(props: {
       */}
       <div class="flex justify-end">
         <div class="relative group/bubble max-w-[80%]">
-          <div class="rounded-2xl rounded-br-md bg-accent text-[var(--ag-accent-fg)] px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] shadow-sm">
+          <div
+            class="rounded-2xl rounded-br-md bg-accent text-[var(--ag-accent-fg)] px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] shadow-sm overflow-y-auto"
+            classList={{
+              // Cap the height of long messages so a pasted transcript
+              // can't take over the whole timeline; the bubble scrolls
+              // internally and a toggle expands it.
+              "max-h-[16rem]": userIsLong() && !userExpanded(),
+            }}
+            data-testid={`user-bubble-${props.prompt.id}`}
+          >
             {props.prompt.content}
           </div>
+          <Show when={userIsLong()}>
+            <button
+              type="button"
+              class="mt-1 text-[11.5px] text-accent hover:underline"
+              onClick={() => setUserExpanded((v) => !v)}
+              data-testid={`user-bubble-toggle-${props.prompt.id}`}
+            >
+              {userExpanded() ? "Show less" : "Show more"}
+            </button>
+          </Show>
           <CopyButton
             text={props.prompt.content}
             class="absolute -top-2 -left-2 opacity-0 group-hover/bubble:opacity-100 transition-opacity"
