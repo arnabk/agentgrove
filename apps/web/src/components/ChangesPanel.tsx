@@ -24,6 +24,41 @@ import { confirm } from "./dialog";
  */
 /** Persisted toggle for soft-wrapping long lines in the diff view. */
 const WRAP_LS_KEY = "ag-changes-wrap";
+/** Persisted "reviewed" markers, keyed by scope path. The value is a
+ *  map of repo-relative file path -> the content signature that was
+ *  reviewed. A file counts as reviewed only while its CURRENT diff
+ *  signature still matches the stored one, so any new change to the
+ *  same file automatically clears its reviewed state. */
+const REVIEWED_LS_KEY = "ag-changes-reviewed";
+
+type ReviewedStore = Record<string, Record<string, string>>;
+
+function loadReviewedStore(): ReviewedStore {
+  try {
+    return JSON.parse(localStorage.getItem(REVIEWED_LS_KEY) || "{}") as ReviewedStore;
+  } catch {
+    return {};
+  }
+}
+
+function saveReviewedStore(store: ReviewedStore) {
+  localStorage.setItem(REVIEWED_LS_KEY, JSON.stringify(store));
+}
+
+/** Stable, cheap content signature for a file's diff. Mixes a length
+ *  prefix into a 32-bit rolling hash so unrelated edits of the same
+ *  length still differ. Not cryptographic — collision risk is
+ *  irrelevant for "did this file change since I reviewed it". */
+function signature(head: string, working: string): string {
+  const s = `${head.length}\u0000${working.length}\u0000${head}\u0001${working}`;
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  // Fold in length again so very long files don't all alias.
+  return `${(h >>> 0).toString(36)}-${s.length.toString(36)}`;
+}
 
 export default function ChangesPanel() {
   const [entries, setEntries] = createSignal<GitStatusEntry[]>([]);
@@ -31,8 +66,53 @@ export default function ChangesPanel() {
   const [err, setErr] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
   const [wrap, setWrap] = createSignal(localStorage.getItem(WRAP_LS_KEY) !== "0");
+  // path -> current diff signature, populated as files are opened.
+  const [sigs, setSigs] = createSignal<Record<string, string>>({});
+  // path -> reviewed signature for the active scope.
+  const [reviewed, setReviewed] = createSignal<Record<string, string>>({});
   let host: HTMLDivElement | undefined;
   let view: MergeView | null = null;
+
+  /** A file is reviewed iff we have a stored reviewed signature AND the
+   *  current diff signature still matches it. Files we haven't opened
+   *  yet (no current signature) are treated as NOT reviewed so the user
+   *  is nudged to actually open + re-review anything ambiguous. */
+  const isReviewed = (path: string): boolean => {
+    const sig = sigs()[path];
+    const rev = reviewed()[path];
+    return Boolean(sig && rev && sig === rev);
+  };
+
+  /** Mark / unmark a file as reviewed. Marking stores its current diff
+   *  signature; unmarking removes it. Persisted per scope. */
+  function toggleReviewed(path: string, ev?: MouseEvent) {
+    ev?.stopPropagation();
+    const scope = changesScope();
+    if (!scope) return;
+    const sig = sigs()[path];
+    setReviewed((prev) => {
+      const next = { ...prev };
+      if (isReviewed(path)) {
+        delete next[path];
+      } else if (sig) {
+        next[path] = sig;
+      } else {
+        // Not opened yet — open it so we have a signature to store,
+        // then the diff-load effect records the review.
+        pendingReview = path;
+        void openDiff(path);
+        return prev;
+      }
+      const store = loadReviewedStore();
+      store[scope.path] = next;
+      saveReviewedStore(store);
+      return next;
+    });
+  }
+
+  // When a "mark reviewed" was requested for an unopened file, this
+  // holds its path until its diff (and signature) load.
+  let pendingReview: string | null = null;
 
   function commonExts() {
     const exts = [
@@ -86,6 +166,25 @@ export default function ChangesPanel() {
     const abs = `${scope.path}${sep}${filePath}`;
     try {
       const d = await api.fileDiff(abs);
+      // Record the current content signature so the review state can
+      // tell whether this file changed since it was last reviewed.
+      const sig = signature(d.head ?? "", d.working ?? "");
+      setSigs((prev) => ({ ...prev, [filePath]: sig }));
+      // Fulfil a deferred "mark reviewed" for a file the user clicked
+      // before its diff had loaded.
+      if (pendingReview === filePath) {
+        pendingReview = null;
+        const scope2 = changesScope();
+        if (scope2) {
+          setReviewed((prev) => {
+            const next = { ...prev, [filePath]: sig };
+            const store = loadReviewedStore();
+            store[scope2.path] = next;
+            saveReviewedStore(store);
+            return next;
+          });
+        }
+      }
       tearDownView();
       if (!host) return;
       view = new MergeView({
@@ -103,9 +202,12 @@ export default function ChangesPanel() {
   // Refresh whenever the scope changes (e.g. user switches projects
   // while the panel is open).
   createEffect(() => {
-    void changesScope();
+    const scope = changesScope();
     tearDownView();
     setSelected(null);
+    setSigs({});
+    // Load this scope's reviewed markers from localStorage.
+    setReviewed(scope ? (loadReviewedStore()[scope.path] ?? {}) : {});
     void refresh();
   });
 
@@ -224,6 +326,17 @@ export default function ChangesPanel() {
               {changesScope()!.label}
             </span>
           </Show>
+          {/* Reviewed progress: how many changed files the user has
+              marked reviewed (and whose content is unchanged since). */}
+          <Show when={entries().length > 0}>
+            <span
+              class="ag-chip font-mono text-fg-subtle"
+              title="Files you've marked reviewed (auto-clears if a file changes again)"
+              data-testid="changes-reviewed-count"
+            >
+              ✓ {entries().filter((e) => isReviewed(e.path)).length}/{entries().length} reviewed
+            </span>
+          </Show>
           <button
             type="button"
             class="ag-btn ag-btn-ghost ag-btn-sm ml-auto"
@@ -274,6 +387,8 @@ export default function ChangesPanel() {
               items={staged()}
               statusLabel={statusLabel}
               selected={selected()}
+              isReviewed={isReviewed}
+              onToggleReviewed={(p, ev) => toggleReviewed(p, ev)}
               onSelect={(p) => void openDiff(p)}
               onDiscard={(e, ev) => void discardFile(e, ev)}
             />
@@ -282,6 +397,8 @@ export default function ChangesPanel() {
               items={unstaged()}
               statusLabel={statusLabel}
               selected={selected()}
+              isReviewed={isReviewed}
+              onToggleReviewed={(p, ev) => toggleReviewed(p, ev)}
               onSelect={(p) => void openDiff(p)}
               onDiscard={(e, ev) => void discardFile(e, ev)}
             />
@@ -314,6 +431,10 @@ interface SectionProps {
   items: GitStatusEntry[];
   selected: string | null;
   statusLabel: (e: GitStatusEntry) => string;
+  /** Whether a file is currently marked reviewed (and unchanged). */
+  isReviewed: (path: string) => boolean;
+  /** Toggle a file's reviewed state. */
+  onToggleReviewed: (path: string, ev: MouseEvent) => void;
   onSelect: (path: string) => void;
   /** Per-row discard handler. Receives the entry + the mouse event
    *  (the button stops propagation so the row's onSelect doesn't also
@@ -332,10 +453,38 @@ function Section(props: SectionProps) {
           <For each={props.items}>
             {(e) => (
               <li class="group relative">
+                {/* Reviewed checkbox. Stops propagation so toggling
+                    review doesn't also open the diff. Absolutely
+                    positioned on the left so the row button keeps its
+                    full clickable width. */}
                 <button
                   type="button"
-                  class="w-full flex items-center gap-2 px-3 py-1 pr-8 text-left hover:bg-bg-2 text-[12.5px] font-mono"
-                  classList={{ "!bg-accent-soft": props.selected === e.path }}
+                  class="absolute left-1 top-1/2 -translate-y-1/2 z-10 w-4 h-4 rounded border flex items-center justify-center"
+                  classList={{
+                    "border-accent bg-accent text-[var(--ag-accent-fg)]": props.isReviewed(e.path),
+                    "border-border text-transparent hover:border-accent": !props.isReviewed(e.path),
+                  }}
+                  onClick={(ev) => props.onToggleReviewed(e.path, ev)}
+                  aria-label={
+                    props.isReviewed(e.path)
+                      ? `Mark ${e.path} as not reviewed`
+                      : `Mark ${e.path} as reviewed`
+                  }
+                  aria-pressed={props.isReviewed(e.path)}
+                  title={
+                    props.isReviewed(e.path) ? "Reviewed — click to unmark" : "Mark as reviewed"
+                  }
+                  data-testid={`changes-reviewed-${e.path}`}
+                >
+                  <CheckIcon />
+                </button>
+                <button
+                  type="button"
+                  class="w-full flex items-center gap-2 pl-7 pr-8 py-1 text-left hover:bg-bg-2 text-[12.5px] font-mono"
+                  classList={{
+                    "!bg-accent-soft": props.selected === e.path,
+                    "opacity-55": props.isReviewed(e.path),
+                  }}
                   onClick={() => props.onSelect(e.path)}
                   data-testid={`changes-row-${e.path}`}
                   title={e.path}
@@ -343,7 +492,9 @@ function Section(props: SectionProps) {
                   <span class="w-5 text-[11px] text-fg-subtle text-center">
                     {props.statusLabel(e)}
                   </span>
-                  <span class="truncate">{e.path}</span>
+                  <span class="truncate" classList={{ "line-through": props.isReviewed(e.path) }}>
+                    {e.path}
+                  </span>
                 </button>
                 {/* Per-row discard icon. Reveals on hover so the
                     file list stays clean; absolutely positioned so it
@@ -381,6 +532,22 @@ function DiscardIcon() {
         d="M3 7v6h6M3.51 15a9 9 0 1 0 2.13-9.36L3 8"
         stroke="currentColor"
         stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Checkmark for the reviewed toggle. `currentColor`, so it's invisible
+ *  (text-transparent) until the box is checked. */
+function CheckIcon() {
+  return (
+    <svg width="0.7em" height="0.7em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M5 12l5 5 9-11"
+        stroke="currentColor"
+        stroke-width="3"
         stroke-linecap="round"
         stroke-linejoin="round"
       />
