@@ -459,10 +459,14 @@ function Section(props: SectionProps) {
                     full clickable width. */}
                 <button
                   type="button"
-                  class="absolute left-1 top-1/2 -translate-y-1/2 z-10 w-4 h-4 rounded border flex items-center justify-center"
+                  class="absolute left-1.5 top-1/2 -translate-y-1/2 z-10 w-[18px] h-[18px] rounded-[5px] border-2 flex items-center justify-center transition-colors"
                   classList={{
+                    // Reviewed: solid accent box with a visible check.
                     "border-accent bg-accent text-[var(--ag-accent-fg)]": props.isReviewed(e.path),
-                    "border-border text-transparent hover:border-accent": !props.isReviewed(e.path),
+                    // Unreviewed: an obvious empty box (no check) with a
+                    // strong border so it reads as a clickable checkbox.
+                    "border-fg-subtle/70 text-transparent bg-bg-2 hover:border-accent":
+                      !props.isReviewed(e.path),
                   }}
                   onClick={(ev) => props.onToggleReviewed(e.path, ev)}
                   aria-label={
@@ -480,7 +484,7 @@ function Section(props: SectionProps) {
                 </button>
                 <button
                   type="button"
-                  class="w-full flex items-center gap-2 pl-7 pr-8 py-1 text-left hover:bg-bg-2 text-[12.5px] font-mono"
+                  class="w-full flex items-center gap-2 pl-9 pr-8 py-1 text-left hover:bg-bg-2 text-[12.5px] font-mono"
                   classList={{
                     "!bg-accent-soft": props.selected === e.path,
                     "opacity-55": props.isReviewed(e.path),
