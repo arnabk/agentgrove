@@ -1647,6 +1647,39 @@ function PromptRow(props: {
   };
   const [userExpanded, setUserExpanded] = createSignal(false);
 
+  // ---- "working…" liveliness while we wait for output ----
+  // While a prompt is pending and no assistant text has streamed yet,
+  // we run a little timer so the wait feels alive (a cycling status
+  // phrase + an elapsed counter). It also lets us tell the user when a
+  // model isn't streaming: if several seconds pass with zero tokens,
+  // the model is almost certainly returning the whole reply at once, so
+  // we surface a friendly note instead of leaving them guessing.
+  const [elapsed, setElapsed] = createSignal(0);
+  const waiting = () => isPending() && !assistantText() && !thinkingText();
+  createEffect(() => {
+    if (!waiting()) {
+      setElapsed(0);
+      return;
+    }
+    const started = Date.now();
+    const h = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 250);
+    onCleanup(() => clearInterval(h));
+  });
+  // Cycle a playful status phrase every ~1.8s so the indicator reads as
+  // live even when the backend is silent (non-streaming models).
+  const WORK_PHRASES = [
+    "thinking",
+    "consulting the model",
+    "drafting a response",
+    "connecting the dots",
+    "almost there",
+  ];
+  const phrase = () => WORK_PHRASES[Math.floor(elapsed() / 2) % WORK_PHRASES.length]!;
+  // After this many seconds with no streamed text, assume the model
+  // delivers its answer in one shot (no live token stream).
+  const NONSTREAM_AFTER = 3;
+  const looksNonStreaming = () => waiting() && elapsed() >= NONSTREAM_AFTER;
+
   return (
     <article class="space-y-3 group py-4" data-testid={`prompt-${props.prompt.id}`}>
       {/*
@@ -1735,23 +1768,42 @@ function PromptRow(props: {
               <Show
                 when={assistantText()}
                 fallback={
-                  <span class="flex items-center gap-2 text-fg-subtle">
-                    <span class="inline-flex gap-0.5">
-                      <span
-                        class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse"
-                        style="animation-delay:0ms"
-                      />
-                      <span
-                        class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse"
-                        style="animation-delay:150ms"
-                      />
-                      <span
-                        class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse"
-                        style="animation-delay:300ms"
-                      />
+                  <div class="flex flex-col gap-1.5" data-testid={`working-${props.prompt.id}`}>
+                    <span class="flex items-center gap-2 text-fg-subtle">
+                      {/* Animated bouncing dots. */}
+                      <span class="inline-flex gap-1 items-end h-3">
+                        <span
+                          class="w-1.5 h-1.5 rounded-full bg-accent ag-bounce"
+                          style="animation-delay:0ms"
+                        />
+                        <span
+                          class="w-1.5 h-1.5 rounded-full bg-accent ag-bounce"
+                          style="animation-delay:160ms"
+                        />
+                        <span
+                          class="w-1.5 h-1.5 rounded-full bg-accent ag-bounce"
+                          style="animation-delay:320ms"
+                        />
+                      </span>
+                      {/* Shimmering, cycling status phrase + elapsed. */}
+                      <em class="ag-shimmer not-italic font-medium">{phrase()}…</em>
+                      <Show when={elapsed() >= 1}>
+                        <span class="text-[11px] tabular-nums opacity-70">{elapsed()}s</span>
+                      </Show>
                     </span>
-                    <em>working…</em>
-                  </span>
+                    {/* When nothing has streamed for a few seconds the
+                        model is almost certainly non-streaming — tell the
+                        user so the silence reads as expected, not stuck. */}
+                    <Show when={looksNonStreaming()}>
+                      <span
+                        class="text-[11.5px] text-fg-subtle inline-flex items-center gap-1.5"
+                        data-testid={`nonstream-note-${props.prompt.id}`}
+                      >
+                        <span class="ag-chip !text-[10px] !py-[1px]">no live stream</span>
+                        This model returns the full reply at once — generating it now.
+                      </span>
+                    </Show>
+                  </div>
                 }
               >
                 <Markdown source={assistantText()} class="ag-prose-chat" />
