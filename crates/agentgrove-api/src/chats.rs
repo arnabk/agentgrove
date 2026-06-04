@@ -1116,13 +1116,41 @@ pub async fn stop_turn(State(state): State<AppState>, Path(id): Path<String>) ->
         let map = state.cancel_tokens.lock().await;
         map.get(&id).cloned()
     };
-    match token {
+    let result = match token {
         Some(t) => {
             t.cancel();
             StatusCode::NO_CONTENT
         }
         None => StatusCode::NOT_FOUND,
+    };
+
+    // After cancelling the in-flight turn, make sure a queued backlog
+    // doesn't get stranded. The dispatch task that was running its own
+    // post-turn drain may have already exited (or never started a drain
+    // — e.g. a direct, non-queue send that the user stopped), leaving
+    // auto-mode items sitting with no drainer. If the chat is no longer
+    // dispatching, the queue is in auto mode, and items remain pending,
+    // kick a fresh drain so the next message goes out automatically —
+    // which is exactly what users expect after hitting Stop.
+    {
+        let mut dispatching = state.dispatching.lock().await;
+        let is_dispatching = dispatching.contains(&id);
+        if !is_dispatching && crate::queue::is_auto(&state, &id).await {
+            let pending = crate::queue::read_state(&state, &id)
+                .await
+                .items
+                .iter()
+                .filter(|i| i.status == crate::queue::Status::Pending)
+                .count();
+            if pending > 0 {
+                dispatching.insert(id.clone());
+                drop(dispatching);
+                spawn_drain_task(state.clone(), id.clone());
+            }
+        }
     }
+
+    result
 }
 
 /// RAII guard that clears the chat's `dispatching` flag on drop.

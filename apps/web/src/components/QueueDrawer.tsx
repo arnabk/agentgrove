@@ -1,14 +1,5 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { api, type QueueItem, type QueueState } from "../api/client";
-
-/** Resize bounds + persistence key for the queue dock width. Same
- *  pattern as the LeftRail's resize handle, but bound to the right
- *  edge of the chat pane so dragging LEFT grows the queue (and
- *  shrinks the chat) and dragging RIGHT shrinks the queue. */
-const QUEUE_MIN_PX = 280;
-const QUEUE_MAX_PX = 720;
-const QUEUE_DEFAULT_PX = 420;
-const QUEUE_LS_KEY = "ag-queue-w";
 
 /**
  * Per-chat queue panel, docked inline as the right column of the
@@ -110,129 +101,54 @@ export default function QueueDock(props: Props) {
   const total = () => items().length;
   const mode = () => qstate()?.mode ?? "auto";
 
-  // Width persistence + drag state. Mirrors LeftRail's resize
-  // handle: handle sits on the LEFT edge of the dock (the boundary
-  // between chat timeline and queue) so dragging LEFT widens the
-  // queue at the expense of the chat.
-  const persisted = Number(localStorage.getItem(QUEUE_LS_KEY));
-  const initial =
-    Number.isFinite(persisted) && persisted >= QUEUE_MIN_PX && persisted <= QUEUE_MAX_PX
-      ? persisted
-      : QUEUE_DEFAULT_PX;
-  const [width, setWidth] = createSignal(initial);
-  const [dragging, setDragging] = createSignal(false);
-
-  function clamp(px: number) {
-    return Math.min(QUEUE_MAX_PX, Math.max(QUEUE_MIN_PX, Math.round(px)));
-  }
-
-  function onPointerDown(ev: PointerEvent) {
-    ev.preventDefault();
-    setDragging(true);
-    (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-  }
-  function onPointerMove(ev: PointerEvent) {
-    if (!dragging()) return;
-    // Dock is right-anchored: width = (viewport right edge) -
-    // (pointer x). Pointer moving LEFT grows the dock.
-    const next = clamp(window.innerWidth - ev.clientX);
-    setWidth(next);
-  }
-  function onPointerUp(ev: PointerEvent) {
-    if (!dragging()) return;
-    setDragging(false);
+  /** Run the next pending item now — pushes the top of the queue into
+   *  the chat immediately, regardless of auto/manual mode. This is the
+   *  "send this queued message into the chat" action the queue was
+   *  missing. */
+  async function runNext() {
+    setBusy(true);
+    setErr(null);
     try {
-      (ev.currentTarget as HTMLElement).releasePointerCapture(ev.pointerId);
-    } catch {
-      // pointer might already be released
+      await api.runNextQueue(props.chatId);
+      await refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
     }
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-    localStorage.setItem(QUEUE_LS_KEY, String(width()));
   }
-  function onKeyDown(ev: KeyboardEvent) {
-    let next = width();
-    // ArrowLeft grows the dock (matches the drag-LEFT-to-widen
-    // semantics); ArrowRight shrinks it.
-    if (ev.key === "ArrowLeft") next += ev.shiftKey ? 32 : 8;
-    else if (ev.key === "ArrowRight") next -= ev.shiftKey ? 32 : 8;
-    else if (ev.key === "Home") next = QUEUE_MAX_PX;
-    else if (ev.key === "End") next = QUEUE_MIN_PX;
-    else if (ev.key === "Enter" || ev.key === " ") next = QUEUE_DEFAULT_PX;
-    else return;
-    ev.preventDefault();
-    setWidth(clamp(next));
-    localStorage.setItem(QUEUE_LS_KEY, String(width()));
-  }
-
-  // Belt-and-braces: if pointer is released outside the handle
-  // (e.g. over a child <iframe>) we still want to commit the width.
-  const onWindowUp = () => {
-    if (!dragging()) return;
-    setDragging(false);
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-    localStorage.setItem(QUEUE_LS_KEY, String(width()));
-  };
-  onMount(() => {
-    window.addEventListener("pointerup", onWindowUp);
-  });
-  onCleanup(() => {
-    window.removeEventListener("pointerup", onWindowUp);
-  });
 
   return (
     <Show when={props.open}>
+      {/* The queue lives inside the RightSidebar's bottom slot, which
+          already owns the panel width + a resize handle. So we simply
+          fill that slot (w-full / h-full) rather than rendering our own
+          fixed-width dock — that's why the rows looked too narrow and
+          didn't use the full width. */}
       <aside
-        class="relative shrink-0 h-full bg-bg-1 border-l border-border flex flex-col"
-        style={{ width: `${width()}px` }}
+        class="relative w-full h-full bg-bg-1 flex flex-col min-h-0"
         data-testid="queue-dock"
         aria-label="Queue"
       >
-        {/* Resize handle on the LEFT edge of the dock. Pointer drag
-            or arrow keys adjust width; persisted to localStorage. */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize queue panel"
-          aria-valuemin={QUEUE_MIN_PX}
-          aria-valuemax={QUEUE_MAX_PX}
-          aria-valuenow={width()}
-          tabIndex={0}
-          class="absolute top-0 left-0 h-full w-1.5 -ml-[3px] cursor-col-resize hover:bg-accent/30 active:bg-accent/50 transition-colors z-10 touch-none"
-          classList={{ "!bg-accent/50": dragging() }}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onKeyDown={onKeyDown}
-          data-testid="queue-dock-resize"
-        />
-        <header class="px-4 py-3 border-b border-border bg-bg-1">
+        <header class="px-4 py-2.5 border-b border-border bg-bg-1 space-y-1.5">
           <div class="flex items-center gap-2">
             <h3 class="text-[13.5px] font-semibold tracking-tight">Queue</h3>
             <span class="ag-chip text-[11px]" data-testid="queue-total">
               {total()}
             </span>
 
-            {/*
-                Auto-drain toggle — promoted into the header row so
-                the queue dock keeps a single-row chrome. ON = items
-                send back-to-back as the agent finishes; OFF =
-                items wait until manually re-ordered or run. Both
-                old test ids are aliased to this switch so existing
-                tests keep working regardless of state.
-              */}
+            {/* Auto-drain toggle. ON = pending items send back-to-back
+                as the agent finishes; OFF = they wait until you send
+                them. */}
             <label
               class="ml-auto inline-flex items-center gap-2 select-none cursor-pointer"
               title={
                 mode() === "auto"
-                  ? "Auto-drain ON — pending messages send as soon as the agent finishes."
-                  : "Auto-drain OFF — pending messages wait; reorder or send them yourself."
+                  ? "Auto-send ON — queued messages send automatically as soon as the agent finishes."
+                  : "Auto-send OFF — queued messages wait until you click Send."
               }
             >
-              <span class="text-[11px] text-fg-subtle uppercase tracking-wider">Auto</span>
+              <span class="text-[11px] text-fg-subtle uppercase tracking-wider">Auto-send</span>
               <button
                 type="button"
                 role="switch"
@@ -255,41 +171,67 @@ export default function QueueDock(props: Props) {
                 />
               </button>
             </label>
-
-            <button
-              type="button"
-              class="ag-btn ag-btn-ghost ag-btn-sm"
-              onClick={() => props.onClose()}
-              aria-label="Close"
-              data-testid="queue-close"
-            >
-              ✕
-            </button>
           </div>
+
+          {/* Status line + actions. Makes it obvious what the queue is
+              doing and gives a one-click way to push the next message
+              into the chat. */}
+          <div class="flex items-center gap-2">
+            <p
+              class="text-[11px] text-fg-subtle min-w-0 flex-1 truncate"
+              data-testid="queue-status"
+            >
+              <Show when={total() > 0} fallback="Nothing queued.">
+                <Show
+                  when={mode() === "auto"}
+                  fallback={`${total()} waiting — click Send to dispatch the next one.`}
+                >
+                  {`${total()} waiting — sending automatically as the agent frees up.`}
+                </Show>
+              </Show>
+            </p>
+            <Show when={total() > 0}>
+              <button
+                type="button"
+                class="ag-btn ag-btn-primary ag-btn-sm shrink-0"
+                disabled={busy()}
+                onClick={() => void runNext()}
+                title="Send the next queued message into the chat now"
+                data-testid="queue-run-next"
+              >
+                ▸ Send next
+              </button>
+            </Show>
+          </div>
+
           <Show when={err()}>
-            <p class="mt-1 text-[11px] text-danger" title={err() ?? ""}>
+            <p class="text-[11px] text-danger" title={err() ?? ""}>
               {err()}
             </p>
           </Show>
         </header>
 
-        <div class="flex-1 overflow-y-auto px-3 py-3 space-y-2" data-testid="queue-items">
+        <div class="flex-1 overflow-y-auto px-3 py-3 space-y-2 min-h-0" data-testid="queue-items">
           <Show
             when={total() > 0}
             fallback={
               <p class="text-center text-[12.5px] text-fg-subtle py-8" data-testid="queue-empty">
-                Queue is empty. Type a message while the agent is working to enqueue it.
+                Queue is empty. Type a message while the agent is working to line it up here.
               </p>
             }
           >
             <For each={items()}>
-              {(item) => (
+              {(item, i) => (
                 <QueueCard
                   item={item}
+                  index={i()}
+                  isNext={i() === 0}
+                  busy={busy()}
                   expanded={expanded().has(item.id)}
                   onToggle={() => toggleExpanded(item.id)}
                   onCancel={() => void cancel(item)}
                   onUpdate={(body) => void updateItemBody(item, body)}
+                  onSendNow={() => void runNext()}
                 />
               )}
             </For>
@@ -308,10 +250,14 @@ export default function QueueDock(props: Props) {
  *  attachment chips; the remaining text is the actual prompt. */
 function QueueCard(props: {
   item: QueueItem;
+  index: number;
+  isNext: boolean;
+  busy: boolean;
   expanded: boolean;
   onToggle: () => void;
   onCancel: () => void;
   onUpdate: (body: string) => void;
+  onSendNow: () => void;
 }) {
   const split = createMemo(() => splitBodyAndAttachments(props.item.body));
   const [editing, setEditing] = createSignal(false);
@@ -345,36 +291,53 @@ function QueueCard(props: {
 
   return (
     <article
-      class="rounded-lg border border-border bg-bg-2 p-3 space-y-2"
+      class="rounded-lg border bg-bg-2 p-3 space-y-2"
+      classList={{
+        // Highlight the item that will go next so the order is obvious.
+        "border-accent/60 ring-1 ring-accent/30": props.isNext,
+        "border-border": !props.isNext,
+      }}
       data-testid={`queue-card-${props.item.id}`}
     >
-      {/*
-        Item header — timestamp + remove button only. Status labels
-        were redundant here: an item only lives in the queue while
-        it's waiting to run; once dispatched the BE moves it into
-        the chat timeline and removes the row. Three lifecycle
-        states are now possible from the user's perspective:
-
-          - in the queue (this card is rendered)
-          - in the chat timeline (it left the queue)
-          - deleted (user clicked Remove → also gone from the queue)
-
-        The remove button is unconditionally rendered; cancelling a
-        queue item is a tracked-but-rare operation, never a footgun
-        on items the user "shouldn't" cancel.
-      */}
       <header class="flex items-center gap-2 text-[11.5px]">
-        <span class="text-fg-subtle">{new Date(props.item.created_at).toLocaleTimeString()}</span>
-        <button
-          type="button"
-          class="ml-auto text-fg-subtle hover:text-danger"
-          onClick={() => props.onCancel()}
-          title="Remove"
-          aria-label="Remove"
-          data-testid={`queue-cancel-${props.item.id}`}
+        {/* Position badge — makes the queue order explicit. */}
+        <span
+          class="inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full text-[10px] font-semibold"
+          classList={{
+            "bg-accent text-[var(--ag-accent-fg)]": props.isNext,
+            "bg-bg-3 text-fg-subtle": !props.isNext,
+          }}
+          title={props.isNext ? "Next to send" : `Position ${props.index + 1} in queue`}
         >
-          ✕
-        </button>
+          {props.isNext ? "next" : props.index + 1}
+        </span>
+        <span class="text-fg-subtle">{new Date(props.item.created_at).toLocaleTimeString()}</span>
+        <div class="ml-auto flex items-center gap-1">
+          {/* Per-item "Send now" only on the next item (run_next sends
+              the head of the queue). One-click push into the chat. */}
+          <Show when={props.isNext}>
+            <button
+              type="button"
+              class="ag-btn ag-btn-ghost ag-btn-sm !py-0.5 !px-1.5 !text-[11px] text-accent"
+              disabled={props.busy}
+              onClick={() => props.onSendNow()}
+              title="Send this message into the chat now"
+              data-testid={`queue-send-now-${props.item.id}`}
+            >
+              ▸ Send now
+            </button>
+          </Show>
+          <button
+            type="button"
+            class="text-fg-subtle hover:text-danger"
+            onClick={() => props.onCancel()}
+            title="Remove"
+            aria-label="Remove"
+            data-testid={`queue-cancel-${props.item.id}`}
+          >
+            ✕
+          </button>
+        </div>
       </header>
 
       <Show
