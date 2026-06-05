@@ -24,6 +24,11 @@ import { confirm } from "./dialog";
  */
 /** Persisted toggle for soft-wrapping long lines in the diff view. */
 const WRAP_LS_KEY = "ag-changes-wrap";
+/** Persisted toggle for collapsing unchanged lines in the diff view.
+ *  Defaults to ON (collapsed) so the user sees only the changes plus a
+ *  little context; clicking a collapsed region (or the header toggle)
+ *  reveals the surrounding lines. */
+const COLLAPSE_LS_KEY = "ag-changes-collapse";
 /** Persisted "reviewed" markers, keyed by scope path. The value is a
  *  map of repo-relative file path -> the content signature that was
  *  reviewed. A file counts as reviewed only while its CURRENT diff
@@ -66,6 +71,8 @@ export default function ChangesPanel() {
   const [err, setErr] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
   const [wrap, setWrap] = createSignal(localStorage.getItem(WRAP_LS_KEY) !== "0");
+  // Collapse unchanged lines by default (only "0" disables it).
+  const [collapse, setCollapse] = createSignal(localStorage.getItem(COLLAPSE_LS_KEY) !== "0");
   // path -> current diff signature, populated as files are opened.
   const [sigs, setSigs] = createSignal<Record<string, string>>({});
   // path -> reviewed signature for the active scope.
@@ -191,6 +198,11 @@ export default function ChangesPanel() {
         parent: host,
         a: { doc: d.head, extensions: commonExts() },
         b: { doc: d.working, extensions: commonExts() },
+        // Collapse long runs of unchanged lines into a clickable widget
+        // (default). `margin` keeps a few lines of context around each
+        // change; clicking the collapsed region expands it. Omitted when
+        // the user turns collapsing off so the whole file is shown.
+        ...(collapse() ? { collapseUnchanged: { margin: 3, minSize: 4 } } : {}),
       });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -211,12 +223,13 @@ export default function ChangesPanel() {
     void refresh();
   });
 
-  // Rebuild the diff view when the wrap toggle changes so the new
-  // extensions take effect. CodeMirror MergeView extensions are
+  // Rebuild the diff view when the wrap or collapse toggle changes so
+  // the new extensions take effect. CodeMirror MergeView extensions are
   // immutable once attached; the cheapest reliable refresh is to
   // recreate it.
   createEffect(() => {
     void wrap();
+    void collapse();
     const sel = selected();
     if (sel) void openDiff(sel);
   });
@@ -340,6 +353,25 @@ export default function ChangesPanel() {
           <button
             type="button"
             class="ag-btn ag-btn-ghost ag-btn-sm ml-auto"
+            classList={{ "!bg-bg-3 !text-fg": collapse() }}
+            onClick={() => {
+              const next = !collapse();
+              setCollapse(next);
+              localStorage.setItem(COLLAPSE_LS_KEY, next ? "1" : "0");
+            }}
+            title={
+              collapse()
+                ? "Showing only changed lines — click to show the whole file"
+                : "Showing the whole file — click to collapse unchanged lines"
+            }
+            aria-pressed={collapse()}
+            data-testid="changes-collapse"
+          >
+            {collapse() ? "⊟ changes only" : "⊞ full file"}
+          </button>
+          <button
+            type="button"
+            class="ag-btn ag-btn-ghost ag-btn-sm"
             classList={{ "!bg-bg-3 !text-fg": wrap() }}
             onClick={() => {
               const next = !wrap();
