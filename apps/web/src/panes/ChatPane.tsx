@@ -421,7 +421,24 @@ export default function ChatPane() {
             const parsed = JSON.parse(ev.data) as {
               queue_dispatched?: string;
               chat_idle?: boolean;
+              subscribed?: string;
             };
+            if (parsed.subscribed) {
+              // Fresh subscription (initial connect OR an auto-reconnect
+              // after the socket dropped during a long silent turn). The
+              // BE immediately replays the topic's history, which re-sends
+              // every token frame. Clearing the live buffers first means
+              // that replay REBUILDS them cleanly instead of doubling the
+              // text. Canonical text already persisted (events) is
+              // untouched.
+              setChatStore(
+                produce((s) => {
+                  s.liveTokens = {};
+                  s.liveThinking = {};
+                }),
+              );
+              return;
+            }
             if (parsed.queue_dispatched) {
               void reconcileChat();
               return;
