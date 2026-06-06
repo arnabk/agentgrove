@@ -36,6 +36,20 @@ export interface Worktree {
   removed_at?: string | null;
 }
 
+/** Drift + PR status for a worktree's branch vs its remote. */
+export interface WorktreeRemoteStatus {
+  behind: number;
+  ahead: number;
+  tracking: string | null;
+  pr: {
+    number: number;
+    title: string;
+    state: string;
+    url: string;
+    review_decision: string | null;
+  } | null;
+}
+
 /** Chat metadata as returned by list endpoints (no prompts). */
 export interface Chat {
   id: string;
@@ -293,6 +307,8 @@ export const api = {
     req<Worktree>(`/api/worktrees/${encodeURIComponent(worktreeId)}/restore`, {
       method: "POST",
     }),
+  worktreeRemoteStatus: (worktreeId: string) =>
+    req<WorktreeRemoteStatus>(`/api/worktrees/${encodeURIComponent(worktreeId)}/remote-status`),
   // Chats — worktree-scoped (legacy) + project-scoped (current).
   listChats: (worktreeId: string) =>
     req<Chat[]>(`/api/worktrees/${encodeURIComponent(worktreeId)}/chats`),

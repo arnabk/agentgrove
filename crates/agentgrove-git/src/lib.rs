@@ -7,11 +7,13 @@
 #![warn(missing_docs)]
 
 pub mod branches;
+pub mod drift;
 pub mod inspect;
 pub mod status;
 pub mod worktree;
 
 pub use branches::{list_local, switch_branch, BranchInfo};
+pub use drift::{check_drift, check_pr, DriftInfo, PrInfo};
 pub use inspect::{inspect_repo, RepoInfo};
 pub use status::{status, StatusEntry};
 pub use worktree::{

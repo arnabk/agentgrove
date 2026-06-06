@@ -8,7 +8,7 @@ import {
   onMount,
 } from "solid-js";
 import { createStore, produce } from "solid-js/store";
-import { api, type Project, type TreeEntry } from "../api/client";
+import { api, type Project, type TreeEntry, type WorktreeRemoteStatus } from "../api/client";
 import {
   addChatTab,
   addTerminalTab,
@@ -151,6 +151,28 @@ export default function LeftRail() {
       saveExpanded(expanded);
     }
   }
+
+  const [remoteStatus, setRemoteStatus] = createSignal<Record<string, WorktreeRemoteStatus>>({});
+  const DRIFT_POLL_MS = 5 * 60 * 1000;
+  function fetchDrift(worktreeId: string) {
+    void api
+      .worktreeRemoteStatus(worktreeId)
+      .then((rs) => setRemoteStatus((prev) => ({ ...prev, [worktreeId]: rs })))
+      .catch(() => {});
+  }
+  createEffect(() => {
+    for (const p of state.projects) {
+      if (!isExpanded(p.id)) continue;
+      for (const w of state.worktrees[p.id] ?? []) fetchDrift(w.id);
+    }
+    const h = setInterval(() => {
+      for (const p of state.projects) {
+        if (!isExpanded(p.id)) continue;
+        for (const w of state.worktrees[p.id] ?? []) fetchDrift(w.id);
+      }
+    }, DRIFT_POLL_MS);
+    onCleanup(() => clearInterval(h));
+  });
 
   async function deleteWorktree(projectId: string, wtId: string, ev: MouseEvent) {
     ev.stopPropagation();
@@ -693,6 +715,50 @@ export default function LeftRail() {
                                   <span class="truncate text-[0.83em] font-mono min-w-0 flex-1">
                                     {w.branch}
                                   </span>
+                                  <Show
+                                    when={
+                                      remoteStatus()[w.id]?.behind &&
+                                      remoteStatus()[w.id]!.behind > 0
+                                    }
+                                  >
+                                    <button
+                                      type="button"
+                                      class="ag-chip ag-chip-warn !text-[0.65em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80"
+                                      title={`${remoteStatus()[w.id]!.behind} commits behind ${remoteStatus()[w.id]!.tracking ?? "remote"} — click to ask AI to pull + merge`}
+                                      onClick={(ev) => {
+                                        ev.stopPropagation();
+                                        openNewChatDialog(p.id, w.id, w.branch);
+                                      }}
+                                      data-testid={`drift-${w.id}`}
+                                    >
+                                      ↓{remoteStatus()[w.id]!.behind}
+                                    </button>
+                                  </Show>
+                                  <Show
+                                    when={
+                                      remoteStatus()[w.id]?.ahead && remoteStatus()[w.id]!.ahead > 0
+                                    }
+                                  >
+                                    <span
+                                      class="ag-chip !text-[0.65em] !py-[1px] shrink-0"
+                                      title={`${remoteStatus()[w.id]!.ahead} commits ahead of ${remoteStatus()[w.id]!.tracking ?? "remote"}`}
+                                    >
+                                      ↑{remoteStatus()[w.id]!.ahead}
+                                    </span>
+                                  </Show>
+                                  <Show when={remoteStatus()[w.id]?.pr}>
+                                    <a
+                                      href={remoteStatus()[w.id]!.pr!.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      class="ag-chip ag-chip-accent !text-[0.65em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80"
+                                      title={`PR #${remoteStatus()[w.id]!.pr!.number}: ${remoteStatus()[w.id]!.pr!.title} (${remoteStatus()[w.id]!.pr!.state}${remoteStatus()[w.id]!.pr!.review_decision ? " · " + remoteStatus()[w.id]!.pr!.review_decision : ""})`}
+                                      onClick={(ev) => ev.stopPropagation()}
+                                      data-testid={`pr-${w.id}`}
+                                    >
+                                      PR #{remoteStatus()[w.id]!.pr!.number}
+                                    </a>
+                                  </Show>
                                   {/* Status chip only for states a user can
                                       act on. We deliberately suppress:
                                         - "ready"    — the steady state; the

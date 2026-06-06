@@ -46,6 +46,11 @@ pub fn build_router(state: AppState) -> Router {
         // Worktree history (soft-deleted) + restore
         .route("/api/worktrees/history", get(worktrees::history))
         .route("/api/worktrees/:id/restore", post(worktrees::restore))
+        // Remote drift + PR status for a worktree branch.
+        .route(
+            "/api/worktrees/:id/remote-status",
+            get(worktrees::remote_status),
+        )
         // Chats
         .route(
             "/api/worktrees/:id/chats",

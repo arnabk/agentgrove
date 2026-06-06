@@ -750,3 +750,38 @@ fn sanitize_branch(branch: &str) -> String {
         })
         .collect()
 }
+
+// ---- Remote status (drift + PR) -----------------------------------------
+
+/// Combined drift + PR status for a worktree's branch.
+#[derive(Debug, Serialize)]
+pub struct RemoteStatusDto {
+    pub behind: u32,
+    pub ahead: u32,
+    pub tracking: Option<String>,
+    pub pr: Option<git::PrInfo>,
+}
+
+/// `GET /api/worktrees/:id/remote-status` — fetch from origin, compare
+/// commits, and check for an open GitHub PR. The fetch is best-effort
+/// (may fail without network); the PR check requires the `gh` CLI.
+pub async fn remote_status(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<RemoteStatusDto>, (StatusCode, String)> {
+    let wt = state
+        .worktrees
+        .get(&id)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, format!("worktree not found: {e}")))?;
+
+    let drift = git::check_drift(&wt.path, &wt.branch).await;
+    let pr = git::check_pr(&wt.path, &wt.branch).await;
+
+    Ok(Json(RemoteStatusDto {
+        behind: drift.behind,
+        ahead: drift.ahead,
+        tracking: drift.tracking,
+        pr,
+    }))
+}
