@@ -19,28 +19,36 @@ pub struct DriftInfo {
     pub diverged: bool,
 }
 
-pub async fn check_drift_quick(cwd: &Path, branch: &str) -> DriftInfo {
+/// `base_ref` is the branch the worktree was created from (e.g. "dev",
+/// "main"). Used as a fallback when the actual HEAD branch has no
+/// upstream tracking ref configured.
+pub async fn check_drift_quick(cwd: &Path, _branch: &str, base_ref: &str) -> DriftInfo {
     let mut info = DriftInfo::default();
-    let local_sha = match cmd(cwd, &["rev-parse", branch]).await {
+
+    // Use the ACTUAL HEAD branch, not the stored worktree record name
+    // (the user may have switched/renamed branches inside the worktree).
+    let head = match cmd(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]).await {
+        Some(s) if !s.is_empty() && s != "HEAD" => s,
+        _ => return info,
+    };
+    let local_sha = match cmd(cwd, &["rev-parse", "HEAD"]).await {
         Some(s) => s,
         None => return info,
     };
-    let tracking = match cmd(
+
+    // Try the configured upstream first; fall back to origin/<base_ref>.
+    let tracking = cmd(
         cwd,
-        &[
-            "rev-parse",
-            "--abbrev-ref",
-            &format!("{branch}@{{upstream}}"),
-        ],
+        &["rev-parse", "--abbrev-ref", &format!("{head}@{{upstream}}")],
     )
     .await
-    {
-        Some(s) if !s.is_empty() => s,
-        _ => return info,
-    };
+    .filter(|s| !s.is_empty())
+    .unwrap_or_else(|| format!("origin/{base_ref}"));
     info.tracking = Some(tracking.clone());
+
     let remote = tracking.split('/').next().unwrap_or("origin");
-    let remote_sha = match cmd(cwd, &["ls-remote", "--heads", remote, branch]).await {
+    let ref_to_check = tracking.splitn(2, '/').nth(1).unwrap_or(base_ref);
+    let remote_sha = match cmd(cwd, &["ls-remote", "--heads", remote, ref_to_check]).await {
         Some(line) => line.split_whitespace().next().unwrap_or("").to_string(),
         None => return info,
     };
@@ -48,41 +56,29 @@ pub async fn check_drift_quick(cwd: &Path, branch: &str) -> DriftInfo {
     info
 }
 
-pub async fn check_drift_full(cwd: &Path, branch: &str) -> DriftInfo {
+pub async fn check_drift_full(cwd: &Path, _branch: &str, base_ref: &str) -> DriftInfo {
     let mut info = DriftInfo::default();
     let _ = Command::new("git")
         .args(["fetch", "origin", "--prune", "--quiet"])
         .current_dir(cwd)
         .output()
         .await;
-    let tracking = match cmd(
-        cwd,
-        &[
-            "rev-parse",
-            "--abbrev-ref",
-            &format!("{branch}@{{upstream}}"),
-        ],
-    )
-    .await
-    {
-        Some(s) if !s.is_empty() => s,
+    let head = match cmd(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]).await {
+        Some(s) if !s.is_empty() && s != "HEAD" => s,
         _ => return info,
     };
-    info.tracking = Some(tracking.clone());
-    if let Some(s) = cmd(
+    let tracking = cmd(
         cwd,
-        &["rev-list", "--count", &format!("{branch}..{tracking}")],
+        &["rev-parse", "--abbrev-ref", &format!("{head}@{{upstream}}")],
     )
     .await
-    {
+    .filter(|s| !s.is_empty())
+    .unwrap_or_else(|| format!("origin/{base_ref}"));
+    info.tracking = Some(tracking.clone());
+    if let Some(s) = cmd(cwd, &["rev-list", "--count", &format!("HEAD..{tracking}")]).await {
         info.behind = s.parse().unwrap_or(0);
     }
-    if let Some(s) = cmd(
-        cwd,
-        &["rev-list", "--count", &format!("{tracking}..{branch}")],
-    )
-    .await
-    {
+    if let Some(s) = cmd(cwd, &["rev-list", "--count", &format!("{tracking}..HEAD")]).await {
         info.ahead = s.parse().unwrap_or(0);
     }
     info.diverged = info.behind > 0 || info.ahead > 0;
@@ -266,7 +262,7 @@ mod tests {
     #[tokio::test]
     async fn quick_drift_on_non_git_dir() {
         let d = tempfile::tempdir().unwrap();
-        let info = check_drift_quick(d.path(), "main").await;
+        let info = check_drift_quick(d.path(), "main", "main").await;
         assert!(!info.diverged);
         assert_eq!(info.behind, 0);
     }

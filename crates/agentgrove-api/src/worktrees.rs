@@ -790,9 +790,9 @@ pub async fn remote_status(
         .map_err(|e| (StatusCode::NOT_FOUND, format!("worktree not found: {e}")))?;
 
     let drift = if q.full.unwrap_or(false) {
-        git::check_drift_full(&wt.path, &wt.branch).await
+        git::check_drift_full(&wt.path, &wt.branch, &wt.base_ref).await
     } else {
-        git::check_drift_quick(&wt.path, &wt.branch).await
+        git::check_drift_quick(&wt.path, &wt.branch, &wt.base_ref).await
     };
 
     // PR + forge detection (runs in parallel with drift for speed).
