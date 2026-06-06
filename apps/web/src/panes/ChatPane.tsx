@@ -206,34 +206,6 @@ export default function ChatPane() {
   const tabs = () => scope()?.chats ?? [];
   const activeId = () => selectedChatId();
 
-  /** Scan the active chat's events for the FIRST GitHub PR URL.
-   *  Returns `{ url, shortLabel }` or null. Used by the chat header
-   *  to render a clickable PR badge without any BE schema change —
-   *  purely derived from the agent's output. */
-  const detectedPr = createMemo(() => {
-    const PR_RE = /https?:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/;
-    for (const p of chatStore.prompts) {
-      for (const ev of p.events) {
-        const text =
-          ev.type === "token"
-            ? ev.text
-            : ev.type === "tool_result"
-              ? JSON.stringify(ev.result)
-              : "";
-        const m = PR_RE.exec(text);
-        if (m) {
-          return {
-            url: m[0],
-            repo: m[1],
-            number: m[2],
-            shortLabel: `#${m[2]}`,
-          };
-        }
-      }
-    }
-    return null;
-  });
-
   /** Refresh the chat list for the active scope from the BE.
    *
    *  Tabs in this scope are user-curated: closing a tab is a local
@@ -958,14 +930,11 @@ export default function ChatPane() {
     <section data-testid="chat-pane" class="flex flex-col h-full">
       {/* Chat-specific status badges (queue + PR + error + settings).
           Title is shown in the unified TabStrip — not repeated here. */}
-      <Show when={activeId() && ((queueSummary()?.total ?? 0) > 0 || detectedPr() || err())}>
+      <Show when={activeId() && ((queueSummary()?.total ?? 0) > 0 || err())}>
         <header
           class="h-8 px-4 flex items-center gap-1.5 border-b border-border bg-bg-1 overflow-x-auto"
           data-testid="chat-status-bar"
         >
-          {/* Queue status indicator. Moved from a toggle button to a
-            read-only badge now that the queue lives permanently in
-            the RightSidebar. Highlights when active. */}
           <Show when={activeId() && (queueSummary()?.total ?? 0) > 0}>
             <div
               class="ml-1 ag-chip flex items-center gap-1"
@@ -981,20 +950,6 @@ export default function ChatPane() {
                 <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
               </Show>
             </div>
-          </Show>
-          {/* PR badge: auto-detected from agent output. Shows the PR
-            number as a clickable link that opens in a new tab. */}
-          <Show when={detectedPr()}>
-            <a
-              href={detectedPr()!.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              class="ml-1 ag-chip ag-chip-accent flex items-center gap-1 hover:bg-accent/20 text-[11px] font-mono"
-              title={`Open PR ${detectedPr()!.shortLabel} on GitHub`}
-              data-testid="chat-pr-badge"
-            >
-              <span>PR {detectedPr()!.shortLabel}</span>
-            </a>
           </Show>
           <Show when={err()}>
             <span
