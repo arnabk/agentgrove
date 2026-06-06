@@ -397,19 +397,13 @@ export default function ChatPane() {
               subscribed?: string;
             };
             if (parsed.subscribed) {
-              // Fresh subscription (initial connect OR an auto-reconnect
-              // after the socket dropped during a long silent turn). The
-              // BE immediately replays the topic's history, which re-sends
-              // every token frame. Clearing the live buffers first means
-              // that replay REBUILDS them cleanly instead of doubling the
-              // text. Canonical text already persisted (events) is
-              // untouched.
-              setChatStore(
-                produce((s) => {
-                  s.liveTokens = {};
-                  s.liveThinking = {};
-                }),
-              );
+              // Fresh subscription (initial connect or reconnect).
+              // Reconcile from the BE so we have the canonical events,
+              // which clears liveTokens/liveThinking for any finished
+              // prompts. We do NOT blanket-clear the live buffers here
+              // — that wiped in-flight thinking text when the user
+              // switched scopes and came back.
+              void reconcileChat();
               return;
             }
             if (parsed.queue_dispatched) {
