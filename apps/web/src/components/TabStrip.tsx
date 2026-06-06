@@ -1,6 +1,7 @@
 import { For, Show, createSignal } from "solid-js";
 import {
   activeTab,
+  busyChats,
   closeTab,
   setActiveTab,
   renameTab,
@@ -134,6 +135,16 @@ export default function TabStrip() {
             data-testid={`tab-${t.id}`}
           >
             <span class="text-fg-subtle shrink-0">{icon(t.kind)}</span>
+            {/* Pulsing dot when this chat has an in-flight agent turn.
+                Visible even when the tab isn't active so the user sees
+                "something is happening" while viewing a different tab. */}
+            <Show when={t.kind === "chat" && busyChats().has(t.id)}>
+              <span
+                class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shrink-0"
+                title="Agent is working…"
+                data-testid={`tab-busy-${t.id}`}
+              />
+            </Show>
             <Show when={editingId() === t.id} fallback={<span class="truncate">{label(t)}</span>}>
               <input
                 class="bg-transparent border-b border-accent outline-none w-28 text-[11.5px]"

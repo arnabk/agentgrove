@@ -30,6 +30,7 @@ import {
   currentWorktreeId,
   getChatDraft,
   selectedChatId,
+  setBusyChats,
   setChatDraft,
   setScopeChats,
   state,
@@ -545,6 +546,30 @@ export default function ChatPane() {
     const id = activeId();
     void loadChat();
     setInput(id ? getChatDraft(id) : "");
+  });
+
+  // Maintain the global busyChats signal so the TabStrip (and any
+  // other global UI) can show which chats have an in-flight turn —
+  // even when the user is viewing a different tab. Without this,
+  // switching away from a chat during a long silent turn makes it
+  // look like nothing is happening.
+  createEffect(() => {
+    const id = activeId();
+    const busy = isStreaming();
+    if (!id) return;
+    setBusyChats((prev) => {
+      const next = new Set(prev);
+      if (busy) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+    onCleanup(() => {
+      setBusyChats((prev) => {
+        const next = new Set(prev);
+        next.delete(id!);
+        return next;
+      });
+    });
   });
 
   // Report this chat's memory footprint to the global registry. The

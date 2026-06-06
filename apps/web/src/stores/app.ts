@@ -137,6 +137,12 @@ export const [state, setState] = createStore<AppState>({
 /** Visibility of the global Settings modal. */
 export const [settingsOpen, setSettingsOpen] = createSignal(false);
 
+/** Chat ids that currently have an in-flight agent turn. ChatPane
+ *  maintains this from its per-chat store; the TabStrip reads it to
+ *  show a pulsing activity indicator on busy chat tabs so the user
+ *  can see "something is happening" even when viewing a different tab. */
+export const [busyChats, setBusyChats] = createSignal<Set<string>>(new Set());
+
 /** Transient, dismissable navigation error (e.g. the user used the
  *  browser back button to land on a project/worktree that no longer
  *  exists). Rendered as a toast in App.tsx; cleared on dismiss or the
