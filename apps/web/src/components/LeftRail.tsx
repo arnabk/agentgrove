@@ -152,12 +152,27 @@ export default function LeftRail() {
     }
   }
 
-  const [remoteStatus, setRemoteStatus] = createSignal<Record<string, WorktreeRemoteStatus>>({});
-  const DRIFT_POLL_MS = 5 * 60 * 1000;
+  // Use a SolidJS store (not a plain signal) so reads like
+  // `remoteStatus[w.id]?.diverged` inside <For> bodies get
+  // fine-grained reactivity — a createSignal<Record> doesn't
+  // track individual keys, so <Show> inside <For> wouldn't
+  // re-evaluate when a specific worktree's status changed.
+  const [remoteStatus, setRemoteStatusStore] = createStore<Record<string, WorktreeRemoteStatus>>(
+    {},
+  );
+  // Quick check via `git ls-remote` is cheap (no object download) so
+  // we can poll more frequently than a full fetch.
+  const DRIFT_POLL_MS = 60 * 1000;
   function fetchDrift(worktreeId: string) {
     void api
       .worktreeRemoteStatus(worktreeId)
-      .then((rs) => setRemoteStatus((prev) => ({ ...prev, [worktreeId]: rs })))
+      .then((rs) =>
+        setRemoteStatusStore(
+          produce((s) => {
+            s[worktreeId] = rs;
+          }),
+        ),
+      )
       .catch(() => {});
   }
   createEffect(() => {
@@ -717,47 +732,54 @@ export default function LeftRail() {
                                   </span>
                                   <Show
                                     when={
-                                      remoteStatus()[w.id]?.behind &&
-                                      remoteStatus()[w.id]!.behind > 0
+                                      remoteStatus[w.id]?.diverged ||
+                                      (remoteStatus[w.id]?.behind ?? 0) > 0
                                     }
                                   >
                                     <button
                                       type="button"
                                       class="ag-chip ag-chip-warn !text-[0.65em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80"
-                                      title={`${remoteStatus()[w.id]!.behind} commits behind ${remoteStatus()[w.id]!.tracking ?? "remote"} — click to ask AI to pull + merge`}
+                                      title={
+                                        (remoteStatus[w.id]?.behind ?? 0) > 0
+                                          ? `${remoteStatus[w.id]!.behind} behind ${remoteStatus[w.id]!.tracking ?? "remote"} — click to sync`
+                                          : `Branch drifted from ${remoteStatus[w.id]?.tracking ?? "remote"} — click to check`
+                                      }
                                       onClick={(ev) => {
                                         ev.stopPropagation();
+                                        fetchDrift(w.id);
                                         openNewChatDialog(p.id, w.id, w.branch);
                                       }}
                                       data-testid={`drift-${w.id}`}
                                     >
-                                      ↓{remoteStatus()[w.id]!.behind}
+                                      {(remoteStatus[w.id]?.behind ?? 0) > 0
+                                        ? `↓${remoteStatus[w.id]!.behind}`
+                                        : "⟳ drifted"}
                                     </button>
                                   </Show>
                                   <Show
                                     when={
-                                      remoteStatus()[w.id]?.ahead && remoteStatus()[w.id]!.ahead > 0
+                                      remoteStatus[w.id]?.ahead && remoteStatus[w.id]!.ahead > 0
                                     }
                                   >
                                     <span
                                       class="ag-chip !text-[0.65em] !py-[1px] shrink-0"
-                                      title={`${remoteStatus()[w.id]!.ahead} commits ahead of ${remoteStatus()[w.id]!.tracking ?? "remote"}`}
+                                      title={`${remoteStatus[w.id]!.ahead} commits ahead of ${remoteStatus[w.id]!.tracking ?? "remote"}`}
                                     >
-                                      ↑{remoteStatus()[w.id]!.ahead}
+                                      ↑{remoteStatus[w.id]!.ahead}
                                     </span>
                                   </Show>
-                                  <Show when={remoteStatus()[w.id]?.pr}>
+                                  <Show when={remoteStatus[w.id]?.pr}>
                                     <a
-                                      href={remoteStatus()[w.id]!.pr!.url}
+                                      href={remoteStatus[w.id]!.pr!.url}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       class="ag-chip ag-chip-accent !text-[0.65em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80"
-                                      title={`${remoteStatus()[w.id]!.pr!.source === "glab" ? "MR" : "PR"} #${remoteStatus()[w.id]!.pr!.number}: ${remoteStatus()[w.id]!.pr!.title} (${remoteStatus()[w.id]!.pr!.state})`}
+                                      title={`${remoteStatus[w.id]!.pr!.source === "glab" ? "MR" : "PR"} #${remoteStatus[w.id]!.pr!.number}: ${remoteStatus[w.id]!.pr!.title} (${remoteStatus[w.id]!.pr!.state})`}
                                       onClick={(ev) => ev.stopPropagation()}
                                       data-testid={`pr-${w.id}`}
                                     >
-                                      {remoteStatus()[w.id]!.pr!.source === "glab" ? "MR" : "PR"} #
-                                      {remoteStatus()[w.id]!.pr!.number}
+                                      {remoteStatus[w.id]!.pr!.source === "glab" ? "MR" : "PR"} #
+                                      {remoteStatus[w.id]!.pr!.number}
                                     </a>
                                   </Show>
                                   {/* Suggest installing the forge CLI if the
@@ -766,16 +788,16 @@ export default function LeftRail() {
                                       they could have PR/MR badges. */}
                                   <Show
                                     when={
-                                      remoteStatus()[w.id]?.forge &&
-                                      !remoteStatus()[w.id]!.forge!.cli_installed &&
-                                      remoteStatus()[w.id]!.forge!.install_hint
+                                      remoteStatus[w.id]?.forge &&
+                                      !remoteStatus[w.id]!.forge!.cli_installed &&
+                                      remoteStatus[w.id]!.forge!.install_hint
                                     }
                                   >
                                     <span
                                       class="ag-chip !text-[0.6em] !py-[1px] shrink-0 text-fg-subtle cursor-help"
-                                      title={remoteStatus()[w.id]!.forge!.install_hint!}
+                                      title={remoteStatus[w.id]!.forge!.install_hint!}
                                     >
-                                      💡 install {remoteStatus()[w.id]!.forge!.cli}
+                                      💡 install {remoteStatus[w.id]!.forge!.cli}
                                     </span>
                                   </Show>
                                   {/* Status chip only for states a user can
