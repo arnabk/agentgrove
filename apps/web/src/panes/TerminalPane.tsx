@@ -181,23 +181,22 @@ export default function TerminalPane() {
     syncStage();
   });
 
-  // Re-fit + tell BE PTY when the window resizes. Without this the
-  // BE keeps the original cols/rows and the shell wraps wrong on any
-  // pane/window resize (arrow-up + edit-in-place visibly scrambles
-  // the buffer). ResizeObserver on the stage would be ideal but
-  // window.resize fires for the common cases (browser resize, FE
-  // pane width change via the LeftRail handle).
-  const onWindowResize = () => {
-    const a = activeId();
-    if (!a) return;
-    const sess = cache.get(a);
-    if (sess) fitAndResize(a, sess);
-  };
+  // Re-fit + tell BE PTY when the stage resizes. ResizeObserver
+  // catches ALL layout triggers: window resize, sidebar toggle, left
+  // rail drag, zoom change — anything that changes the available
+  // space for the terminal. The old window.resize listener missed
+  // intra-page layout shifts (sidebar open/close) which left the
+  // terminal at a stale size.
   onMount(() => {
-    window.addEventListener("resize", onWindowResize);
-  });
-  onCleanup(() => {
-    window.removeEventListener("resize", onWindowResize);
+    if (!stage) return;
+    const ro = new ResizeObserver(() => {
+      const a = activeId();
+      if (!a) return;
+      const sess = cache.get(a);
+      if (sess) fitAndResize(a, sess);
+    });
+    ro.observe(stage);
+    onCleanup(() => ro.disconnect());
   });
 
   /** Run xterm's FitAddon for `id` AND tell the BE PTY about the
@@ -214,6 +213,11 @@ export default function TerminalPane() {
       /* not sized yet */
       return;
     }
+    // After re-fitting, ensure the viewport scrolls to the latest
+    // output. Without this, switching to a terminal tab that was
+    // mounted at a stale size leaves the scrollbar mid-buffer — the
+    // user sees old output and has to scroll down manually.
+    sess.term.scrollToBottom();
     const cols = sess.term.cols;
     const rows = sess.term.rows;
     void api.resizeTerminal(id, cols, rows).catch(() => {
@@ -250,8 +254,15 @@ export default function TerminalPane() {
       if (!sess) continue;
       sess.host.style.display = t.id === a ? "block" : "none";
       if (t.id === a) {
-        fitAndResize(t.id, sess);
-        sess.term.focus();
+        // Defer fit to the next animation frame so the browser has
+        // reflowed the now-visible host (display:none → block). Without
+        // this, FitAddon measures 0×0, computes the wrong cols/rows, and
+        // the terminal doesn't scroll to the bottom or renders at a
+        // stale size — the "doesn't scroll until refresh" bug.
+        window.requestAnimationFrame(() => {
+          fitAndResize(t.id, sess);
+          sess.term.focus();
+        });
       }
     }
   }
