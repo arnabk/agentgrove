@@ -136,12 +136,17 @@ pub async fn read_state(state: &AppState, chat_id: &str) -> QueueState {
         .await
         .unwrap_or(QueueMode::Auto)
         .into();
+    // Only surface Pending + Running items to the FE. Done items have
+    // already been dispatched into the chat timeline; leaving them in
+    // the queue list made stale cards linger (and clicking ✕ on a Done
+    // item returned 404 since the BE had already removed it).
     let items: Vec<QueueItem> = state
         .queue_store
         .list(chat_id)
         .await
         .unwrap_or_default()
         .into_iter()
+        .filter(|i| i.status != agentgrove_store::QueueStatus::Done)
         .map(Into::into)
         .collect();
     QueueState {

@@ -67,10 +67,13 @@ export default function QueueDock(props: Props) {
     setErr(null);
     try {
       await api.cancelQueueItem(props.chatId, item.id);
-      await refresh();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      // 404 = item already gone (dispatched or deleted by another
+      // client). Not an error — just refresh to remove the stale card.
+      const isNotFound = e instanceof Error && e.message.includes("404");
+      if (!isNotFound) setErr(e instanceof Error ? e.message : String(e));
     } finally {
+      await refresh();
       setBusy(false);
     }
   }
