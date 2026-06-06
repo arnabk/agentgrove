@@ -752,12 +752,31 @@ export default function LeftRail() {
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       class="ag-chip ag-chip-accent !text-[0.65em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80"
-                                      title={`PR #${remoteStatus()[w.id]!.pr!.number}: ${remoteStatus()[w.id]!.pr!.title} (${remoteStatus()[w.id]!.pr!.state}${remoteStatus()[w.id]!.pr!.review_decision ? " · " + remoteStatus()[w.id]!.pr!.review_decision : ""})`}
+                                      title={`${remoteStatus()[w.id]!.pr!.source === "glab" ? "MR" : "PR"} #${remoteStatus()[w.id]!.pr!.number}: ${remoteStatus()[w.id]!.pr!.title} (${remoteStatus()[w.id]!.pr!.state})`}
                                       onClick={(ev) => ev.stopPropagation()}
                                       data-testid={`pr-${w.id}`}
                                     >
-                                      PR #{remoteStatus()[w.id]!.pr!.number}
+                                      {remoteStatus()[w.id]!.pr!.source === "glab" ? "MR" : "PR"} #
+                                      {remoteStatus()[w.id]!.pr!.number}
                                     </a>
+                                  </Show>
+                                  {/* Suggest installing the forge CLI if the
+                                      repo is on a known forge but the CLI
+                                      isn't installed — so the user knows
+                                      they could have PR/MR badges. */}
+                                  <Show
+                                    when={
+                                      remoteStatus()[w.id]?.forge &&
+                                      !remoteStatus()[w.id]!.forge!.cli_installed &&
+                                      remoteStatus()[w.id]!.forge!.install_hint
+                                    }
+                                  >
+                                    <span
+                                      class="ag-chip !text-[0.6em] !py-[1px] shrink-0 text-fg-subtle cursor-help"
+                                      title={remoteStatus()[w.id]!.forge!.install_hint!}
+                                    >
+                                      💡 install {remoteStatus()[w.id]!.forge!.cli}
+                                    </span>
                                   </Show>
                                   {/* Status chip only for states a user can
                                       act on. We deliberately suppress:

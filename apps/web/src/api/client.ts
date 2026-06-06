@@ -36,17 +36,24 @@ export interface Worktree {
   removed_at?: string | null;
 }
 
-/** Drift + PR status for a worktree's branch vs its remote. */
+/** Drift + PR + forge status for a worktree's branch vs its remote. */
 export interface WorktreeRemoteStatus {
   behind: number;
   ahead: number;
   tracking: string | null;
+  diverged: boolean;
   pr: {
     number: number;
     title: string;
     state: string;
     url: string;
-    review_decision: string | null;
+    source: string;
+  } | null;
+  forge: {
+    forge: string;
+    cli: string | null;
+    cli_installed: boolean;
+    install_hint: string | null;
   } | null;
 }
 

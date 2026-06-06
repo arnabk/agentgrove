@@ -753,13 +753,20 @@ fn sanitize_branch(branch: &str) -> String {
 
 // ---- Remote status (drift + PR) -----------------------------------------
 
-/// Drift status for a worktree's branch vs its remote tracking branch.
+/// Drift + PR + forge status for a worktree's branch.
 #[derive(Debug, Serialize)]
 pub struct RemoteStatusDto {
     pub behind: u32,
     pub ahead: u32,
     pub tracking: Option<String>,
     pub diverged: bool,
+    /// Open PR/MR for this branch (None if no forge CLI installed or
+    /// no PR exists).
+    pub pr: Option<git::PrInfo>,
+    /// Which forge hosts the repo + whether its CLI is installed.
+    /// When the CLI is missing, `install_hint` tells the user how to
+    /// get PR status badges.
+    pub forge: Option<git::ForgeInfo>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -788,10 +795,16 @@ pub async fn remote_status(
         git::check_drift_quick(&wt.path, &wt.branch).await
     };
 
+    // PR + forge detection (runs in parallel with drift for speed).
+    let pr = git::check_pr(&wt.path, &wt.branch).await;
+    let forge = git::detect_forge(&wt.path).await;
+
     Ok(Json(RemoteStatusDto {
         behind: drift.behind,
         ahead: drift.ahead,
         tracking: drift.tracking,
         diverged: drift.diverged,
+        pr,
+        forge: Some(forge),
     }))
 }

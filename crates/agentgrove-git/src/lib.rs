@@ -13,7 +13,9 @@ pub mod status;
 pub mod worktree;
 
 pub use branches::{list_local, switch_branch, BranchInfo};
-pub use drift::{check_drift_full, check_drift_quick, DriftInfo};
+pub use drift::{
+    check_drift_full, check_drift_quick, check_pr, detect_forge, DriftInfo, ForgeInfo, PrInfo,
+};
 pub use inspect::{inspect_repo, RepoInfo};
 pub use status::{status, StatusEntry};
 pub use worktree::{
