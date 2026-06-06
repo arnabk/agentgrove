@@ -753,21 +753,28 @@ fn sanitize_branch(branch: &str) -> String {
 
 // ---- Remote status (drift + PR) -----------------------------------------
 
-/// Combined drift + PR status for a worktree's branch.
+/// Drift status for a worktree's branch vs its remote tracking branch.
 #[derive(Debug, Serialize)]
 pub struct RemoteStatusDto {
     pub behind: u32,
     pub ahead: u32,
     pub tracking: Option<String>,
-    pub pr: Option<git::PrInfo>,
+    pub diverged: bool,
 }
 
-/// `GET /api/worktrees/:id/remote-status` — fetch from origin, compare
-/// commits, and check for an open GitHub PR. The fetch is best-effort
-/// (may fail without network); the PR check requires the `gh` CLI.
+#[derive(Debug, Deserialize, Default)]
+pub struct RemoteStatusQuery {
+    #[serde(default)]
+    pub full: Option<bool>,
+}
+
+/// `GET /api/worktrees/:id/remote-status` — compare local branch with
+/// remote. Default: cheap `ls-remote` quick-check. `?full=true`: fetch
+/// + exact ahead/behind counts.
 pub async fn remote_status(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<RemoteStatusQuery>,
 ) -> Result<Json<RemoteStatusDto>, (StatusCode, String)> {
     let wt = state
         .worktrees
@@ -775,13 +782,16 @@ pub async fn remote_status(
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, format!("worktree not found: {e}")))?;
 
-    let drift = git::check_drift(&wt.path, &wt.branch).await;
-    let pr = git::check_pr(&wt.path, &wt.branch).await;
+    let drift = if q.full.unwrap_or(false) {
+        git::check_drift_full(&wt.path, &wt.branch).await
+    } else {
+        git::check_drift_quick(&wt.path, &wt.branch).await
+    };
 
     Ok(Json(RemoteStatusDto {
         behind: drift.behind,
         ahead: drift.ahead,
         tracking: drift.tracking,
-        pr,
+        diverged: drift.diverged,
     }))
 }
