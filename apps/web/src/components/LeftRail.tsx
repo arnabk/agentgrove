@@ -18,6 +18,7 @@ import {
   refreshWorktreesForProject,
   selectFile,
   selectWorktree,
+  selectedChatId,
   selectedFilePath,
   setChangesScope,
   setState,
@@ -742,18 +743,32 @@ export default function LeftRail() {
                                       title={
                                         (remoteStatus[w.id]?.behind ?? 0) > 0
                                           ? `${remoteStatus[w.id]!.behind} behind ${remoteStatus[w.id]!.tracking ?? "remote"} — click to sync`
-                                          : `Branch drifted from ${remoteStatus[w.id]?.tracking ?? "remote"} — click to check`
+                                          : `Branch drifted from ${remoteStatus[w.id]?.tracking ?? "remote"} — click to sync`
                                       }
                                       onClick={(ev) => {
                                         ev.stopPropagation();
                                         fetchDrift(w.id);
-                                        openNewChatDialog(p.id, w.id, w.branch);
+                                        // Switch to this worktree's scope
+                                        selectWorktree(p.id, w.id);
+                                        // If a chat is already open for this scope, send
+                                        // a sync prompt directly; otherwise open a new chat.
+                                        const chatId = selectedChatId();
+                                        if (chatId) {
+                                          const tracking =
+                                            remoteStatus[w.id]?.tracking ?? "origin/" + w.branch;
+                                          void api.sendMessage(
+                                            chatId,
+                                            `Pull latest from ${tracking} into this worktree's branch, merge, and resolve any conflicts.`,
+                                          );
+                                        } else {
+                                          openNewChatDialog(p.id, w.id, w.branch);
+                                        }
                                       }}
                                       data-testid={`drift-${w.id}`}
                                     >
                                       {(remoteStatus[w.id]?.behind ?? 0) > 0
                                         ? `↓${remoteStatus[w.id]!.behind}`
-                                        : "⟳ drifted"}
+                                        : "⟳"}
                                     </button>
                                   </Show>
                                   <Show
