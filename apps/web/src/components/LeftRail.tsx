@@ -768,7 +768,7 @@ export default function LeftRail() {
                                     >
                                       {(remoteStatus[w.id]?.behind ?? 0) > 0
                                         ? `↓${remoteStatus[w.id]!.behind}`
-                                        : "⟳"}
+                                        : "↓"}
                                     </button>
                                   </Show>
                                   <Show
