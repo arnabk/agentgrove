@@ -46,6 +46,8 @@ fn expected_routes() -> BTreeSet<&'static str> {
         "DELETE /api/projects/{project_id}/notes/{note_id}",
         "GET /api/projects/{id}/scratchpad",
         "PUT /api/projects/{id}/scratchpad",
+        "GET /api/notes",
+        "PUT /api/notes",
         "GET /api/settings",
         "PUT /api/settings",
         "GET /api/layout",

@@ -18,6 +18,7 @@ import {
   refreshWorktreesForProject,
   selectFile,
   selectWorktree,
+  setPendingChatInjection,
   selectedChatId,
   selectedFilePath,
   setChangesScope,
@@ -530,11 +531,11 @@ export default function LeftRail() {
                     {isWorktree ? <WorktreeIcon /> : <FolderIcon />}
                     <span class="truncate text-[0.97em] min-w-0 flex-1">{p.name}</span>
 
-                    {/* Right-edge cluster: branch chip + two quick-create
-                        actions + an overflow (kebab) menu for the rest.
-                        Only these few items stay inline, so the cluster
-                        never outgrows the row — the project name truncates
-                        via min-w-0 instead of the icons clipping. */}
+                    {/* Right-edge cluster: branch chip + a single overflow
+                        (kebab) menu holding every row action. Keeping just
+                        the kebab inline means the cluster never outgrows the
+                        row — the project name truncates via min-w-0 instead
+                        of icons clipping — and every action has a text label. */}
                     <div class="flex items-center gap-0.5 shrink-0 flex-nowrap">
                       {/* Worktree branch */}
                       <Show when={isWorktree && p.current_branch}>
@@ -546,39 +547,10 @@ export default function LeftRail() {
                         </span>
                       </Show>
 
-                      {/* + chat (quick action, always inline). */}
-                      <button
-                        type="button"
-                        class="shrink-0 p-1 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openNewChatDialog(p.id, null, p.name);
-                        }}
-                        aria-label={`New chat in ${p.name}`}
-                        title="New chat"
-                        data-testid={`new-chat-${p.id}`}
-                      >
-                        <ChatPlusIcon />
-                      </button>
-
-                      {/* + terminal (quick action, always inline). */}
-                      <button
-                        type="button"
-                        class="shrink-0 p-1 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void openTerminalAt(p.id, null, p.name);
-                        }}
-                        aria-label={`New terminal in ${p.name}`}
-                        title="New terminal"
-                        data-testid={`new-terminal-${p.id}`}
-                      >
-                        <TerminalPlusIcon />
-                      </button>
-
-                      {/* Overflow menu: changes, worktree, history,
-                          settings, remove. Absolutely-positioned dropdown
-                          so it never clips, even on a narrow rail. */}
+                      {/* Overflow menu: every project action lives here now
+                          (new chat, new terminal, changes, worktree, history,
+                          settings, remove). Absolutely-positioned dropdown so
+                          it never clips, even on a narrow rail. */}
                       <div class="relative shrink-0">
                         <button
                           type="button"
@@ -603,6 +575,31 @@ export default function LeftRail() {
                             onClick={(e) => e.stopPropagation()}
                             data-testid={`project-menu-list-${p.id}`}
                           >
+                            <button
+                              type="button"
+                              role="menuitem"
+                              class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                              onClick={() => {
+                                setOpenMenuFor(null);
+                                openNewChatDialog(p.id, null, p.name);
+                              }}
+                              data-testid={`new-chat-${p.id}`}
+                            >
+                              <ChatPlusIcon /> New chat
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                              onClick={() => {
+                                setOpenMenuFor(null);
+                                void openTerminalAt(p.id, null, p.name);
+                              }}
+                              data-testid={`new-terminal-${p.id}`}
+                            >
+                              <TerminalPlusIcon /> New terminal
+                            </button>
+                            <div class="my-1 border-t border-border" />
                             <Show when={p.is_git}>
                               <button
                                 type="button"
@@ -750,17 +747,21 @@ export default function LeftRail() {
                                         fetchDrift(w.id);
                                         // Switch to this worktree's scope
                                         selectWorktree(p.id, w.id);
-                                        // If a chat is already open for this scope, send
-                                        // a sync prompt directly; otherwise open a new chat.
+                                        const tracking =
+                                          remoteStatus[w.id]?.tracking ?? "origin/" + w.branch;
+                                        const text = `Pull latest from ${tracking} into this worktree's branch, merge, and resolve any conflicts.`;
+                                        // If a chat is already open for this scope, hand the
+                                        // sync prompt to ChatPane via the injection signal —
+                                        // it runs the SAME optimistic insert the composer
+                                        // uses, so the user bubble appears instantly instead
+                                        // of waiting for the BE round-trip. Otherwise open a
+                                        // new chat; the signal is consumed once that chat is
+                                        // active.
                                         const chatId = selectedChatId();
                                         if (chatId) {
-                                          const tracking =
-                                            remoteStatus[w.id]?.tracking ?? "origin/" + w.branch;
-                                          void api.sendMessage(
-                                            chatId,
-                                            `Pull latest from ${tracking} into this worktree's branch, merge, and resolve any conflicts.`,
-                                          );
+                                          setPendingChatInjection({ chatId, text });
                                         } else {
+                                          setPendingChatInjection({ chatId: "", text });
                                           openNewChatDialog(p.id, w.id, w.branch);
                                         }
                                       }}
@@ -848,49 +849,23 @@ export default function LeftRail() {
                                       {w.status}
                                     </span>
                                   </Show>
-                                  {/* + chat under this worktree */}
-                                  <button
-                                    type="button"
-                                    class="shrink-0 ml-auto p-0.5 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
+                                  {/* Overflow menu: every worktree action
+                                      lives here now (new chat, new terminal,
+                                      changes, rename, remove). Keyed `wt:<id>`
+                                      so it doesn't collide with a project
+                                      row's menu key. `ml-auto` keeps the
+                                      cluster right-aligned now that the inline
+                                      quick-actions are gone. */}
+                                  <div
+                                    class="relative shrink-0 ml-auto"
                                     classList={{
-                                      // Tighten the gap only when a chip is
-                                      // ACTUALLY rendered (i.e. the row is
-                                      // in a noisy transient state). The
-                                      // suppressed "removing" + steady
-                                      // "ready" states should NOT trigger
-                                      // the inset.
+                                      // Tighten the gap only when a status chip
+                                      // is ACTUALLY rendered (noisy transient
+                                      // state). Steady "ready"/"removing"
+                                      // states should NOT trigger the inset.
                                       "!ml-1": w.status !== "ready" && w.status !== "removing",
                                     }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openNewChatDialog(p.id, w.id, w.branch);
-                                    }}
-                                    aria-label={`New chat in worktree ${w.branch}`}
-                                    title="New chat"
-                                    data-testid={`new-chat-wt-${w.id}`}
                                   >
-                                    <ChatPlusIcon />
-                                  </button>
-                                  {/* + terminal scoped to this worktree.
-                                      cwd defaults to the worktree path so
-                                      the user lands inside the checkout. */}
-                                  <button
-                                    type="button"
-                                    class="shrink-0 p-0.5 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      void openTerminalAt(p.id, w.id, w.branch);
-                                    }}
-                                    aria-label={`New terminal in worktree ${w.branch}`}
-                                    title="New terminal"
-                                    data-testid={`new-terminal-wt-${w.id}`}
-                                  >
-                                    <TerminalPlusIcon />
-                                  </button>
-                                  {/* Overflow menu: changes, rename, remove.
-                                      Keyed `wt:<id>` so it doesn't collide
-                                      with a project row's menu key. */}
-                                  <div class="relative shrink-0">
                                     <button
                                       type="button"
                                       class="shrink-0 p-0.5 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
@@ -918,6 +893,31 @@ export default function LeftRail() {
                                         onClick={(e) => e.stopPropagation()}
                                         data-testid={`project-menu-list-wt-${w.id}`}
                                       >
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                          onClick={() => {
+                                            setOpenMenuFor(null);
+                                            openNewChatDialog(p.id, w.id, w.branch);
+                                          }}
+                                          data-testid={`new-chat-wt-${w.id}`}
+                                        >
+                                          <ChatPlusIcon /> New chat
+                                        </button>
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                          onClick={() => {
+                                            setOpenMenuFor(null);
+                                            void openTerminalAt(p.id, w.id, w.branch);
+                                          }}
+                                          data-testid={`new-terminal-wt-${w.id}`}
+                                        >
+                                          <TerminalPlusIcon /> New terminal
+                                        </button>
+                                        <div class="my-1 border-t border-border" />
                                         <button
                                           type="button"
                                           role="menuitem"

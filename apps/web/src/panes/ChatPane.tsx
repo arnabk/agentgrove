@@ -29,9 +29,11 @@ import {
   currentScope,
   currentWorktreeId,
   getChatDraft,
+  pendingChatInjection,
   selectedChatId,
   setBusyChats,
   setChatDraft,
+  setPendingChatInjection,
   setScopeChats,
   state,
 } from "../stores/app";
@@ -316,7 +318,16 @@ export default function ChatPane() {
           s.view = view;
           s.atStart = view.prompts.length >= view.prompts_total;
           const beIds = new Set(view.prompts.map((p) => p.id));
-          const localOnly = s.prompts.filter((p) => !beIds.has(p.id));
+          // Content of BE prompts, used to drop optimistic placeholders
+          // that the BE has already materialized under a real id. Without
+          // this, a reconcile that races an in-flight injected send (e.g.
+          // the drift "pull & merge" badge, which switches scope mid-
+          // dispatch) leaves the `pending-` placeholder orphaned next to
+          // the real prompt — a visible duplicate.
+          const beContents = new Set(view.prompts.map((p) => p.content));
+          const localOnly = s.prompts.filter(
+            (p) => !beIds.has(p.id) && !(p.id.startsWith("pending-") && beContents.has(p.content)),
+          );
           s.prompts = [...view.prompts, ...localOnly];
           // Drop any liveTokens / liveThinking entries whose prompt
           // has reached a terminal event in the BE copy — they're
@@ -622,33 +633,12 @@ export default function ChatPane() {
    * both paths; queue items carry the full body so the dispatch
    * later picks them up via the agent's Read tool.
    */
-  async function send(ev: SubmitEvent) {
-    ev.preventDefault();
-    const id = activeId();
-    let body = input().trim();
-    const atts = uploads();
-    if (!id || (!body && atts.length === 0)) return;
-    if (atts.length > 0) {
-      const lines = atts
-        .map((u) => `- ${u.path}${u.content_type ? ` (${u.content_type})` : ""}`)
-        .join("\n");
-      body = `${body}${body ? "\n\n" : ""}Attached files (absolute paths, read with your Read tool):\n${lines}`;
-    }
-
-    // OPTIMISTIC CLEAR: drop the text + attachments out of the
-    // composer the instant the user hits Enter, BEFORE we await the
-    // BE call. Otherwise the textarea stays full while the request
-    // round-trips, which looks broken to the user. We snapshot the
-    // pre-cleared state so a failure can restore it.
-    const snapshot = { body, uploads: atts };
-    setInput("");
-    setUploads([]);
-    // Drop the persisted draft for this chat — the message is now
-    // in flight, no point keeping it as recoverable text.
-    const chatId = activeId();
-    if (chatId) setChatDraft(chatId, "");
-    queueMicrotask(() => composer?.setMarkdown(""));
-
+  /** Core send: optimistic-insert `body` into the timeline for chat
+   *  `id`, then dispatch to the BE. Shared by the composer `send`
+   *  handler and programmatic injections (e.g. the drift "pull &
+   *  merge" badge). `onFail` lets the composer path restore its draft;
+   *  injections pass nothing. Returns true on success. */
+  async function dispatchBody(id: string, body: string, onFail?: () => void): Promise<boolean> {
     // Push an OPTIMISTIC placeholder prompt so the user's message
     // lands in the timeline instantly. We don't know yet whether
     // the BE will dispatch or queue — if it queues, we remove the
@@ -700,23 +690,77 @@ export default function ChatPane() {
           }),
         );
       }
+      return true;
     } catch (e) {
-      // Remove the placeholder + restore the composer so the user
-      // can retry without retyping.
+      // Remove the placeholder; let the caller restore any state.
       setChatStore(
         produce((s) => {
           const idx = s.prompts.findIndex((p) => p.id === tempId);
           if (idx >= 0) s.prompts.splice(idx, 1);
         }),
       );
-      setInput(snapshot.body);
-      setUploads(snapshot.uploads);
-      // Restore the draft too so a reload / scope switch still
-      // shows the unsent message.
-      if (chatId) setChatDraft(chatId, snapshot.body);
+      onFail?.();
       setErr(e instanceof Error ? e.message : String(e));
+      return false;
     }
   }
+
+  async function send(ev: SubmitEvent) {
+    ev.preventDefault();
+    const id = activeId();
+    let body = input().trim();
+    const atts = uploads();
+    if (!id || (!body && atts.length === 0)) return;
+    if (atts.length > 0) {
+      const lines = atts
+        .map((u) => `- ${u.path}${u.content_type ? ` (${u.content_type})` : ""}`)
+        .join("\n");
+      body = `${body}${body ? "\n\n" : ""}Attached files (absolute paths, read with your Read tool):\n${lines}`;
+    }
+
+    // OPTIMISTIC CLEAR: drop the text + attachments out of the
+    // composer the instant the user hits Enter, BEFORE we await the
+    // BE call. Otherwise the textarea stays full while the request
+    // round-trips, which looks broken to the user. We snapshot the
+    // pre-cleared state so a failure can restore it.
+    const snapshot = { body, uploads: atts };
+    setInput("");
+    setUploads([]);
+    // Drop the persisted draft for this chat — the message is now
+    // in flight, no point keeping it as recoverable text.
+    const chatId = activeId();
+    if (chatId) setChatDraft(chatId, "");
+    queueMicrotask(() => composer?.setMarkdown(""));
+
+    await dispatchBody(id, body, () => {
+      // Restore the composer + draft so the user can retry without
+      // retyping.
+      setInput(snapshot.body);
+      setUploads(snapshot.uploads);
+      if (chatId) setChatDraft(chatId, snapshot.body);
+    });
+  }
+
+  // Consume programmatic message injections (e.g. the drift "pull &
+  // merge" badge in the LeftRail). The badge can't send directly —
+  // the target chat may not be the active scope yet, and a raw
+  // api.sendMessage would skip the optimistic insert so the user
+  // bubble wouldn't appear until the BE round-trips. The badge sets
+  // a global signal instead; here we wait until the matching chat is
+  // active, then run the same optimistic dispatch the composer uses,
+  // so the bubble shows instantly.
+  createEffect(() => {
+    const pending = pendingChatInjection();
+    if (!pending) return;
+    const id = activeId();
+    if (!id) return;
+    // An empty chatId means "send into whichever chat becomes active
+    // next" (the new-chat flow, where the id isn't known until the
+    // dialog creates the chat). A concrete id must match exactly.
+    if (pending.chatId && pending.chatId !== id) return;
+    setPendingChatInjection(null);
+    void dispatchBody(id, pending.text);
+  });
 
   /** Cancel the in-flight agent turn. BE kills the provider
    *  subprocess + appends a synthetic `cancelled by user` error

@@ -117,6 +117,11 @@ pub fn build_router(state: AppState) -> Router {
             "/api/projects/:id/scratchpad",
             get(scratchpad::get).put(scratchpad::put),
         )
+        // Workspace-global note (not tied to any project)
+        .route(
+            "/api/notes",
+            get(scratchpad::get_global).put(scratchpad::put_global),
+        )
         // Terminal
         .route("/api/terminals", get(terminal::list).post(terminal::create))
         .route("/api/terminals/:id", delete(terminal::delete))

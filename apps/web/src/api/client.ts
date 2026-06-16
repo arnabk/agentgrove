@@ -607,6 +607,14 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ body }),
     }),
+  // Workspace-global note (not tied to a project). Same shape as the
+  // per-project scratchpad; the BE returns a reserved project_id.
+  getNotes: () => req<Scratchpad>("/api/notes"),
+  saveNotes: (body: string) =>
+    req<Scratchpad>("/api/notes", {
+      method: "PUT",
+      body: JSON.stringify({ body }),
+    }),
   // Diagnostics
   getMemory: () => req<MemoryReport>("/api/diag/memory"),
   // Layout (per-scope + global UI state) — see

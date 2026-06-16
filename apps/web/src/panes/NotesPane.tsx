@@ -1,4 +1,4 @@
-import { Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import TaskList from "@tiptap/extension-task-list";
@@ -8,12 +8,13 @@ import Typography from "@tiptap/extension-typography";
 import Link from "@tiptap/extension-link";
 import GlobalDragHandle from "tiptap-extension-global-drag-handle";
 import { api } from "../api/client";
-import { state } from "../stores/app";
 import { useSyncSubscription } from "../lib/crossInstanceSync";
 
 /**
- * One large rich-text scratchpad per project. Persists to the BE at
- * /api/projects/:id/scratchpad with debounced autosave. Supports:
+ * One large workspace-**global** rich-text scratchpad. Persists to the
+ * BE at /api/notes with debounced autosave. It is no longer tied to the
+ * selected project — switching projects does not change the note.
+ * Supports:
  *
  *   - Headings (H1, H2, H3)
  *   - Bullet + ordered lists
@@ -36,7 +37,10 @@ export const [notesErr, setNotesErr] = createSignal<string | null>(null);
 export default function NotesPane() {
   let host!: HTMLDivElement;
   let editor: Editor | null = null;
-  const [loadedFor, setLoadedFor] = createSignal<string | null>(null);
+  // True once the global note has been fetched into the editor. Saves
+  // are blocked until then so a debounced autosave can't PUT the empty
+  // doc that exists during the initial load.
+  const [loaded, setLoaded] = createSignal(false);
   const setSavedAt = setNotesSavedAt;
   const setSaving = setNotesSaving;
   // Raw epoch ms of our last successful save. The cross-instance
@@ -50,16 +54,14 @@ export default function NotesPane() {
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   // Data-loss guards. A save must only ever persist content that the
   // user actually edited — never the transient empty doc that exists
-  // while a project's scratchpad is still loading, and never content
-  // belonging to a different project than the one we're saving to.
+  // while the note is still loading.
   //
-  //  - loadingPid: set while loadForProject is mid-flight; blocks saves
-  //    so a load race can't PUT an empty/stale doc.
+  //  - loading: true while loadNote is mid-flight; blocks saves so a
+  //    load race can't PUT an empty/stale doc.
   //  - loadedBody: the exact HTML we last loaded from (or saved to) the
-  //    BE for loadedFor(). A save is skipped when the editor still
-  //    matches this baseline (nothing changed) so switching projects or
-  //    re-mounting never rewrites an untouched doc.
-  let loadingPid: string | null = null;
+  //    BE. A save is skipped when the editor still matches this baseline
+  //    (nothing changed) so a re-mount never rewrites an untouched doc.
+  let loading = false;
   let loadedBody = "";
   // A bare-empty tiptap document. Used to refuse clobbering a non-empty
   // remote with an empty buffer that the user never intentionally
@@ -136,31 +138,20 @@ export default function NotesPane() {
     editor = null;
   });
 
-  // React to project changes.
-  createEffect(() => {
-    const pid = state.selectedProjectId;
-    if (!editor) return;
-    if (loadedFor() === pid) return;
-    // Flush the previous project's pending write before swapping.
-    void flushSave().then(() => loadForProject(pid));
-  });
+  // Load the global note once the editor exists. Notes are no longer
+  // scoped to a project, so there's nothing to react to — one fetch on
+  // mount, plus cross-instance sync reloads below.
+  onMount(() => void loadNote());
 
-  async function loadForProject(pid: string | null) {
+  async function loadNote() {
+    if (!editor) return;
     setErr(null);
     setSavedAt(null);
-    if (!pid) {
-      loadingPid = null;
-      loadedBody = "";
-      editor?.commands.clearContent(false);
-      editor?.setEditable(false);
-      setLoadedFor(null);
-      return;
-    }
     // Block saves until the fetched content is in the editor — without
     // this an autosave fired during the load could PUT the empty doc.
-    loadingPid = pid;
+    loading = true;
     try {
-      const pad = await api.getScratchpad(pid);
+      const pad = await api.getNotes();
       const newBody = pad.body || "";
       // Remember the loaded baseline so flushSave can tell a genuine
       // edit apart from an untouched doc (and never re-save the latter).
@@ -173,10 +164,7 @@ export default function NotesPane() {
         // Preserve the cursor position across the content swap.
         // ProseMirror's setContent blows the selection away; we
         // save the JSON-serialised selection anchor+head, run the
-        // replacement, then restore it. The cursor may land in
-        // slightly the wrong spot if the remote edit shifted nodes
-        // around the anchor, but it's far less disruptive than
-        // silently jumping to the end.
+        // replacement, then restore it.
         const anchor = editor?.state.selection.anchor ?? 0;
         const head = editor?.state.selection.head ?? 0;
         editor?.commands.setContent(newBody, false);
@@ -190,16 +178,14 @@ export default function NotesPane() {
         }
       }
       editor?.setEditable(true);
-      setLoadedFor(pid);
+      setLoaded(true);
       if (pad.body && pad.updated_at) {
         setSavedAt(formatTime(pad.updated_at));
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
-      // Only release the save lock if we're still the in-flight load
-      // (a newer project swap may have superseded us).
-      if (loadingPid === pid) loadingPid = null;
+      loading = false;
     }
   }
 
@@ -212,27 +198,26 @@ export default function NotesPane() {
   }
 
   async function flushSave() {
-    const pid = loadedFor();
-    if (!pid || !editor) return;
-    // Never save while a project's content is still loading — the
-    // editor may hold the transient empty/previous doc.
-    if (loadingPid !== null) return;
+    if (!loaded() || !editor) return;
+    // Never save while the note is still loading — the editor may hold
+    // the transient empty doc.
+    if (loading) return;
     const html = editor.getHTML();
     // Nothing changed since we loaded/last saved — skip. This stops a
-    // project swap or re-mount from rewriting an untouched document.
+    // re-mount from rewriting an untouched document.
     if (html === loadedBody) return;
     // Refuse to clobber a non-empty remote with an empty buffer UNLESS
-    // the user is actively editing this doc (editor focused). A clear
-    // that happens while the editor is unfocused is a project-swap /
-    // re-mount race, not an intentional delete — bail out to protect
-    // the notes. A focused empty doc is a real "select-all + delete".
+    // the user is actively editing (editor focused). A clear that
+    // happens while the editor is unfocused is a re-mount race, not an
+    // intentional delete — bail out to protect the notes. A focused
+    // empty doc is a real "select-all + delete".
     if (html === EMPTY_DOC && loadedBody !== EMPTY_DOC && !editor.isFocused) {
       return;
     }
     setSaving(true);
     setErr(null);
     try {
-      await api.saveScratchpad(pid, html);
+      await api.saveNotes(html);
       loadedBody = html;
       lastSavedMs = Date.now();
       setSavedAt(formatTime(new Date().toISOString()));
@@ -243,21 +228,16 @@ export default function NotesPane() {
     }
   }
 
-  // Cross-instance sync: another client (any browser, any
-  // machine) edited this project's scratchpad. Reload the doc so
-  // we render their changes; suppress our own save echo by
-  // comparing the BE updated_at against our last savedAt.
+  // Cross-instance sync: another client (any browser, any machine)
+  // edited the global note. Reload so we render their changes; suppress
+  // our own save echo by comparing against our last save time.
   useSyncSubscription((frame) => {
-    if (frame.kind !== "scratchpad_updated") return;
-    const pid = loadedFor();
-    if (!pid || frame.project_id !== pid) return;
-    // If WE just saved (within the last 3 s) the frame is our
-    // own echo — skip the reload to avoid clobbering the user's
-    // in-flight edits. We compare against the raw epoch ms from
-    // our last successful PUT, NOT the formatted display string
-    // (`savedAt` is "02:35 PM" which can't round-trip).
+    if (frame.kind !== "notes_updated") return;
+    if (!loaded()) return;
+    // If WE just saved (within the last 3 s) the frame is our own echo
+    // — skip the reload to avoid clobbering the user's in-flight edits.
     if (lastSavedMs > 0 && Date.now() - lastSavedMs < 3_000) return;
-    void loadForProject(pid);
+    void loadNote();
   });
 
   // ---- toolbar actions ----
@@ -416,7 +396,7 @@ export default function NotesPane() {
       <div
         class="flex-1 overflow-auto bg-bg-1"
         data-testid="notes-host"
-        classList={{ "opacity-50 pointer-events-none": !state.selectedProjectId }}
+        classList={{ "opacity-50 pointer-events-none": !loaded() }}
       >
         <div ref={(el) => (host = el)} class="h-full" />
       </div>

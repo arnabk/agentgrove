@@ -158,6 +158,22 @@ export interface ChangesScope {
 }
 export const [changesScope, setChangesScope] = createSignal<ChangesScope | null>(null);
 
+/** A message that some other part of the UI wants ChatPane to send on
+ *  the user's behalf (e.g. the drift "pull latest & merge" badge in the
+ *  LeftRail). We can't send it straight from the badge because the
+ *  target chat may not be the active scope yet — sending raw would skip
+ *  ChatPane's optimistic-insert path, so the user bubble wouldn't appear
+ *  until the BE round-trips (looks slow/broken). Instead the badge sets
+ *  this signal; ChatPane watches it and, once the matching chat is the
+ *  active one, runs its normal optimistic `send` so the bubble lands
+ *  instantly. Cleared by ChatPane after consuming. */
+export interface PendingChatInjection {
+  chatId: string;
+  text: string;
+}
+export const [pendingChatInjection, setPendingChatInjection] =
+  createSignal<PendingChatInjection | null>(null);
+
 // ---- scope key + helpers -----------------------------------------------
 
 /** Encode (projectId, worktreeId|null) into the scope key.

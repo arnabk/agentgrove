@@ -77,6 +77,10 @@ export type SyncFrame =
       kind: "scratchpad_updated";
       project_id: string;
       updated_at: string;
+    }
+  | {
+      kind: "notes_updated";
+      updated_at: string;
     };
 
 const listeners = new Set<(frame: SyncFrame) => void>();
