@@ -15,8 +15,11 @@ import {
   type ChatView,
   type Prompt,
   type ProviderDescriptor,
+  type QueueItem,
+  type QueueState,
   type UploadDto,
 } from "../api/client";
+import QueueTimeline from "../components/QueueTimeline";
 import Select from "../components/Select";
 import ChatSettingsDialog from "../components/ChatSettingsDialog";
 import { confirm } from "../components/dialog";
@@ -207,6 +210,123 @@ export default function ChatPane() {
   const scope = () => currentScope();
   const tabs = () => scope()?.chats ?? [];
   const activeId = () => selectedChatId();
+
+  // ---- Inline queue (rendered at the bottom of the timeline) --------
+  // The queue used to live in the right sidebar; it now sits in the
+  // chat flow. ChatPane owns the state because it already holds the WS
+  // connection + the busy/streaming signal that locks the queue.
+  const [queueState, setQueueState] = createSignal<QueueState | null>(null);
+  const [queueBusy, setQueueBusy] = createSignal(false);
+  const [queueExpanded, setQueueExpanded] = createSignal<Set<string>>(new Set());
+  // Ids of queue items currently being edited inline. While non-empty we
+  // pause queue polling so a refresh doesn't re-create the row and drop
+  // the user's in-progress edit.
+  const [queueEditingIds, setQueueEditingIds] = createSignal<Set<string>>(new Set());
+  function onQueueItemEditing(itemId: string, editing: boolean) {
+    setQueueEditingIds((s) => {
+      const next = new Set(s);
+      if (editing) next.add(itemId);
+      else next.delete(itemId);
+      return next;
+    });
+  }
+  const queueItems = () => queueState()?.items ?? [];
+  const queueMode = () => queueState()?.mode ?? "auto";
+  // Lock the whole queue while the agent is working (product decision):
+  // queued items can't be edited / removed / reordered mid-turn.
+  const queueLocked = () => isStreaming();
+
+  async function refreshQueue() {
+    const id = activeId();
+    if (!id) {
+      setQueueState(null);
+      return;
+    }
+    try {
+      setQueueState(await api.getQueue(id));
+    } catch {
+      // Queue is non-critical chrome; swallow transient errors so a
+      // hiccup doesn't spam the chat error banner.
+    }
+  }
+
+  function toggleQueueExpanded(itemId: string) {
+    setQueueExpanded((s) => {
+      const next = new Set(s);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }
+
+  async function cancelQueueItem(item: QueueItem) {
+    setQueueBusy(true);
+    try {
+      await api.cancelQueueItem(activeId()!, item.id);
+    } catch (e) {
+      // 404 = already gone (dispatched / removed elsewhere). Benign.
+      const notFound = e instanceof Error && e.message.includes("404");
+      if (!notFound) setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      await refreshQueue();
+      setQueueBusy(false);
+    }
+  }
+
+  async function updateQueueItem(item: QueueItem, body: string) {
+    setQueueBusy(true);
+    try {
+      await api.updateQueueItem(activeId()!, item.id, body);
+      await refreshQueue();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setQueueBusy(false);
+    }
+  }
+
+  async function setQueueMode(mode: "auto" | "manual") {
+    setQueueBusy(true);
+    try {
+      await api.setQueueMode(activeId()!, mode);
+      await refreshQueue();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setQueueBusy(false);
+    }
+  }
+
+  async function runNextQueue() {
+    setQueueBusy(true);
+    try {
+      await api.runNextQueue(activeId()!);
+      await refreshQueue();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setQueueBusy(false);
+    }
+  }
+
+  // Poll the queue while a chat is active. Cheap (small JSON) + the
+  // BE auto-drains, so most queues shrink fast; this just keeps the
+  // inline cards in sync. Also re-reads on every chat switch.
+  createEffect(() => {
+    const id = activeId();
+    if (!id) {
+      setQueueState(null);
+      return;
+    }
+    void refreshQueue();
+    const handle = setInterval(() => {
+      // Pause polling while a card is being edited so the refresh
+      // doesn't re-create the row and discard the in-progress edit.
+      if (queueEditingIds().size > 0) return;
+      void refreshQueue();
+    }, 1000);
+    onCleanup(() => clearInterval(handle));
+  });
 
   /** Refresh the chat list for the active scope from the BE.
    *
@@ -419,10 +539,15 @@ export default function ChatPane() {
             }
             if (parsed.queue_dispatched) {
               void reconcileChat();
+              // A queued item just drained into the chat — refresh the
+              // inline queue so the dispatched card disappears promptly.
+              void refreshQueue();
               return;
             }
             if (parsed.chat_idle) {
               void reconcileChat();
+              // Turn finished: the queue unlocks + may have auto-drained.
+              void refreshQueue();
               return;
             }
           }
@@ -1036,6 +1161,25 @@ export default function ChatPane() {
               loadingOlder={chatStore.loadingOlder}
               onLoadOlder={() => void loadOlder()}
               onRevert={(p) => void revert(p)}
+            />
+          </Show>
+
+          {/* Inline queue: pending messages line up at the bottom of the
+              timeline, just above the composer. Editable until the agent
+              is busy (then the whole queue is locked). */}
+          <Show when={activeId()}>
+            <QueueTimeline
+              items={queueItems()}
+              mode={queueMode()}
+              busy={queueBusy()}
+              locked={queueLocked()}
+              expanded={queueExpanded()}
+              onToggleExpanded={toggleQueueExpanded}
+              onCancel={(item) => void cancelQueueItem(item)}
+              onUpdate={(item, body) => void updateQueueItem(item, body)}
+              onRunNext={() => void runNextQueue()}
+              onSetMode={(m) => void setQueueMode(m)}
+              onItemEditing={onQueueItemEditing}
             />
           </Show>
 

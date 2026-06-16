@@ -1,28 +1,22 @@
 import { createSignal, Show, onMount, onCleanup } from "solid-js";
 import NotesPane, { notesSaving, notesSavedAt, notesErr } from "../panes/NotesPane";
-import QueueDrawer from "./QueueDrawer";
-import { isSidebarOpen, toggleSidebar, selectedChatId } from "../stores/app";
+import { isSidebarOpen, toggleSidebar } from "../stores/app";
 
 /**
- * Always-visible right sidebar: Notes (top) + Queue (bottom).
+ * Always-visible right sidebar: the workspace-global Notes scratchpad.
  *
- * Notes is the per-project Tiptap scratchpad (unchanged from the
- * old NotesPane — we just host it here instead of in a pane tab).
- * Queue shows the prompt queue for the currently-active chat tab
- * (if any); when no chat is active the queue section collapses.
+ * The queue used to live in the bottom half of this sidebar; it now
+ * renders inline at the bottom of the chat timeline (see QueueTimeline),
+ * so the sidebar is Notes-only and fills the full height.
  *
- * The sidebar is collapsible via a toggle button + resizable
- * via a drag handle on its left edge. Width persists to
- * localStorage.
+ * The sidebar is collapsible via a toggle button + resizable via a
+ * drag handle on its left edge. Width persists to localStorage.
  */
 
 const SIDEBAR_LS_KEY = "ag-sidebar-w";
 const SIDEBAR_MIN_PX = 280;
 const SIDEBAR_MAX_PX = 600;
 const SIDEBAR_DEFAULT_PX = 340;
-
-const DIVIDER_LS_KEY = "ag-sidebar-divider";
-const DIVIDER_DEFAULT_PCT = 60; // notes gets 60% by default
 
 export default function RightSidebar() {
   // ---- Width (persisted) ----
@@ -69,67 +63,21 @@ export default function RightSidebar() {
       document.body.style.userSelect = "";
       localStorage.setItem(SIDEBAR_LS_KEY, String(width()));
     }
-    if (divDragging()) {
-      setDivDragging(false);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      localStorage.setItem(DIVIDER_LS_KEY, String(notesPct()));
-    }
   };
   onMount(() => window.addEventListener("pointerup", onWindowUp));
   onCleanup(() => window.removeEventListener("pointerup", onWindowUp));
 
-  // ---- Divider (Notes / Queue split, persisted) ----
-  const persistedDiv = Number(localStorage.getItem(DIVIDER_LS_KEY));
-  const initialDiv =
-    Number.isFinite(persistedDiv) && persistedDiv >= 20 && persistedDiv <= 80
-      ? persistedDiv
-      : DIVIDER_DEFAULT_PCT;
-  const [notesPct, setNotesPct] = createSignal(initialDiv);
-  const [divDragging, setDivDragging] = createSignal(false);
-  let sidebarRef: HTMLElement | undefined;
-
-  function onDivDown(ev: PointerEvent) {
-    ev.preventDefault();
-    setDivDragging(true);
-    (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
-    document.body.style.cursor = "row-resize";
-    document.body.style.userSelect = "none";
-  }
-  function onDivMove(ev: PointerEvent) {
-    if (!divDragging() || !sidebarRef) return;
-    const rect = sidebarRef.getBoundingClientRect();
-    const pct = Math.min(80, Math.max(20, ((ev.clientY - rect.top) / rect.height) * 100));
-    setNotesPct(Math.round(pct));
-  }
-  function onDivUp(ev: PointerEvent) {
-    if (!divDragging()) return;
-    setDivDragging(false);
-    try {
-      (ev.currentTarget as HTMLElement).releasePointerCapture(ev.pointerId);
-    } catch {
-      /* */
-    }
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-    localStorage.setItem(DIVIDER_LS_KEY, String(notesPct()));
-  }
-
   // Bind mousemove globally so dragging works even if the cursor
-  // leaves the tiny 6px handle while the button is down.
+  // leaves the tiny resize handle while the button is down.
   const onWindowMove = (ev: PointerEvent) => {
     if (dragging()) onPointerMove(ev);
-    if (divDragging()) onDivMove(ev);
   };
   onMount(() => window.addEventListener("pointermove", onWindowMove));
   onCleanup(() => window.removeEventListener("pointermove", onWindowMove));
 
-  const chatId = () => selectedChatId();
-
   return (
     <Show when={isSidebarOpen()}>
       <aside
-        ref={(el) => (sidebarRef = el)}
         class="relative shrink-0 h-full bg-bg-1 border-l border-border flex flex-col"
         style={{ width: `${width()}px` }}
         data-testid="right-sidebar"
@@ -147,8 +95,9 @@ export default function RightSidebar() {
           data-testid="sidebar-resize"
         />
 
-        {/* Notes section (top) */}
-        <div class="overflow-hidden flex flex-col" style={{ height: `${notesPct()}%` }}>
+        {/* Notes — fills the whole sidebar now that the queue moved
+            inline into the chat timeline. */}
+        <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
           <header class="h-8 px-3 flex items-center gap-2 border-b border-border bg-bg-1 text-[12px] font-semibold text-fg-muted shrink-0">
             Notes
             <div class="ml-auto flex items-center gap-2 text-[11px] font-normal text-fg-subtle">
@@ -170,36 +119,6 @@ export default function RightSidebar() {
           <div class="flex-1 min-h-0 overflow-y-auto">
             <NotesPane />
           </div>
-        </div>
-
-        {/* Horizontal divider handle. Added a visible inner border
-            so there's a clear separation between Notes and Queue. */}
-        <div
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="Resize notes / queue split"
-          class="relative h-1.5 cursor-row-resize hover:bg-accent/30 active:bg-accent/50 transition-colors touch-none shrink-0"
-          classList={{ "!bg-accent/50": divDragging() }}
-          onPointerDown={onDivDown}
-          onPointerUp={onDivUp}
-          data-testid="sidebar-divider"
-        >
-          {/* Visible line in the center of the drag area */}
-          <div class="absolute top-1/2 left-0 right-0 h-[1px] -translate-y-1/2 bg-border pointer-events-none" />
-        </div>
-
-        {/* Queue section (bottom) */}
-        <div class="overflow-hidden flex flex-col" style={{ height: `${100 - notesPct()}%` }}>
-          <Show
-            when={chatId()}
-            fallback={
-              <div class="flex-1 flex items-center justify-center text-[12px] text-fg-subtle px-3 text-center">
-                Select a chat to see its queue
-              </div>
-            }
-          >
-            <QueueDrawer chatId={chatId()!} open={true} onClose={() => {}} />
-          </Show>
         </div>
       </aside>
     </Show>
