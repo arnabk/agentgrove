@@ -45,6 +45,21 @@ export default function App() {
     await bootstrap();
   });
 
+  // CSS zoom on <html> (from font-size scaling in app.ts) makes body's
+  // 100vh render taller than the viewport, creating a scroll gap that
+  // ProseMirror's scrollIntoView exploits on paste — scrolling the
+  // entire viewport up and shifting the UI. Intercept paste events and
+  // reset the viewport scroll so the browser never paints the shifted
+  // state.
+  onMount(() => {
+    const onPaste = () => {
+      Promise.resolve().then(() => window.scrollTo(0, 0));
+      requestAnimationFrame(() => window.scrollTo(0, 0));
+    };
+    document.addEventListener("paste", onPaste, true);
+    onCleanup(() => document.removeEventListener("paste", onPaste, true));
+  });
+
   // Bidirectional sync between the URL and the active workspace
   // state. Refreshing keeps you on the same scope + pane + chat +
   // file; copy-pasting the URL into another tab opens the same view.

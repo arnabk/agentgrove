@@ -69,6 +69,8 @@ export default [
         globalThis: "readonly",
         __dirname: "readonly",
         __filename: "readonly",
+        requestAnimationFrame: "readonly",
+        cancelAnimationFrame: "readonly",
       },
     },
     plugins: {
