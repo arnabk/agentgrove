@@ -46,18 +46,18 @@ export default function App() {
   });
 
   // CSS zoom on <html> (from font-size scaling in app.ts) makes body's
-  // 100vh render taller than the viewport, creating a scroll gap that
-  // ProseMirror's scrollIntoView exploits on paste — scrolling the
-  // entire viewport up and shifting the UI. Intercept paste events and
-  // reset the viewport scroll so the browser never paints the shifted
-  // state.
+  // 100vh render taller than the viewport, creating a ~149 px scroll gap
+  // that ProseMirror's scrollIntoView exploits on paste, formatting, or
+  // selection changes — scrolling the entire viewport up and shifting the
+  // UI. Intercept viewport scroll and immediately reset to 0. This is safe
+  // because the app fills the viewport; all internal scrolling (notes-host,
+  // chat-pane, etc.) uses overflow:auto on their own containers.
   onMount(() => {
-    const onPaste = () => {
-      Promise.resolve().then(() => window.scrollTo(0, 0));
-      requestAnimationFrame(() => window.scrollTo(0, 0));
+    const onScroll = () => {
+      if (window.scrollY > 0) window.scrollTo(0, 0);
     };
-    document.addEventListener("paste", onPaste, true);
-    onCleanup(() => document.removeEventListener("paste", onPaste, true));
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onCleanup(() => window.removeEventListener("scroll", onScroll));
   });
 
   // Bidirectional sync between the URL and the active workspace
