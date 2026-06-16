@@ -95,6 +95,7 @@ body {
 }
 
 html {
+  overflow: hidden;
   font-family: var(--ag-font-ui);
   font-feature-settings:
     "cv02" 1,

@@ -398,7 +398,7 @@ export default function NotesPane() {
         data-testid="notes-host"
         classList={{ "opacity-50 pointer-events-none": !loaded() }}
       >
-        <div ref={(el) => (host = el)} class="h-full" />
+        <div ref={(el) => (host = el)} class="min-h-full" />
       </div>
     </section>
   );

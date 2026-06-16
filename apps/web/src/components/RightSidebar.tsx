@@ -116,7 +116,7 @@ export default function RightSidebar() {
               </Show>
             </div>
           </header>
-          <div class="flex-1 min-h-0 overflow-y-auto">
+          <div class="flex-1 min-h-0 overflow-hidden">
             <NotesPane />
           </div>
         </div>
