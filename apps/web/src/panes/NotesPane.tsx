@@ -7,6 +7,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
 import Link from "@tiptap/extension-link";
 import GlobalDragHandle from "tiptap-extension-global-drag-handle";
+import { Markdown } from "tiptap-markdown";
 import { api } from "../api/client";
 import { useSyncSubscription } from "../lib/crossInstanceSync";
 
@@ -78,6 +79,14 @@ export default function NotesPane() {
         TaskList,
         TaskItem.configure({ nested: true }),
         Typography,
+        Markdown.configure({
+          html: false,
+          tightLists: true,
+          tightListClass: "tight",
+          breaks: false,
+          transformPastedText: true,
+          transformCopiedText: true,
+        }),
         Link.configure({
           openOnClick: true,
           autolink: true,
@@ -85,7 +94,7 @@ export default function NotesPane() {
         }),
         Placeholder.configure({
           placeholder:
-            "Start writing… use the toolbar above or markdown shortcuts like # H1, ## H2, - bullet, 1. list, [ ] task.",
+            "Start writing… use the toolbar above, markdown shortcuts, or paste markdown directly.",
         }),
         // Block-level drag handle: hovering any paragraph / heading
         // / list-item reveals a `⠿` grab handle in the left gutter
