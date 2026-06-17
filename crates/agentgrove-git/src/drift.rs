@@ -11,11 +11,16 @@
 use std::path::Path;
 use tokio::process::Command;
 
+/// Information about how much the branch has drifted from its tracking remote.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct DriftInfo {
+    /// Number of commits the local branch is behind the remote.
     pub behind: u32,
+    /// Number of commits the local branch is ahead of the remote.
     pub ahead: u32,
+    /// Name of the remote tracking branch, e.g. "origin/main", if any.
     pub tracking: Option<String>,
+    /// Whether the local branch has diverged from the remote tracking branch.
     pub diverged: bool,
 }
 
@@ -56,6 +61,7 @@ pub async fn check_drift_quick(cwd: &Path, _branch: &str, base_ref: &str) -> Dri
     info
 }
 
+/// Performs a full drift check (including fetching remote and listing PRs).
 pub async fn check_drift_full(cwd: &Path, _branch: &str, base_ref: &str) -> DriftInfo {
     let mut info = DriftInfo::default();
     let _ = Command::new("git")
@@ -103,10 +109,13 @@ async fn cmd(cwd: &Path, args: &[&str]) -> Option<String> {
 /// A pull/merge request associated with a branch.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PrInfo {
+    /// PR number.
     pub number: u64,
+    /// PR title.
     pub title: String,
     /// e.g. "open", "merged", "closed".
     pub state: String,
+    /// URL to the PR.
     pub url: String,
     /// Which forge CLI provided this ("gh", "glab", …).
     pub source: String,
