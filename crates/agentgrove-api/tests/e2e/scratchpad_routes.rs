@@ -94,7 +94,12 @@ async fn global_notes_put_then_get_roundtrips_and_is_project_independent() {
         .send()
         .await
         .unwrap();
-    assert_eq!(put.status(), 200, "put notes: {}", put.text().await.unwrap());
+    assert_eq!(
+        put.status(),
+        200,
+        "put notes: {}",
+        put.text().await.unwrap()
+    );
 
     let got = h.get("/api/notes").send().await.unwrap();
     let body: Value = got.json().await.unwrap();
