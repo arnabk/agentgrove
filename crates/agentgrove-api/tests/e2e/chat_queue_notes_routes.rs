@@ -1466,3 +1466,111 @@ async fn queue_item_patch_updates_body() {
     let updated = &q["items"].as_array().unwrap()[0];
     assert_eq!(updated["body"], "new text");
 }
+
+/// Flipping manual → auto on an IDLE chat with a pending backlog must
+/// kick a drain. This is the user-reported bug: queue items while in
+/// manual mode, send some manually, then re-enable auto-send — and the
+/// queue just sat there instead of draining. The normal drain only
+/// fires on send / turn-completion; an idle chat has no in-flight turn
+/// to trigger it, so `set_mode` must kick one itself.
+#[tokio::test]
+async fn flip_to_auto_on_idle_chat_drains_pending_backlog() {
+    let h = BeHarness::start().await;
+    let chat_id = make_chat(&h, "flip-drain", "fake", "echo").await;
+
+    // Manual mode so enqueued items park (don't auto-drain).
+    let res = h
+        .post_auth(&format!("/api/chats/{chat_id}/queue/mode"))
+        .json(&json!({"mode": "manual"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 204);
+
+    // Queue three items while manual — they stay pending.
+    for i in 0..3 {
+        h.post_auth(&format!("/api/chats/{chat_id}/queue"))
+            .json(&json!({"body": format!("parked-{i}")}))
+            .send()
+            .await
+            .unwrap();
+    }
+
+    // Sanity: all three pending, chat idle (no prompts dispatched).
+    let q: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}/queue"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        q["items"].as_array().unwrap().len(),
+        3,
+        "expected 3 parked items, got {:?}",
+        q["items"]
+    );
+
+    // Re-enable auto-send on the idle chat. This MUST kick a drain.
+    let res = h
+        .post_auth(&format!("/api/chats/{chat_id}/queue/mode"))
+        .json(&json!({"mode": "auto"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 204);
+
+    // Wait for the drain: all 3 land as prompts, queue empties.
+    let mut drained = false;
+    for _ in 0..100 {
+        let view: Value = h
+            .get_auth(&format!("/api/chats/{chat_id}"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let prompts = view["prompts"].as_array().map(|a| a.len()).unwrap_or(0);
+        if prompts >= 3 {
+            drained = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(
+        drained,
+        "queue did not drain after flipping to auto on an idle chat"
+    );
+
+    // Prompts landed in FIFO order.
+    let view: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let prompts = view["prompts"].as_array().unwrap();
+    assert_eq!(prompts.len(), 3, "expected 3 drained prompts: {prompts:?}");
+    for (i, p) in prompts.iter().enumerate() {
+        assert_eq!(p["content"].as_str().unwrap(), format!("parked-{i}"));
+    }
+
+    // Queue is now empty.
+    let q: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}/queue"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        q["items"].as_array().unwrap().is_empty(),
+        "queue not empty after auto drain: {:?}",
+        q["items"]
+    );
+}

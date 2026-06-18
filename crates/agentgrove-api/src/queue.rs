@@ -252,10 +252,36 @@ pub async fn set_mode(
     Path(chat_id): Path<String>,
     Json(body): Json<ModeBody>,
 ) -> StatusCode {
-    if let Err(e) = write_mode(&state, &chat_id, body.mode).await {
+    let mode = body.mode;
+    if let Err(e) = write_mode(&state, &chat_id, mode).await {
         tracing::warn!(chat_id, error = %e, "queue mode write failed");
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
+
+    // Flipping manual → auto on an idle chat with a pending backlog
+    // must kick a drain. Otherwise the queue just sits there: the
+    // normal drain only fires on send / turn-completion, and there's
+    // no in-flight turn after a manual send finishes. Without this,
+    // re-enabling auto-send appears to do nothing — the user's exact
+    // complaint. Mirrors the idle-kick in `stop_chat`.
+    if matches!(mode, Mode::Auto) {
+        let mut dispatching = state.dispatching.lock().await;
+        let is_dispatching = dispatching.contains(&chat_id);
+        if !is_dispatching {
+            let pending = read_state(&state, &chat_id)
+                .await
+                .items
+                .iter()
+                .filter(|i| i.status == Status::Pending)
+                .count();
+            if pending > 0 {
+                dispatching.insert(chat_id.clone());
+                drop(dispatching);
+                crate::chats::spawn_drain_task(state.clone(), chat_id.clone());
+            }
+        }
+    }
+
     StatusCode::NO_CONTENT
 }
 

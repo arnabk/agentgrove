@@ -48,9 +48,9 @@ export default function QueueTimeline(props: {
           <Show when={props.locked}>
             <span
               class="text-[10.5px] text-fg-subtle italic"
-              title="The queue is locked while the agent is working."
+              title="The running message can't be changed; pending ones below are still editable."
             >
-              locked while working
+              sending…
             </span>
           </Show>
 
@@ -109,7 +109,12 @@ export default function QueueTimeline(props: {
                 index={i()}
                 isNext={i() === 0}
                 busy={props.busy}
-                locked={props.locked}
+                // Only the item actually being dispatched (status
+                // "running") is immutable. Pending items behind it stay
+                // editable / removable even while the head is in flight —
+                // the user explicitly wants to fix up queued messages
+                // without waiting for the current turn to finish.
+                locked={item.status === "running"}
                 expanded={props.expanded.has(item.id)}
                 onToggle={() => props.onToggleExpanded(item.id)}
                 onCancel={() => props.onCancel(item)}
