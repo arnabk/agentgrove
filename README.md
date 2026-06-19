@@ -24,6 +24,7 @@ Quick links:
 - Code of Conduct: [`docs/CODE_OF_CONDUCT.md`](./docs/CODE_OF_CONDUCT.md)
 - Security policy: [`docs/SECURITY.md`](./docs/SECURITY.md)
 - Testing strategy: [`docs/testing/strategy.md`](./docs/testing/strategy.md)
+- Roadmap / TODO: [`TODO.md`](./TODO.md)
 - Comparison with other tools: [`docs/comparison.md`](./docs/comparison.md)
 - Data safety + restore: [`docs/operations/data-safety.md`](./docs/operations/data-safety.md)
 - ADRs: [`docs/adr/`](./docs/adr/)
