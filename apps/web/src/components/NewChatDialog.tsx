@@ -1,5 +1,6 @@
 import { For, Show, createSignal, onMount } from "solid-js";
 import { api, type Chat, type ProviderDescriptor } from "../api/client";
+import { state } from "../stores/app";
 import Select, { type SelectOption } from "./Select";
 
 interface Props {
@@ -61,6 +62,22 @@ export default function NewChatDialog(props: Props) {
   }
 
   onMount(() => {
+    // Synchronously use the cached providers if available so we can
+    // render optimistically without a flash of loading state.
+    if (state.providers && state.providers.length > 0) {
+      const userVisible = state.providers.filter((p) => p.id !== "fake");
+      const sorted = [...userVisible].sort((a, b) => Number(b.available) - Number(a.available));
+      setProviders(sorted);
+      const firstAvailable = sorted.find((p) => p.available);
+      if (firstAvailable) {
+        setProviderId(firstAvailable.id);
+        setModel(firstAvailable.default_model);
+      }
+      // Since we had a cached version, optimistically hide the loader.
+      setLoadingProviders(false);
+    }
+    
+    // Always fetch fresh in the background to catch any recent changes.
     void (async () => {
       try {
         const list = await api.listProviders();
@@ -74,13 +91,19 @@ export default function NewChatDialog(props: Props) {
         // Order: available providers first.
         const sorted = [...userVisible].sort((a, b) => Number(b.available) - Number(a.available));
         setProviders(sorted);
-        const firstAvailable = sorted.find((p) => p.available);
-        if (firstAvailable) {
-          setProviderId(firstAvailable.id);
-          setModel(firstAvailable.default_model);
+        // Only update the selected model if we hadn't already set it
+        // (i.e., if cache was empty) or if the current selection is no longer valid.
+        if (state.providers.length === 0) {
+          const firstAvailable = sorted.find((p) => p.available);
+          if (firstAvailable) {
+            setProviderId(firstAvailable.id);
+            setModel(firstAvailable.default_model);
+          }
         }
       } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
+        if (providers().length === 0) {
+          setErr(e instanceof Error ? e.message : String(e));
+        }
       } finally {
         setLoadingProviders(false);
       }

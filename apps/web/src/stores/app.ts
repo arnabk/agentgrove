@@ -14,7 +14,7 @@
 
 import { createStore, produce } from "solid-js/store";
 import { createSignal } from "solid-js";
-import { api, type Project, type Theme, type UserSettings, type Worktree } from "../api/client";
+import { api, type Project, type Theme, type UserSettings, type Worktree, type ProviderDescriptor } from "../api/client";
 
 /** Per-scope cap for chats (max 5 per project/worktree scope). */
 export const MAX_PER_PROJECT = 5;
@@ -103,6 +103,7 @@ export interface AppState {
   ready: boolean;
   loadError: string | null;
   projects: Project[];
+  providers: ProviderDescriptor[];
   selectedProjectId: string | null;
   /** Active worktree per project (null = project root scope). */
   selectedWorktreeByProject: Record<string, string | null>;
@@ -125,6 +126,7 @@ export const [state, setState] = createStore<AppState>({
   ready: false,
   loadError: null,
   projects: [],
+  providers: [],
   selectedProjectId: null,
   selectedWorktreeByProject: {},
   worktrees: {},
@@ -566,6 +568,12 @@ export function selectWorktree(projectId: string, worktreeId: string | null) {
 // ---- bootstrap + settings ----------------------------------------------
 
 export async function bootstrap() {
+  try {
+    const providers = await api.listProviders();
+    setState("providers", providers);
+  } catch {
+    // providers optional at bootstrap
+  }
   try {
     const themes = await api.listThemes();
     setState("themes", themes);
