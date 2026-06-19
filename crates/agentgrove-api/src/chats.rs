@@ -1250,6 +1250,11 @@ async fn drain_loop(state: &AppState, chat_id: &str) {
         let Some(item) = next_item else {
             break;
         };
+        if !crate::queue::is_auto(state, chat_id).await {
+            let _ = crate::queue::reset_to_pending(state, &item.id).await;
+            break;
+        }
+
         let chat_opt = {
             let reg = state.chats.read().await;
             reg.get(chat_id).cloned()
