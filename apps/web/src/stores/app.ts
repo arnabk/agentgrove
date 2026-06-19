@@ -419,11 +419,15 @@ export function setScopeChats(chats: ChatTab[]) {
           if (tab && tab.kind === "chat") {
             tab.title = c.title;
           }
-        } else {
-          // If it doesn't exist, this is a new chat from the backend that
-          // isn't locally open. We deliberately DO NOT push it into s.tabs.
-          // Tabs are user-curated; closing a chat removes it from tabs but
-          // not from the backend.
+        } else if (s.activeTab === c.id) {
+          // If it doesn't exist, but it is currently active, push it into tabs.
+          // This ensures that an actively selected chat remains in tabs
+          s.tabs.push({
+            kind: "chat",
+            id: c.id,
+            title: c.title,
+            ...(c.draft ? { draft: c.draft } : {}),
+          });
         }
       }
       s.chatsHydrated = true;

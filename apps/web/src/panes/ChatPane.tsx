@@ -208,7 +208,7 @@ export default function ChatPane() {
   });
 
   const scope = () => currentScope();
-  const tabs = () => scope()?.chats ?? [];
+  const tabs = () => scope()?.tabs.filter((t) => t.kind === "chat") ?? [];
   const activeId = () => selectedChatId();
 
   // ---- Inline queue (rendered at the bottom of the timeline) --------
@@ -357,7 +357,7 @@ export default function ChatPane() {
       const wt = currentWorktreeId();
       const beChats = all.filter((c) => (c.worktree_id ?? null) === wt);
       const beById = new Map(beChats.map((c) => [c.id, c]));
-      const current = scope()?.chats ?? [];
+      const current = scope()?.tabs.filter((t) => t.kind === "chat") ?? [];
       const hydrated = scope()?.chatsHydrated ?? false;
       if (current.length === 0 && !hydrated) {
         // Bootstrap: scope has NEVER been visited — seed with
