@@ -9,5 +9,7 @@ ignore = [
     # `rsa` crate Marvin Attack. No fixed upgrade available yet.
     "RUSTSEC-2023-0071",
     # Another issue, probably `gix` or something similar related
-    "RUSTSEC-2025-0021"
+    "RUSTSEC-2025-0021",
+    # gix-date issue
+    "RUSTSEC-2025-0140"
 ]
