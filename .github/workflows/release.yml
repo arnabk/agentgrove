@@ -44,7 +44,7 @@ jobs:
           # Check if this version is already tagged — if so, bump
           # the patch number. If not (e.g. someone manually bumped
           # the version in Cargo.toml), use it as-is.
-          if git rev-parse "v$CURRENT" >/dev/null 2>&1; then
+          if git rev-parse "refs/tags/v$CURRENT" >/dev/null 2>&1; then
             IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
             PATCH=$((PATCH + 1))
             NEXT="${MAJOR}.${MINOR}.${PATCH}"
