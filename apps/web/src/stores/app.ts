@@ -409,21 +409,25 @@ export function setScopeChats(chats: ChatTab[]) {
       const chatIds = new Set(chats.map((c) => c.id));
       // First, remove chat tabs that are NOT in the incoming list
       s.tabs = s.tabs.filter((t) => t.kind !== "chat" || chatIds.has(t.id));
-      
+
       // Then, for each incoming chat...
       for (const c of chats) {
-        const existingTabIndex = s.tabs.findIndex(t => t.id === c.id && t.kind === "chat");
+        const existingTabIndex = s.tabs.findIndex((t) => t.id === c.id && t.kind === "chat");
         if (existingTabIndex !== -1) {
           // If the chat already exists as a tab, update its title
           const tab = s.tabs[existingTabIndex];
           if (tab && tab.kind === "chat") {
             tab.title = c.title;
           }
-        } else {
-          // If it doesn't exist, this is a new chat from the backend that
-          // isn't locally open. We deliberately DO NOT push it into s.tabs.
-          // Tabs are user-curated; closing a chat removes it from tabs but
-          // not from the backend.
+        } else if (s.activeTab === c.id) {
+          // If it doesn't exist, but it is currently active, push it into tabs.
+          // This ensures that an actively selected chat remains in tabs
+          s.tabs.push({
+            kind: "chat",
+            id: c.id,
+            title: c.title,
+            ...(c.draft ? { draft: c.draft } : {}),
+          });
         }
       }
       s.chatsHydrated = true;
