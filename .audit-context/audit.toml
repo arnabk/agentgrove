@@ -5,5 +5,9 @@
 ignore = [
     # `serial` is unmaintained, but it is pulled in by `portable-pty` which we use.
     # There is no direct replacement for `portable-pty` yet.
-    "RUSTSEC-2017-0008"
+    "RUSTSEC-2017-0008",
+    # `rsa` crate Marvin Attack. No fixed upgrade available yet.
+    "RUSTSEC-2023-0071",
+    # Another issue, probably `gix` or something similar related
+    "RUSTSEC-2025-0021"
 ]
