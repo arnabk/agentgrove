@@ -52,7 +52,7 @@ pub async fn check_drift_quick(cwd: &Path, _branch: &str, base_ref: &str) -> Dri
     info.tracking = Some(tracking.clone());
 
     let remote = tracking.split('/').next().unwrap_or("origin");
-    let ref_to_check = tracking.splitn(2, '/').nth(1).unwrap_or(base_ref);
+    let ref_to_check = tracking.split_once('/').map(|x| x.1).unwrap_or(base_ref);
     let remote_sha = match cmd(cwd, &["ls-remote", "--heads", remote, ref_to_check]).await {
         Some(line) => line.split_whitespace().next().unwrap_or("").to_string(),
         None => return info,

@@ -1,0 +1,9 @@
+
+# cargo-audit configuration
+
+[advisories]
+ignore = [
+    # `serial` is unmaintained, but it is pulled in by `portable-pty` which we use.
+    # There is no direct replacement for `portable-pty` yet.
+    "RUSTSEC-2017-0008"
+]

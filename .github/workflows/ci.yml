@@ -85,14 +85,9 @@ jobs:
   security:
     name: security audit
     runs-on: ubuntu-latest
-    # Advisory-only: upstream crate vulnerabilities are tracked
-    # but don't block CI. We fix them as patches land; blocking
-    # every merge on a transitive dep advisory we can't action
-    # wastes contributor time.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo install --locked cargo-audit
-      - run: cargo audit
+      - run: cargo audit --ignore RUSTSEC-2017-0008
