@@ -14,7 +14,14 @@
 
 import { createStore, produce } from "solid-js/store";
 import { createSignal } from "solid-js";
-import { api, type Project, type Theme, type UserSettings, type Worktree, type ProviderDescriptor } from "../api/client";
+import {
+  api,
+  type Project,
+  type Theme,
+  type UserSettings,
+  type Worktree,
+  type ProviderDescriptor,
+} from "../api/client";
 
 /** Per-scope cap for chats (max 5 per project/worktree scope). */
 export const MAX_PER_PROJECT = 5;

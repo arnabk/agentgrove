@@ -76,7 +76,7 @@ export default function NewChatDialog(props: Props) {
       // Since we had a cached version, optimistically hide the loader.
       setLoadingProviders(false);
     }
-    
+
     // Always fetch fresh in the background to catch any recent changes.
     void (async () => {
       try {

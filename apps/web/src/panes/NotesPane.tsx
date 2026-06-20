@@ -177,7 +177,7 @@ export default function NotesPane() {
         const anchor = editor?.state.selection.anchor ?? 0;
         const head = editor?.state.selection.head ?? 0;
         editor?.commands.setContent(newBody, false);
-        
+
         // Clamp to the new document length so an out-of-bounds
         // anchor (remote edit shortened the doc) doesn't throw.
         if (editor) {
