@@ -978,10 +978,13 @@ export default function LeftRail() {
                     </div>
                   </Show>
 
-                  {/* Helper hint when project is a git repo without a remote. */}
+                  {/* Helper hint when project is a git repo without a remote.
+                      Indented to align under the project name so it reads as a
+                      message for THIS project row, not the whole rail. */}
                   <Show when={open() && p.is_git && !p.has_remote && !isWorktree}>
-                    <p class="px-2 mt-2 text-[0.73em] text-fg-subtle italic">
-                      Add a git remote to enable worktrees.
+                    <p class="pl-7 pr-2 mt-1 text-[0.73em] text-fg-subtle italic">
+                      Add a git remote to <span class="font-medium">{p.name}</span> to enable
+                      worktrees.
                     </p>
                   </Show>
 
