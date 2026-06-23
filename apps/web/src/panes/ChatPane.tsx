@@ -899,10 +899,29 @@ export default function ChatPane() {
     try {
       await api.stopChat(id);
     } catch (e) {
-      // 404 is benign — race between user click and the turn
-      // ending on its own. Anything else gets surfaced.
       const msg = e instanceof Error ? e.message : String(e);
-      if (!msg.includes("404")) setErr(msg);
+      if (msg.includes("404")) {
+        // 404 = no in-flight turn. If the tail prompt is still
+        // stuck (0 events, no terminal), the agent crashed or
+        // never ran. Force-append a synthetic error so the UI
+        // unsticks and the user can send a new message.
+        setChatStore(
+          produce((s) => {
+            const tail = s.prompts[s.prompts.length - 1];
+            if (!tail) return;
+            const last = tail.events[tail.events.length - 1];
+            if (!last || (last.type !== "done" && last.type !== "error")) {
+              tail.events.push({
+                type: "error",
+                message: "Turn did not complete — the agent may have crashed or timed out.",
+              });
+            }
+          }),
+        );
+        void reconcileChat();
+      } else {
+        setErr(msg);
+      }
     }
   }
 

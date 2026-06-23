@@ -1202,7 +1202,34 @@ pub async fn stop_turn(State(state): State<AppState>, Path(id): Path<String>) ->
             t.cancel();
             StatusCode::NO_CONTENT
         }
-        None => StatusCode::NOT_FOUND,
+        None => {
+            // No in-flight turn. Check if the tail prompt is stuck
+            // (0 events / no terminal event) and write a synthetic
+            // error so the chat doesn't stay permanently "busy" on
+            // reload.
+            if let Ok(prompts) = state.chat_store.list_prompts(&id, None, None).await {
+                if let Some(tail) = prompts.last() {
+                    let events: Vec<serde_json::Value> =
+                        tail.events.as_array().cloned().unwrap_or_default();
+                    let has_terminal = events.iter().any(|e| {
+                        e.get("type")
+                            .and_then(|t| t.as_str())
+                            .map(|t| t == "done" || t == "error")
+                            .unwrap_or(false)
+                    });
+                    if !has_terminal {
+                        let mut patched = events;
+                        patched.push(serde_json::json!({
+                            "type": "error",
+                            "message": "Turn did not complete — the agent may have crashed or timed out."
+                        }));
+                        let patched_json = serde_json::Value::Array(patched);
+                        let _ = state.chat_store.write_events(&tail.id, &patched_json).await;
+                    }
+                }
+            }
+            StatusCode::NOT_FOUND
+        }
     };
 
     // After cancelling the in-flight turn, make sure a queued backlog
