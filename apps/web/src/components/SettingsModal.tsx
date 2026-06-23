@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createSignal, createMemo, onCleanup, onMount } from "solid-js";
 import { produce } from "solid-js/store";
 import { api, type PromptTemplate, type ProviderDescriptor } from "../api/client";
 import {
@@ -150,6 +150,42 @@ function AppearanceTab() {
     setSize(v);
     await saveSettings({ font_size: v });
   }
+  
+  const [defaultProvider, setDefaultProvider] = createSignal(state.settings.default_provider || "");
+  const [defaultModel, setDefaultModel] = createSignal(state.settings.default_model || "");
+
+  const providerOptions = createMemo(() => {
+    const list = state.providers.filter((p) => p.id !== "fake");
+    const sorted = [...list].sort((a, b) => Number(b.available) - Number(a.available));
+    return sorted.map((p) => ({ value: p.id, label: p.label }));
+  });
+
+  const modelOptions = createMemo(() => {
+    const pid = defaultProvider();
+    if (!pid) return [];
+    const p = state.providers.find((p) => p.id === pid);
+    if (!p) return [];
+    return p.models.map((m) => ({ value: m, label: m }));
+  });
+
+  async function onDefaultProvider(v: string) {
+    setDefaultProvider(v);
+    const p = state.providers.find((p) => p.id === v);
+    let nextModel = "";
+    if (p) {
+       nextModel = p.default_model;
+       setDefaultModel(nextModel);
+    } else {
+       setDefaultModel("");
+    }
+    await saveSettings({ default_provider: v, default_model: nextModel });
+  }
+
+  async function onDefaultModel(v: string) {
+    setDefaultModel(v);
+    await saveSettings({ default_model: v });
+  }
+
   async function reset() {
     await saveSettings({
       theme: "dark-default",
@@ -195,27 +231,39 @@ function AppearanceTab() {
         />
       </Row>
 
-      <Row label="Font size" hint="Base size for UI text, in pixels.">
-        <div class="flex items-center gap-2">
-          <input
-            type="range"
-            min={FONT_SIZES[0]}
-            max={FONT_SIZES[FONT_SIZES.length - 1]}
-            step="1"
-            value={size()}
-            onInput={(e) => onSize(Number(e.currentTarget.value))}
-            class="flex-1 accent-[var(--ag-accent)]"
-            data-testid="settings-font-size"
-          />
-          <span class="ag-chip font-mono" data-testid="settings-font-size-value">
-            {size()}px
-          </span>
-        </div>
+      <Row label="Font size" hint="Base size. Everything scales proportionally.">
+        <Select
+          value={size().toString()}
+          onChange={(v) => onSize(Number(v))}
+          ariaLabel="Font size"
+          testId="settings-font-size"
+          options={FONT_SIZES.map(String).map((v) => ({ value: v, label: v }))}
+        />
+      </Row>
+
+      <Row label="Default Provider" hint="Default provider for new chats.">
+        <Select
+          value={defaultProvider()}
+          onChange={(v) => onDefaultProvider(v)}
+          ariaLabel="Default Provider"
+          testId="settings-default-provider"
+          options={providerOptions()}
+        />
+      </Row>
+
+      <Row label="Default Model" hint="Default model for new chats.">
+        <Select
+          value={defaultModel()}
+          onChange={(v) => onDefaultModel(v)}
+          ariaLabel="Default Model"
+          testId="settings-default-model"
+          options={modelOptions()}
+        />
       </Row>
 
       <div class="pt-2">
-        <button class="ag-btn ag-btn-ghost" onClick={reset} data-testid="settings-reset">
-          Reset appearance to defaults
+        <button type="button" class="ag-btn ag-btn-ghost ag-btn-sm text-danger" onClick={reset}>
+          Reset appearance
         </button>
       </div>
     </div>

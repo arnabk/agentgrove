@@ -36,6 +36,12 @@ pub struct Settings {
     /// Base UI font size in px.
     #[serde(default)]
     pub font_size: Option<u32>,
+    /// Default provider for new chats.
+    #[serde(default)]
+    pub default_provider: Option<String>,
+    /// Default model for new chats.
+    #[serde(default)]
+    pub default_model: Option<String>,
     /// User-defined reusable prompt templates. Order is preserved so
     /// the FE picker shows them as the user arranged them.
     #[serde(default)]

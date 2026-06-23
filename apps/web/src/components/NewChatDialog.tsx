@@ -68,15 +68,24 @@ export default function NewChatDialog(props: Props) {
       const userVisible = state.providers.filter((p) => p.id !== "fake");
       const sorted = [...userVisible].sort((a, b) => Number(b.available) - Number(a.available));
       setProviders(sorted);
-      const firstAvailable = sorted.find((p) => p.available);
-      if (firstAvailable) {
-        setProviderId(firstAvailable.id);
-        setModel(firstAvailable.default_model);
+      
+      const defaultProviderId = state.settings.default_provider;
+      const defaultProvider = defaultProviderId ? sorted.find((p) => p.id === defaultProviderId) : undefined;
+      const targetProvider = defaultProvider || sorted.find((p) => p.available);
+      
+      if (targetProvider) {
+        setProviderId(targetProvider.id);
+        const defaultModelId = state.settings.default_model;
+        if (defaultProviderId && targetProvider.id === defaultProviderId && defaultModelId) {
+          setModel(defaultModelId);
+        } else {
+          setModel(targetProvider.default_model);
+        }
       }
       // Since we had a cached version, optimistically hide the loader.
       setLoadingProviders(false);
     }
-
+    
     // Always fetch fresh in the background to catch any recent changes.
     void (async () => {
       try {
@@ -94,10 +103,18 @@ export default function NewChatDialog(props: Props) {
         // Only update the selected model if we hadn't already set it
         // (i.e., if cache was empty) or if the current selection is no longer valid.
         if (state.providers.length === 0) {
-          const firstAvailable = sorted.find((p) => p.available);
-          if (firstAvailable) {
-            setProviderId(firstAvailable.id);
-            setModel(firstAvailable.default_model);
+          const defaultProviderId = state.settings.default_provider;
+          const defaultProvider = defaultProviderId ? sorted.find((p) => p.id === defaultProviderId) : undefined;
+          const targetProvider = defaultProvider || sorted.find((p) => p.available);
+          
+          if (targetProvider) {
+            setProviderId(targetProvider.id);
+            const defaultModelId = state.settings.default_model;
+            if (defaultProviderId && targetProvider.id === defaultProviderId && defaultModelId) {
+              setModel(defaultModelId);
+            } else {
+              setModel(targetProvider.default_model);
+            }
           }
         }
       } catch (e) {

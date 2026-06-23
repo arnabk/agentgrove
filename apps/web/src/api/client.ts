@@ -695,6 +695,8 @@ export interface UserSettings {
   ui_font?: string;
   mono_font?: string;
   font_size?: number;
+  default_provider?: string;
+  default_model?: string;
   /** User-defined reusable prompt templates. */
   prompts?: PromptTemplate[];
   /** Global default: auto-approve every agent tool invocation
