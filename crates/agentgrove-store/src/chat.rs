@@ -165,7 +165,7 @@ impl ChatRepo {
         let rows: Vec<ChatRowTuple> = sqlx::query_as(
             "SELECT id, project_id, worktree_id, title, provider, model, effort, \
              session_id, created_at, updated_at FROM chats \
-             WHERE project_id = ?1 ORDER BY created_at ASC, id ASC",
+             WHERE project_id = ?1 AND deleted_at IS NULL ORDER BY created_at ASC, id ASC",
         )
         .bind(project_id)
         .fetch_all(&self.pool)
@@ -178,7 +178,7 @@ impl ChatRepo {
         let rows: Vec<ChatRowTuple> = sqlx::query_as(
             "SELECT id, project_id, worktree_id, title, provider, model, effort, \
              session_id, created_at, updated_at FROM chats \
-             WHERE worktree_id = ?1 ORDER BY created_at ASC, id ASC",
+             WHERE worktree_id = ?1 AND deleted_at IS NULL ORDER BY created_at ASC, id ASC",
         )
         .bind(worktree_id)
         .fetch_all(&self.pool)
@@ -192,7 +192,7 @@ impl ChatRepo {
         let rows: Vec<ChatRowTuple> = sqlx::query_as(
             "SELECT id, project_id, worktree_id, title, provider, model, effort, \
              session_id, created_at, updated_at FROM chats \
-             ORDER BY created_at ASC, id ASC",
+             WHERE deleted_at IS NULL ORDER BY created_at ASC, id ASC",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -264,14 +264,61 @@ impl ChatRepo {
         self.get(id).await
     }
 
-    /// Delete a chat (cascades to prompts + queue items via FK).
-    /// Returns whether a row was removed.
+    /// Soft-delete a chat (set deleted_at timestamp).
+    /// Returns whether a row was updated.
     pub async fn delete(&self, id: &str) -> Result<bool, ChatError> {
-        let res = sqlx::query("DELETE FROM chats WHERE id = ?1")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let res =
+            sqlx::query("UPDATE chats SET deleted_at = ?1 WHERE id = ?2 AND deleted_at IS NULL")
+                .bind(now_ms)
+                .bind(id)
+                .execute(&self.pool)
+                .await?;
         Ok(res.rows_affected() == 1)
+    }
+
+    /// List soft-deleted chats, optionally filtered by project_id and
+    /// title substring. Most recently deleted first.
+    pub async fn list_deleted(
+        &self,
+        project_id: Option<&str>,
+        q: Option<&str>,
+    ) -> Result<Vec<ChatRow>, ChatError> {
+        let mut sql = String::from(
+            "SELECT id, project_id, worktree_id, title, provider, model, effort, session_id, created_at, updated_at \
+             FROM chats WHERE deleted_at IS NOT NULL",
+        );
+        if project_id.is_some() {
+            sql.push_str(" AND project_id = ?");
+        }
+        if q.is_some() {
+            sql.push_str(" AND title LIKE ?");
+        }
+        sql.push_str(" ORDER BY deleted_at DESC LIMIT 100");
+
+        let mut query = sqlx::query_as::<_, ChatRowTuple>(&sql);
+        if let Some(pid) = project_id {
+            query = query.bind(pid);
+        }
+        if let Some(search) = q {
+            query = query.bind(format!("%{search}%"));
+        }
+        let rows: Vec<ChatRowTuple> = query.fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(row_to_chat).collect())
+    }
+
+    /// Restore a soft-deleted chat (clear deleted_at).
+    pub async fn restore(&self, id: &str) -> Result<Option<ChatRow>, ChatError> {
+        let res = sqlx::query(
+            "UPDATE chats SET deleted_at = NULL WHERE id = ?1 AND deleted_at IS NOT NULL",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        if res.rows_affected() == 0 {
+            return Ok(None);
+        }
+        self.get(id).await.map(Some)
     }
 }
 

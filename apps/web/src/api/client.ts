@@ -305,6 +305,18 @@ export const api = {
       `/api/projects/${encodeURIComponent(projectId)}/worktrees/${encodeURIComponent(worktreeId)}`,
       { method: "PATCH", body: JSON.stringify({ branch }) },
     ),
+  // Chat history (soft-deleted) + restore
+  listChatHistory: (params?: { projectId?: string; q?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.projectId) qs.set("project_id", params.projectId);
+    if (params?.q) qs.set("q", params.q);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return req<Chat[]>(`/api/chats/history${suffix}`);
+  },
+  deleteChat: (chatId: string) =>
+    req<void>(`/api/chats/${encodeURIComponent(chatId)}`, { method: "DELETE" }),
+  restoreChat: (chatId: string) =>
+    req<Chat>(`/api/chats/${encodeURIComponent(chatId)}/restore`, { method: "POST" }),
   // Worktree history (soft-deleted) + restore
   listWorktreeHistory: (params?: { q?: string; projectId?: string }) => {
     const qs = new URLSearchParams();

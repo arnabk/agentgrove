@@ -31,6 +31,7 @@ import FolderPicker from "./FolderPicker";
 import NewChatDialog from "./NewChatDialog";
 import WorktreeDialog from "./WorktreeDialog";
 import WorktreeHistoryDialog from "./WorktreeHistoryDialog";
+import ChatHistoryDialog from "./ChatHistoryDialog";
 import RenameWorktreeDialog from "./RenameWorktreeDialog";
 import ProjectSettingsDialog from "./ProjectSettingsDialog";
 
@@ -86,6 +87,7 @@ export default function LeftRail() {
   const [wtFor, setWtFor] = createSignal<string | null>(null);
   // Active project id whose history dialog is open; null when closed.
   const [historyFor, setHistoryFor] = createSignal<string | null>(null);
+  const [chatHistoryFor, setChatHistoryFor] = createSignal<string | null>(null);
   // Active rename target (projectId + worktreeId + currentBranch) or
   // null when the rename dialog is closed.
   const [renameFor, setRenameFor] = createSignal<{
@@ -640,6 +642,18 @@ export default function LeftRail() {
                                 <HistoryIcon /> Worktree history
                               </button>
                             </Show>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                              onClick={() => {
+                                setOpenMenuFor(null);
+                                setChatHistoryFor(p.id);
+                              }}
+                              data-testid={`chat-history-${p.id}`}
+                            >
+                              <HistoryIcon /> Chat history
+                            </button>
                             <Show when={p.is_git}>
                               <button
                                 type="button"
@@ -1118,6 +1132,10 @@ export default function LeftRail() {
             onRestored={() => void refreshWorktreesForProject(pid)}
           />
         )}
+      </Show>
+
+      <Show when={chatHistoryFor()} keyed>
+        {(pid) => <ChatHistoryDialog projectId={pid} onClose={() => setChatHistoryFor(null)} />}
       </Show>
 
       <Show when={renameFor()} keyed>

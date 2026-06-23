@@ -743,6 +743,82 @@ pub async fn get_one(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
+/// `DELETE /api/chats/:id` — soft-delete a chat.
+pub async fn delete_chat(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, StatusCode> {
+    persist_chat_delete(&state, &id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /api/chats/history` — list soft-deleted chats.
+/// Optional query params: `project_id`, `q` (title search).
+#[derive(Debug, Deserialize)]
+pub struct ChatHistoryQuery {
+    pub project_id: Option<String>,
+    pub q: Option<String>,
+}
+
+pub async fn chat_history(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<ChatHistoryQuery>,
+) -> Result<Json<Vec<ChatRecord>>, StatusCode> {
+    let rows = state
+        .chat_store
+        .list_deleted(q.project_id.as_deref(), q.q.as_deref())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let out: Vec<ChatRecord> = rows
+        .into_iter()
+        .map(|r| ChatRecord {
+            id: r.id,
+            project_id: r.project_id,
+            worktree_id: r.worktree_id,
+            title: r.title,
+            provider: r.provider,
+            model: r.model,
+            created_at: r.created_at,
+            prompts: Vec::new(),
+            session_id: r.session_id,
+            effort: r.effort,
+        })
+        .collect();
+    Ok(Json(out))
+}
+
+/// `POST /api/chats/:id/restore` — restore a soft-deleted chat.
+pub async fn restore_chat(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<ChatRecord>, (StatusCode, String)> {
+    let row = state
+        .chat_store
+        .restore(&id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")))?
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            format!("chat {id} not found or not deleted"),
+        ))?;
+    let rec = ChatRecord {
+        id: row.id,
+        project_id: row.project_id,
+        worktree_id: row.worktree_id,
+        title: row.title,
+        provider: row.provider,
+        model: row.model,
+        created_at: row.created_at,
+        prompts: Vec::new(),
+        session_id: row.session_id,
+        effort: row.effort,
+    };
+    state.chats.write().await.ingest_chat(rec.clone());
+    Ok(Json(rec))
+}
+
 /// Body for `PATCH /api/chats/:id`. Each field is optional; unset
 /// fields leave the corresponding chat property unchanged.
 #[derive(Debug, Deserialize)]

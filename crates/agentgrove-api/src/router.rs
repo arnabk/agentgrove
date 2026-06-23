@@ -61,7 +61,14 @@ pub fn build_router(state: AppState) -> Router {
             "/api/projects/:id/chats",
             get(chats::list_for_project_handler).post(chats::create_for_project_handler),
         )
-        .route("/api/chats/:id", get(chats::get_one).patch(chats::patch))
+        .route(
+            "/api/chats/:id",
+            get(chats::get_one)
+                .patch(chats::patch)
+                .delete(chats::delete_chat),
+        )
+        .route("/api/chats/history", get(chats::chat_history))
+        .route("/api/chats/:id/restore", post(chats::restore_chat))
         .route(
             "/api/chats/:id/prompts",
             get(chats::list_prompts).post(chats::add_prompt),
