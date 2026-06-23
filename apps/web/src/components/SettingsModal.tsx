@@ -150,41 +150,6 @@ function AppearanceTab() {
     setSize(v);
     await saveSettings({ font_size: v });
   }
-  
-  const [defaultProvider, setDefaultProvider] = createSignal(state.settings.default_provider || "");
-  const [defaultModel, setDefaultModel] = createSignal(state.settings.default_model || "");
-
-  const providerOptions = createMemo(() => {
-    const list = state.providers.filter((p) => p.id !== "fake");
-    const sorted = [...list].sort((a, b) => Number(b.available) - Number(a.available));
-    return sorted.map((p) => ({ value: p.id, label: p.label }));
-  });
-
-  const modelOptions = createMemo(() => {
-    const pid = defaultProvider();
-    if (!pid) return [];
-    const p = state.providers.find((p) => p.id === pid);
-    if (!p) return [];
-    return p.models.map((m) => ({ value: m, label: m }));
-  });
-
-  async function onDefaultProvider(v: string) {
-    setDefaultProvider(v);
-    const p = state.providers.find((p) => p.id === v);
-    let nextModel = "";
-    if (p) {
-       nextModel = p.default_model;
-       setDefaultModel(nextModel);
-    } else {
-       setDefaultModel("");
-    }
-    await saveSettings({ default_provider: v, default_model: nextModel });
-  }
-
-  async function onDefaultModel(v: string) {
-    setDefaultModel(v);
-    await saveSettings({ default_model: v });
-  }
 
   async function reset() {
     await saveSettings({
@@ -238,26 +203,6 @@ function AppearanceTab() {
           ariaLabel="Font size"
           testId="settings-font-size"
           options={FONT_SIZES.map(String).map((v) => ({ value: v, label: v }))}
-        />
-      </Row>
-
-      <Row label="Default Provider" hint="Default provider for new chats.">
-        <Select
-          value={defaultProvider()}
-          onChange={(v) => onDefaultProvider(v)}
-          ariaLabel="Default Provider"
-          testId="settings-default-provider"
-          options={providerOptions()}
-        />
-      </Row>
-
-      <Row label="Default Model" hint="Default model for new chats.">
-        <Select
-          value={defaultModel()}
-          onChange={(v) => onDefaultModel(v)}
-          ariaLabel="Default Model"
-          testId="settings-default-model"
-          options={modelOptions()}
         />
       </Row>
 
@@ -718,6 +663,41 @@ function ProvidersTab() {
   const [providers, setProviders] = createSignal<ProviderDescriptor[]>(cachedProviders);
   const [loading, setLoading] = createSignal(cachedProviders.length === 0);
 
+  const [defaultProvider, setDefaultProvider] = createSignal(state.settings.default_provider || "");
+  const [defaultModel, setDefaultModel] = createSignal(state.settings.default_model || "");
+
+  const providerOptions = createMemo(() => {
+    const list = state.providers.filter((p) => p.id !== "fake");
+    const sorted = [...list].sort((a, b) => Number(b.available) - Number(a.available));
+    return sorted.map((p) => ({ value: p.id, label: p.label }));
+  });
+
+  const modelOptions = createMemo(() => {
+    const pid = defaultProvider();
+    if (!pid) return [];
+    const p = state.providers.find((p) => p.id === pid);
+    if (!p) return [];
+    return p.models.map((m) => ({ value: m, label: m }));
+  });
+
+  async function onDefaultProvider(v: string) {
+    setDefaultProvider(v);
+    const p = state.providers.find((p) => p.id === v);
+    let nextModel = "";
+    if (p) {
+      nextModel = p.default_model;
+      setDefaultModel(nextModel);
+    } else {
+      setDefaultModel("");
+    }
+    await saveSettings({ default_provider: v, default_model: nextModel });
+  }
+
+  async function onDefaultModel(v: string) {
+    setDefaultModel(v);
+    await saveSettings({ default_model: v });
+  }
+
   onMount(() => {
     void (async () => {
       try {
@@ -737,6 +717,31 @@ function ProvidersTab() {
 
   return (
     <div class="space-y-6" data-testid="settings-providers-tab">
+      <section class="space-y-3 pb-4 border-b border-border">
+        <h3 class="text-[13.5px] font-semibold tracking-tight">Default selection</h3>
+        <p class="text-[12px] text-fg-muted">
+          These are auto-selected when creating a new chat. They don't affect existing chats.
+        </p>
+        <Row label="Default Provider">
+          <Select
+            value={defaultProvider()}
+            onChange={(v) => onDefaultProvider(v)}
+            ariaLabel="Default Provider"
+            testId="settings-default-provider"
+            options={providerOptions()}
+          />
+        </Row>
+        <Row label="Default Model">
+          <Select
+            value={defaultModel()}
+            onChange={(v) => onDefaultModel(v)}
+            ariaLabel="Default Model"
+            testId="settings-default-model"
+            options={modelOptions()}
+          />
+        </Row>
+      </section>
+
       <Show
         when={providers().length > 0}
         fallback={
