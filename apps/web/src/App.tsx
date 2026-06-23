@@ -358,7 +358,7 @@ function LoadingScreen() {
   return (
     <div class="min-h-screen flex flex-col items-center justify-center bg-bg gap-6">
       {/* Animated logo */}
-      <div class="relative w-16 h-16">
+      <div class="relative w-24 h-24">
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -382,8 +382,8 @@ function LoadingScreen() {
         </svg>
       </div>
       <div class="flex flex-col items-center gap-2">
-        <span class="text-[15px] font-semibold text-fg tracking-tight">AgentGrove</span>
-        <div class="flex items-center gap-2 text-fg-muted text-[12px]">
+        <span class="text-[18px] font-semibold text-fg tracking-tight">AgentGrove</span>
+        <div class="flex items-center gap-2 text-fg-muted text-[13px]">
           <span class="inline-flex gap-1 items-end h-3">
             <span class="w-1 h-1 rounded-full bg-accent ag-bounce" style="animation-delay:0ms" />
             <span class="w-1 h-1 rounded-full bg-accent ag-bounce" style="animation-delay:160ms" />
