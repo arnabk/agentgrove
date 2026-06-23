@@ -321,10 +321,10 @@ function AgentsTab() {
                 data-testid="agents-auto-approve-input"
               />
               <span
-                class="inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform"
+                class="inline-block h-3 w-3 rounded-full bg-white shadow transition-transform"
                 classList={{
                   "translate-x-5": enabled(),
-                  "translate-x-0.5": !enabled(),
+                  "translate-x-1": !enabled(),
                 }}
               />
             </span>
@@ -335,8 +335,7 @@ function AgentsTab() {
   );
 }
 
-/** Per-snapshot DB backups. Lists snapshots taken by the BE on
- *  startup + before every migration, plus any manual snapshots the
+/** List of database snapshots with click-to-restore. Shows size + age +
  *  user has triggered from this tab. Restore is intentionally NOT a
  *  click-to-restore action because SQLite WAL is in flight while
  *  the server runs and overwriting live files would corrupt both
