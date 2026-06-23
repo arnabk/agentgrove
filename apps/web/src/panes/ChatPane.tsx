@@ -1949,7 +1949,6 @@ function PromptRow(props: {
                 fallback={
                   <div class="flex flex-col gap-1.5" data-testid={`working-${props.prompt.id}`}>
                     <span class="flex items-center gap-2 text-fg-subtle">
-                      {/* Animated bouncing dots. */}
                       <span class="inline-flex gap-1 items-end h-3">
                         <span
                           class="w-1.5 h-1.5 rounded-full bg-accent ag-bounce"
@@ -1964,15 +1963,11 @@ function PromptRow(props: {
                           style="animation-delay:320ms"
                         />
                       </span>
-                      {/* Shimmering, cycling status phrase + elapsed. */}
                       <em class="ag-shimmer not-italic font-medium">{phrase()}…</em>
                       <Show when={elapsed() >= 1}>
                         <span class="text-[11px] tabular-nums opacity-70">{elapsed()}s</span>
                       </Show>
                     </span>
-                    {/* When nothing has streamed for a few seconds the
-                        model is almost certainly non-streaming — tell the
-                        user so the silence reads as expected, not stuck. */}
                     <Show when={looksNonStreaming()}>
                       <span
                         class="text-[11.5px] text-fg-subtle inline-flex items-center gap-1.5"
@@ -1986,6 +1981,28 @@ function PromptRow(props: {
                 }
               >
                 <Markdown source={assistantText()} class="ag-prose-chat" />
+                {/* While the agent is still generating (no terminal
+                    event), show a small inline indicator after the
+                    streamed text so the user knows more is coming. */}
+                <Show when={isPending()}>
+                  <span class="inline-flex items-center gap-1.5 mt-2 text-fg-subtle text-[11.5px]">
+                    <span class="inline-flex gap-0.5 items-end h-2.5">
+                      <span
+                        class="w-1 h-1 rounded-full bg-accent/60 ag-bounce"
+                        style="animation-delay:0ms"
+                      />
+                      <span
+                        class="w-1 h-1 rounded-full bg-accent/60 ag-bounce"
+                        style="animation-delay:160ms"
+                      />
+                      <span
+                        class="w-1 h-1 rounded-full bg-accent/60 ag-bounce"
+                        style="animation-delay:320ms"
+                      />
+                    </span>
+                    <em class="ag-shimmer not-italic opacity-70">generating…</em>
+                  </span>
+                </Show>
               </Show>
             </div>
             {/* Only offer Copy when there's actual text to copy — a
