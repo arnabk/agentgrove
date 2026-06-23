@@ -31,16 +31,21 @@ const ChangesPanel = lazy(() => import("./components/ChangesPanel"));
 import {
   activeTab,
   bootstrap,
+  busyChats,
   changesScope,
   currentScope,
   isSidebarOpen,
   routeError,
+  selectedChatId,
+  setActiveChat,
   setRouteError,
   setSettingsOpen,
   setTheme,
   state,
   toggleSidebar,
 } from "./stores/app";
+import ToastHost, { pushToast } from "./components/Toast";
+import { playNotificationSound } from "./lib/notificationSound";
 
 export default function App() {
   // Left rail collapse state (persisted to localStorage).
@@ -136,6 +141,34 @@ export default function App() {
     if (!routeError()) return;
     const t = setTimeout(() => setRouteError(null), 4000);
     onCleanup(() => clearTimeout(t));
+  });
+
+  // Notify when a background chat finishes its agent turn.
+  // Tracks busyChats transitions: when a chat id leaves the set
+  // AND it's not the currently active chat, fire a toast + sound.
+  let prevBusy = new Set<string>();
+  createEffect(() => {
+    const curr = busyChats();
+    const active = selectedChatId();
+    for (const id of prevBusy) {
+      if (!curr.has(id) && id !== active) {
+        const tab = currentScope()?.tabs.find((t) => t.kind === "chat" && t.id === id) as
+          | { title: string; id: string }
+          | undefined;
+        const title = tab?.title ?? "Chat";
+        playNotificationSound();
+        pushToast({
+          title: "Response ready",
+          message: `${title} has finished.`,
+          action: {
+            label: "→ Go to chat",
+            onClick: () => setActiveChat(id),
+          },
+          timeoutMs: 8000,
+        });
+      }
+    }
+    prevBusy = new Set(curr);
   });
 
   return (
@@ -307,6 +340,7 @@ export default function App() {
       </Show>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <DialogHost />
+      <ToastHost />
     </>
   );
 }

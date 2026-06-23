@@ -71,6 +71,7 @@ export default [
         __filename: "readonly",
         requestAnimationFrame: "readonly",
         cancelAnimationFrame: "readonly",
+        AudioContext: "readonly",
       },
     },
     plugins: {

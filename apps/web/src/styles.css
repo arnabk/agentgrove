@@ -987,6 +987,17 @@ textarea::placeholder {
   animation: ag-shimmer-kf 2.2s linear infinite;
 }
 
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
 /* Respect reduced-motion: drop the looping animations. */
 @media (prefers-reduced-motion: reduce) {
   .ag-bounce,
