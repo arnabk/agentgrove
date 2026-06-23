@@ -1,6 +1,7 @@
 import { render } from "solid-js/web";
 import { Route, Router } from "@solidjs/router";
 import App from "./App";
+import ToastHost from "./components/Toast";
 import { applyCachedZoom } from "./stores/app";
 import "./styles.css";
 
@@ -27,9 +28,15 @@ applyCachedZoom();
 //   ?file=<urlencoded absolute path>          → active editor file
 render(
   () => (
-    <Router>
-      <Route path="*" component={App} />
-    </Router>
+    <>
+      <Router>
+        <Route path="*" component={App} />
+      </Router>
+      {/* ToastHost lives OUTSIDE the router so route transitions
+          never unmount / re-create it. Toasts persist across scope
+          switches and page navigations. */}
+      <ToastHost />
+    </>
   ),
   root,
 );

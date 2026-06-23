@@ -987,14 +987,12 @@ textarea::placeholder {
   animation: ag-shimmer-kf 2.2s linear infinite;
 }
 
-@keyframes slideInRight {
+@keyframes ag-toast-progress {
   from {
-    transform: translateX(100%);
-    opacity: 0;
+    transform: scaleX(1);
   }
   to {
-    transform: translateX(0);
-    opacity: 1;
+    transform: scaleX(0);
   }
 }
 

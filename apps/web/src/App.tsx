@@ -44,7 +44,7 @@ import {
   state,
   toggleSidebar,
 } from "./stores/app";
-import ToastHost, { pushToast } from "./components/Toast";
+import { pushToast } from "./components/Toast";
 import { playNotificationSound } from "./lib/notificationSound";
 
 export default function App() {
@@ -146,20 +146,30 @@ export default function App() {
   // Notify when a background chat finishes its agent turn.
   // Tracks busyChats transitions: when a chat id leaves the set
   // AND it's not the currently active chat, fire a toast + sound.
+  // We snapshot prevBusy outside the effect so a scope switch
+  // (which may clear + repopulate busyChats) doesn't cause false
+  // notifications — only genuine busy→idle transitions fire.
   let prevBusy = new Set<string>();
   createEffect(() => {
     const curr = busyChats();
     const active = selectedChatId();
+    // Skip the very first run (bootstrap) so we don't fire for
+    // chats that were already idle when the page loaded.
+    if (prevBusy.size === 0 && curr.size === 0) {
+      prevBusy = new Set(curr);
+      return;
+    }
     for (const id of prevBusy) {
       if (!curr.has(id) && id !== active) {
-        const tab = currentScope()?.tabs.find((t) => t.kind === "chat" && t.id === id) as
+        const scope = currentScope();
+        const tab = scope?.tabs.find((t) => t.kind === "chat" && t.id === id) as
           | { title: string; id: string }
           | undefined;
-        const title = tab?.title ?? "Chat";
+        if (!tab) continue;
         playNotificationSound();
         pushToast({
           title: "Response ready",
-          message: `${title} has finished.`,
+          message: `${tab.title} has finished.`,
           action: {
             label: "→ Go to chat",
             onClick: () => setActiveChat(id),
@@ -340,7 +350,6 @@ export default function App() {
       </Show>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <DialogHost />
-      <ToastHost />
     </>
   );
 }
