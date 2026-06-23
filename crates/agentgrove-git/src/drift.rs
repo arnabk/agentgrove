@@ -119,6 +119,12 @@ pub struct PrInfo {
     pub url: String,
     /// Which forge CLI provided this ("gh", "glab", …).
     pub source: String,
+    /// Review decision: "approved", "changes_requested", "review_required", or null.
+    pub review_decision: Option<String>,
+    /// CI checks rollup: "success", "pending", "failure", or null.
+    pub checks_status: Option<String>,
+    /// Whether the PR is mergeable (no conflicts, checks pass, approved).
+    pub mergeable: Option<bool>,
 }
 
 /// Detect an open PR/MR for `branch` by trying each available forge
@@ -152,7 +158,7 @@ async fn try_gh(cwd: &Path, branch: &str) -> Option<PrInfo> {
             "--head",
             branch,
             "--json",
-            "number,title,state,url",
+            "number,title,state,url,reviewDecision,statusCheckRollup,mergeable",
             "--limit",
             "1",
         ])
@@ -165,6 +171,35 @@ async fn try_gh(cwd: &Path, branch: &str) -> Option<PrInfo> {
     }
     let prs: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).ok()?;
     let pr = prs.into_iter().next()?;
+    let review_decision = pr
+        .get("reviewDecision")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_lowercase());
+    let checks_status = pr
+        .get("statusCheckRollup")
+        .and_then(|v| v.as_array())
+        .map(|checks| {
+            if checks.iter().any(|c| {
+                c.get("conclusion")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s == "FAILURE" || s == "ERROR")
+                    .unwrap_or(false)
+            }) {
+                "failure".to_string()
+            } else if checks
+                .iter()
+                .any(|c| c.get("conclusion").and_then(|v| v.as_str()).is_none())
+            {
+                "pending".to_string()
+            } else {
+                "success".to_string()
+            }
+        });
+    let mergeable = pr
+        .get("mergeable")
+        .and_then(|v| v.as_str())
+        .map(|s| s == "MERGEABLE");
     Some(PrInfo {
         number: pr.get("number")?.as_u64()?,
         title: pr.get("title")?.as_str()?.to_string(),
@@ -175,6 +210,9 @@ async fn try_gh(cwd: &Path, branch: &str) -> Option<PrInfo> {
             .to_lowercase(),
         url: pr.get("url")?.as_str()?.to_string(),
         source: "gh".into(),
+        review_decision,
+        checks_status,
+        mergeable,
     })
 }
 
@@ -200,6 +238,9 @@ async fn try_glab(cwd: &Path, branch: &str) -> Option<PrInfo> {
             .to_lowercase(),
         url: mr.get("web_url")?.as_str()?.to_string(),
         source: "glab".into(),
+        review_decision: None,
+        checks_status: None,
+        mergeable: None,
     })
 }
 
@@ -262,6 +303,49 @@ pub async fn detect_forge(cwd: &Path) -> ForgeInfo {
         cli_installed: installed,
         install_hint: if installed { None } else { Some(hint.into()) },
     }
+}
+
+/// Merge a PR/MR via the forge CLI. Returns Ok(()) on success or an
+/// error message on failure.
+pub async fn merge_pr(cwd: &Path, pr_number: u64, source: &str) -> Result<(), String> {
+    let (cmd_name, args): (&str, Vec<String>) = match source {
+        "gh" => (
+            "gh",
+            vec![
+                "pr".into(),
+                "merge".into(),
+                pr_number.to_string(),
+                "--merge".into(),
+                "--delete-branch".into(),
+            ],
+        ),
+        "glab" => (
+            "glab",
+            vec![
+                "mr".into(),
+                "merge".into(),
+                pr_number.to_string(),
+                "--yes".into(),
+                "--remove-source-branch".into(),
+            ],
+        ),
+        other => return Err(format!("unsupported forge CLI: {other}")),
+    };
+    let out = Command::new(cmd_name)
+        .args(&args)
+        .current_dir(cwd)
+        .output()
+        .await
+        .map_err(|e| format!("failed to run {cmd_name}: {e}"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("{cmd_name} exited with {}", out.status)
+        } else {
+            stderr
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]

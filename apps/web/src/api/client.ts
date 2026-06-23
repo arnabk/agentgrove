@@ -48,6 +48,9 @@ export interface WorktreeRemoteStatus {
     state: string;
     url: string;
     source: string;
+    review_decision: string | null;
+    checks_status: string | null;
+    mergeable: boolean | null;
   } | null;
   forge: {
     forge: string;
@@ -316,6 +319,12 @@ export const api = {
     }),
   worktreeRemoteStatus: (worktreeId: string) =>
     req<WorktreeRemoteStatus>(`/api/worktrees/${encodeURIComponent(worktreeId)}/remote-status`),
+  mergePr: (worktreeId: string, prNumber: number, source: string) =>
+    req<void>(`/api/worktrees/${encodeURIComponent(worktreeId)}/merge-pr`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pr_number: prNumber, source }),
+    }),
   // Chats — worktree-scoped (legacy) + project-scoped (current).
   listChats: (worktreeId: string) =>
     req<Chat[]>(`/api/worktrees/${encodeURIComponent(worktreeId)}/chats`),

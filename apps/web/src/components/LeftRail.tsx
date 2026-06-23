@@ -785,18 +785,88 @@ export default function LeftRail() {
                                     </span>
                                   </Show>
                                   <Show when={remoteStatus[w.id]?.pr}>
-                                    <a
-                                      href={remoteStatus[w.id]!.pr!.url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      class="ag-chip ag-chip-accent !text-[0.65em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80"
-                                      title={`${remoteStatus[w.id]!.pr!.source === "glab" ? "MR" : "PR"} #${remoteStatus[w.id]!.pr!.number}: ${remoteStatus[w.id]!.pr!.title} (${remoteStatus[w.id]!.pr!.state})`}
-                                      onClick={(ev) => ev.stopPropagation()}
-                                      data-testid={`pr-${w.id}`}
-                                    >
-                                      {remoteStatus[w.id]!.pr!.source === "glab" ? "MR" : "PR"} #
-                                      {remoteStatus[w.id]!.pr!.number}
-                                    </a>
+                                    {(() => {
+                                      const pr = remoteStatus[w.id]!.pr!;
+                                      const label = pr.source === "glab" ? "MR" : "PR";
+                                      const checksOk = pr.checks_status === "success";
+                                      const approved = pr.review_decision === "approved";
+                                      const canMerge =
+                                        pr.state === "open" &&
+                                        checksOk &&
+                                        (approved || !pr.review_decision);
+                                      return (
+                                        <>
+                                          <a
+                                            href={pr.url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            class="ag-chip ag-chip-accent !text-[0.65em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80"
+                                            title={`${label} #${pr.number}: ${pr.title} (${pr.state})`}
+                                            onClick={(ev) => ev.stopPropagation()}
+                                            data-testid={`pr-${w.id}`}
+                                          >
+                                            {label} #{pr.number}
+                                          </a>
+                                          <Show when={pr.checks_status}>
+                                            <span
+                                              class="ag-chip !text-[0.6em] !py-[1px] shrink-0"
+                                              classList={{
+                                                "ag-chip-success": checksOk,
+                                                "ag-chip-warn": pr.checks_status === "pending",
+                                                "ag-chip-danger": pr.checks_status === "failure",
+                                              }}
+                                              title={`CI: ${pr.checks_status}`}
+                                            >
+                                              {checksOk
+                                                ? "✓ CI"
+                                                : pr.checks_status === "pending"
+                                                  ? "⏳ CI"
+                                                  : "✗ CI"}
+                                            </span>
+                                          </Show>
+                                          <Show when={pr.review_decision}>
+                                            <span
+                                              class="ag-chip !text-[0.6em] !py-[1px] shrink-0"
+                                              classList={{
+                                                "ag-chip-success": approved,
+                                                "ag-chip-warn":
+                                                  pr.review_decision === "review_required",
+                                                "ag-chip-danger":
+                                                  pr.review_decision === "changes_requested",
+                                              }}
+                                              title={`Review: ${pr.review_decision}`}
+                                            >
+                                              {approved
+                                                ? "✓ approved"
+                                                : pr.review_decision === "changes_requested"
+                                                  ? "✗ changes"
+                                                  : "👁 review"}
+                                            </span>
+                                          </Show>
+                                          <Show when={canMerge}>
+                                            <button
+                                              type="button"
+                                              class="ag-chip ag-chip-success !text-[0.6em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80 font-semibold"
+                                              title={`Merge ${label} #${pr.number}`}
+                                              onClick={async (ev) => {
+                                                ev.stopPropagation();
+                                                try {
+                                                  await api.mergePr(w.id, pr.number, pr.source);
+                                                  fetchDrift(w.id);
+                                                } catch (e) {
+                                                  setErr(
+                                                    e instanceof Error ? e.message : String(e),
+                                                  );
+                                                }
+                                              }}
+                                              data-testid={`merge-pr-${w.id}`}
+                                            >
+                                              ▸ Merge
+                                            </button>
+                                          </Show>
+                                        </>
+                                      );
+                                    })()}
                                   </Show>
                                   {/* Suggest installing the forge CLI if the
                                       repo is on a known forge but the CLI

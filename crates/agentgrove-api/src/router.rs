@@ -51,6 +51,7 @@ pub fn build_router(state: AppState) -> Router {
             "/api/worktrees/:id/remote-status",
             get(worktrees::remote_status),
         )
+        .route("/api/worktrees/:id/merge-pr", post(worktrees::merge_pr))
         // Chats
         .route(
             "/api/worktrees/:id/chats",

@@ -808,3 +808,25 @@ pub async fn remote_status(
         forge: Some(forge),
     }))
 }
+
+#[derive(Debug, serde::Deserialize)]
+pub struct MergePrBody {
+    pub pr_number: u64,
+    pub source: String,
+}
+
+pub async fn merge_pr(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<MergePrBody>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let wt = state
+        .worktrees
+        .get(&id)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, format!("worktree not found: {e}")))?;
+    git::merge_pr(&wt.path, body.pr_number, &body.source)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(StatusCode::NO_CONTENT)
+}
