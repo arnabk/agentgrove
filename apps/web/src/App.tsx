@@ -356,10 +356,41 @@ export default function App() {
 
 function LoadingScreen() {
   return (
-    <div class="min-h-screen flex items-center justify-center bg-bg">
-      <div class="flex items-center gap-2 text-fg-muted text-sm">
-        <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-        Loading…
+    <div class="min-h-screen flex flex-col items-center justify-center bg-bg gap-6">
+      {/* Animated logo */}
+      <div class="relative w-16 h-16">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          class="w-full h-full ag-loader-spin"
+          aria-hidden="true"
+        >
+          <path
+            d="M12 2 4 7v10l8 5 8-5V7l-8-5Z"
+            stroke="var(--ag-accent, #7c5cff)"
+            stroke-width="1.2"
+            stroke-linejoin="round"
+            class="ag-loader-stroke"
+          />
+          <path
+            d="M12 12 4 7m8 5 8-5m-8 5v10"
+            stroke="var(--ag-accent, #7c5cff)"
+            stroke-width="1.2"
+            stroke-linejoin="round"
+            opacity="0.4"
+          />
+        </svg>
+      </div>
+      <div class="flex flex-col items-center gap-2">
+        <span class="text-[15px] font-semibold text-fg tracking-tight">AgentGrove</span>
+        <div class="flex items-center gap-2 text-fg-muted text-[12px]">
+          <span class="inline-flex gap-1 items-end h-3">
+            <span class="w-1 h-1 rounded-full bg-accent ag-bounce" style="animation-delay:0ms" />
+            <span class="w-1 h-1 rounded-full bg-accent ag-bounce" style="animation-delay:160ms" />
+            <span class="w-1 h-1 rounded-full bg-accent ag-bounce" style="animation-delay:320ms" />
+          </span>
+          <span class="ag-shimmer not-italic">Starting up…</span>
+        </div>
       </div>
     </div>
   );

@@ -987,6 +987,37 @@ textarea::placeholder {
   animation: ag-shimmer-kf 2.2s linear infinite;
 }
 
+@keyframes ag-loader-spin-kf {
+  0% {
+    transform: rotateY(0deg) rotateX(15deg);
+  }
+  50% {
+    transform: rotateY(180deg) rotateX(15deg);
+  }
+  100% {
+    transform: rotateY(360deg) rotateX(15deg);
+  }
+}
+.ag-loader-spin {
+  animation: ag-loader-spin-kf 3s ease-in-out infinite;
+  transform-style: preserve-3d;
+}
+@keyframes ag-loader-stroke-kf {
+  0%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0.6;
+  }
+  50% {
+    stroke-dashoffset: 40;
+    opacity: 1;
+  }
+}
+.ag-loader-stroke {
+  stroke-dasharray: 60;
+  animation: ag-loader-stroke-kf 3s ease-in-out infinite;
+}
+
 @keyframes ag-toast-progress {
   from {
     transform: scaleX(1);
