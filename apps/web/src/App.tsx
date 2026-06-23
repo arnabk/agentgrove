@@ -1,5 +1,13 @@
-import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import ChangesPanel from "./components/ChangesPanel";
+import {
+  For,
+  Show,
+  Suspense,
+  createEffect,
+  createSignal,
+  lazy,
+  onCleanup,
+  onMount,
+} from "solid-js";
 import CommandPalette from "./components/CommandPalette";
 import { DialogHost } from "./components/dialog";
 import LeftRail from "./components/LeftRail";
@@ -14,8 +22,12 @@ import { declareMemorySource, estimateJsonBytes, recordMemoryUsage } from "./lib
 
 declareMemorySource("rail.projects", "Project + worktree state");
 import ChatPane from "./panes/ChatPane";
-import EditorPane from "./panes/EditorPane";
-import TerminalPane from "./panes/TerminalPane";
+// Heavyweight panes are code-split so their deps (xterm, CodeMirror,
+// the merge view) stay out of the initial bundle and only download
+// when the user actually opens a terminal, editor, or changes view.
+const EditorPane = lazy(() => import("./panes/EditorPane"));
+const TerminalPane = lazy(() => import("./panes/TerminalPane"));
+const ChangesPanel = lazy(() => import("./components/ChangesPanel"));
 import {
   activeTab,
   bootstrap,
@@ -262,10 +274,14 @@ export default function App() {
                             <ChatPane />
                           </Show>
                           <Show when={tab.kind === "terminal"}>
-                            <TerminalPane />
+                            <Suspense>
+                              <TerminalPane />
+                            </Suspense>
                           </Show>
                           <Show when={tab.kind === "editor"}>
-                            <EditorPane />
+                            <Suspense>
+                              <EditorPane />
+                            </Suspense>
                           </Show>
                         </div>
                       )}
@@ -285,7 +301,9 @@ export default function App() {
       </Show>
       <SettingsModal />
       <Show when={changesScope()}>
-        <ChangesPanel />
+        <Suspense>
+          <ChangesPanel />
+        </Suspense>
       </Show>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <DialogHost />

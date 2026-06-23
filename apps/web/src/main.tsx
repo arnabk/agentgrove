@@ -1,10 +1,16 @@
 import { render } from "solid-js/web";
 import { Route, Router } from "@solidjs/router";
 import App from "./App";
+import { applyCachedZoom } from "./stores/app";
 import "./styles.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");
+
+// Apply the user's cached UI zoom BEFORE the first render so the loading
+// screen doesn't paint at zoom=1 and then visibly jump once the BE
+// settings load. The authoritative value is reconciled in bootstrap().
+applyCachedZoom();
 
 // We only have one visual layout — the App shell — but we still wrap
 // it in @solidjs/router so the URL can mirror the active scope

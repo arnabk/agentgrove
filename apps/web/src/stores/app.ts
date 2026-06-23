@@ -768,6 +768,25 @@ function loadGoogleFont(family: string) {
   document.head.appendChild(link);
 }
 
+/** Apply the cached UI zoom synchronously at startup, before the first
+ *  paint. This keeps the LoadingScreen — and the rest of the shell — at
+ *  the user's real scale from frame one, instead of rendering at zoom=1
+ *  and visibly jumping once the BE settings round-trip completes. The
+ *  authoritative value is reconciled later by `applySettings`. */
+export function applyCachedZoom() {
+  try {
+    const cached = localStorage.getItem("ag-zoom");
+    if (!cached) return;
+    const zoom = Number(cached);
+    if (!Number.isFinite(zoom) || zoom <= 0) return;
+    const root = document.documentElement;
+    root.style.zoom = `${zoom}`;
+    root.style.setProperty("--ag-zoom-inv", `${1 / zoom}`);
+  } catch {
+    // localStorage unavailable — fall back to the post-bootstrap apply.
+  }
+}
+
 export function applySettings(s: UserSettings) {
   const root = document.documentElement;
   const uiFont = s.ui_font ?? DEFAULT_UI_FONT;
@@ -790,6 +809,15 @@ export function applySettings(s: UserSettings) {
   const baseSize = 15; // matches DEFAULT_FONT_SIZE
   const zoom = fontSize / baseSize;
   root.style.zoom = `${zoom}`;
+  // Cache the zoom so the next page load can apply it synchronously
+  // before first paint (see applyCachedZoom). Without this, the BE
+  // settings round-trip leaves the LoadingScreen rendered at zoom=1
+  // for ~400 ms, then the whole UI visibly jumps to the real scale.
+  try {
+    localStorage.setItem("ag-zoom", `${zoom}`);
+  } catch {
+    // localStorage unavailable (private mode, etc.) — skip caching.
+  }
   // Expose the inverse so position:fixed overlays that the Tiptap
   // drag-handle plugin places using viewport-pixel coords can cancel
   // out the root zoom (otherwise their left/top get multiplied by it).
