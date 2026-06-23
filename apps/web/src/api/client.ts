@@ -306,9 +306,10 @@ export const api = {
       { method: "PATCH", body: JSON.stringify({ branch }) },
     ),
   // Chat history (soft-deleted) + restore
-  listChatHistory: (params?: { projectId?: string; q?: string }) => {
+  listChatHistory: (params?: { projectId?: string; worktreeId?: string; q?: string }) => {
     const qs = new URLSearchParams();
     if (params?.projectId) qs.set("project_id", params.projectId);
+    if (params?.worktreeId) qs.set("worktree_id", params.worktreeId);
     if (params?.q) qs.set("q", params.q);
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     return req<Chat[]>(`/api/chats/history${suffix}`);

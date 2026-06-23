@@ -282,6 +282,7 @@ impl ChatRepo {
     pub async fn list_deleted(
         &self,
         project_id: Option<&str>,
+        worktree_id: Option<&str>,
         q: Option<&str>,
     ) -> Result<Vec<ChatRow>, ChatError> {
         let mut sql = String::from(
@@ -291,6 +292,9 @@ impl ChatRepo {
         if project_id.is_some() {
             sql.push_str(" AND project_id = ?");
         }
+        if worktree_id.is_some() {
+            sql.push_str(" AND worktree_id = ?");
+        }
         if q.is_some() {
             sql.push_str(" AND title LIKE ?");
         }
@@ -299,6 +303,9 @@ impl ChatRepo {
         let mut query = sqlx::query_as::<_, ChatRowTuple>(&sql);
         if let Some(pid) = project_id {
             query = query.bind(pid);
+        }
+        if let Some(wid) = worktree_id {
+            query = query.bind(wid);
         }
         if let Some(search) = q {
             query = query.bind(format!("%{search}%"));

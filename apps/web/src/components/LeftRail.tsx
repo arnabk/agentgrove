@@ -87,7 +87,10 @@ export default function LeftRail() {
   const [wtFor, setWtFor] = createSignal<string | null>(null);
   // Active project id whose history dialog is open; null when closed.
   const [historyFor, setHistoryFor] = createSignal<string | null>(null);
-  const [chatHistoryFor, setChatHistoryFor] = createSignal<string | null>(null);
+  const [chatHistoryFor, setChatHistoryFor] = createSignal<{
+    projectId: string;
+    worktreeId?: string | null;
+  } | null>(null);
   // Active rename target (projectId + worktreeId + currentBranch) or
   // null when the rename dialog is closed.
   const [renameFor, setRenameFor] = createSignal<{
@@ -648,7 +651,7 @@ export default function LeftRail() {
                               class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
                               onClick={() => {
                                 setOpenMenuFor(null);
-                                setChatHistoryFor(p.id);
+                                setChatHistoryFor({ projectId: p.id });
                               }}
                               data-testid={`chat-history-${p.id}`}
                             >
@@ -1030,6 +1033,21 @@ export default function LeftRail() {
                                         >
                                           <PencilIcon /> Rename
                                         </button>
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                          onClick={() => {
+                                            setOpenMenuFor(null);
+                                            setChatHistoryFor({
+                                              projectId: p.id,
+                                              worktreeId: w.id,
+                                            });
+                                          }}
+                                          data-testid={`chat-history-wt-${w.id}`}
+                                        >
+                                          <HistoryIcon /> Chat history
+                                        </button>
                                         <div class="my-1 border-t border-border" />
                                         <button
                                           type="button"
@@ -1135,7 +1153,13 @@ export default function LeftRail() {
       </Show>
 
       <Show when={chatHistoryFor()} keyed>
-        {(pid) => <ChatHistoryDialog projectId={pid} onClose={() => setChatHistoryFor(null)} />}
+        {(ctx) => (
+          <ChatHistoryDialog
+            projectId={ctx.projectId}
+            worktreeId={ctx.worktreeId}
+            onClose={() => setChatHistoryFor(null)}
+          />
+        )}
       </Show>
 
       <Show when={renameFor()} keyed>

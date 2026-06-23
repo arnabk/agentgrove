@@ -759,6 +759,7 @@ pub async fn delete_chat(
 #[derive(Debug, Deserialize)]
 pub struct ChatHistoryQuery {
     pub project_id: Option<String>,
+    pub worktree_id: Option<String>,
     pub q: Option<String>,
 }
 
@@ -768,7 +769,11 @@ pub async fn chat_history(
 ) -> Result<Json<Vec<ChatRecord>>, StatusCode> {
     let rows = state
         .chat_store
-        .list_deleted(q.project_id.as_deref(), q.q.as_deref())
+        .list_deleted(
+            q.project_id.as_deref(),
+            q.worktree_id.as_deref(),
+            q.q.as_deref(),
+        )
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let out: Vec<ChatRecord> = rows

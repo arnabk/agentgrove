@@ -4,6 +4,7 @@ import { addChatTab } from "../stores/app";
 
 interface Props {
   projectId: string;
+  worktreeId?: string | null | undefined;
   onClose: () => void;
   onRestored?: (chat: Chat) => void;
 }
@@ -19,7 +20,10 @@ export default function ChatHistoryDialog(props: Props) {
     setLoading(true);
     setErr(null);
     try {
-      const params: { projectId?: string; q?: string } = { projectId: props.projectId };
+      const params: { projectId?: string; worktreeId?: string; q?: string } = {
+        projectId: props.projectId,
+      };
+      if (props.worktreeId) params.worktreeId = props.worktreeId;
       const q = query().trim();
       if (q) params.q = q;
       const list = await api.listChatHistory(params);
