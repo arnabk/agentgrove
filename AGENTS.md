@@ -44,3 +44,19 @@ git push origin main
 ```
 
 Before commit: typecheck + eslint + prettier + test must be clean.
+
+## README CI/CD badge rule
+
+Before every commit, merge, or release (or after pushing, before PR), verify
+that ALL three README badges (CI, Release, Nightly) show **`success`** /
+**`passing`**. Run:
+
+```bash
+for w in ci.yml release.yml nightly.yml; do
+  gh run list --workflow "$w" --limit 1 --json conclusion,status | grep -q '"success"' && echo "✅ $w" || echo "❌ $w"
+done
+```
+
+If any badge is failing, investigate and fix before pushing. New security
+advisories should be added to `.audit-context/audit.toml` (the CI ignore
+list in `.github/workflows/ci.yml` must match).

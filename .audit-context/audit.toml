@@ -11,5 +11,8 @@ ignore = [
     # Another issue, probably `gix` or something similar related
     "RUSTSEC-2025-0021",
     # gix-date issue
-    "RUSTSEC-2025-0140"
+    "RUSTSEC-2025-0140",
+    # memmap2 unchecked pointer offset (pinned by gix 0.66)
+    "RUSTSEC-2026-0185",
+    "RUSTSEC-2026-0186"
 ]

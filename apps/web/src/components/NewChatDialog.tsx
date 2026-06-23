@@ -68,11 +68,13 @@ export default function NewChatDialog(props: Props) {
       const userVisible = state.providers.filter((p) => p.id !== "fake");
       const sorted = [...userVisible].sort((a, b) => Number(b.available) - Number(a.available));
       setProviders(sorted);
-      
+
       const defaultProviderId = state.settings.default_provider;
-      const defaultProvider = defaultProviderId ? sorted.find((p) => p.id === defaultProviderId) : undefined;
+      const defaultProvider = defaultProviderId
+        ? sorted.find((p) => p.id === defaultProviderId)
+        : undefined;
       const targetProvider = defaultProvider || sorted.find((p) => p.available);
-      
+
       if (targetProvider) {
         setProviderId(targetProvider.id);
         const defaultModelId = state.settings.default_model;
@@ -85,7 +87,7 @@ export default function NewChatDialog(props: Props) {
       // Since we had a cached version, optimistically hide the loader.
       setLoadingProviders(false);
     }
-    
+
     // Always fetch fresh in the background to catch any recent changes.
     void (async () => {
       try {
@@ -104,9 +106,11 @@ export default function NewChatDialog(props: Props) {
         // (i.e., if cache was empty) or if the current selection is no longer valid.
         if (state.providers.length === 0) {
           const defaultProviderId = state.settings.default_provider;
-          const defaultProvider = defaultProviderId ? sorted.find((p) => p.id === defaultProviderId) : undefined;
+          const defaultProvider = defaultProviderId
+            ? sorted.find((p) => p.id === defaultProviderId)
+            : undefined;
           const targetProvider = defaultProvider || sorted.find((p) => p.available);
-          
+
           if (targetProvider) {
             setProviderId(targetProvider.id);
             const defaultModelId = state.settings.default_model;
