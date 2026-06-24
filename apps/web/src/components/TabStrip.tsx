@@ -9,6 +9,7 @@ import {
   type UnifiedTab,
   state,
 } from "../stores/app";
+import { api } from "../api/client";
 import { confirm } from "./dialog";
 
 /**
@@ -44,6 +45,9 @@ export default function TabStrip() {
       if (!ok) return;
     }
     closeTab(tab.id);
+    if (tab.kind === "chat") {
+      void api.deleteChat(tab.id).catch(() => {});
+    }
   }
 
   function icon(kind: UnifiedTab["kind"]) {
