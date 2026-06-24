@@ -171,6 +171,36 @@ export default function ChatComposer(props: Props) {
             props.onPasteFiles(files);
             return true;
           }
+          // Some browsers (Chrome) expose screenshots as HTML content
+          // with an embedded `<img>` tag that has a `file://` src, not
+          // as a file item. If we don't catch this, the image silently
+          // drops. Read the HTML, extract any data-URI / blob-URI img
+          // and upload them.
+          const html = event.clipboardData?.getData("text/html");
+          if (html) {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, "text/html");
+            const imgs = Array.from(doc.querySelectorAll("img[src^='file:'], img[src^='data:']"));
+            const dataUrls = imgs
+              .map((img) => img.getAttribute("src"))
+              .filter((s): s is string => !!s);
+            if (dataUrls.length > 0) {
+              event.preventDefault();
+              // Try fetching each data: URI and converting to a File.
+              const futs = dataUrls.map(async (url, i) => {
+                const res = await fetch(url);
+                const blob = await res.blob();
+                const ext = blob.type.split("/").pop() || "png";
+                return new File([blob], `pasted-image-${Date.now()}-${i}.${ext}`, {
+                  type: blob.type,
+                });
+              });
+              Promise.all(futs)
+                .then((converted) => props.onPasteFiles(converted))
+                .catch(() => {});
+              return true;
+            }
+          }
           return false;
         },
         handleKeyDown: (_view, event) => {

@@ -716,7 +716,13 @@ export default function ChatPane() {
       const dtos = await api.uploadFiles(files);
       setUploads((cur) => [...cur, ...dtos]);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(
+        "upload failed:",
+        msg,
+        files.map((f) => `${f.name} (${f.type})`),
+      );
+      setErr(msg);
     } finally {
       setUploading(false);
     }
