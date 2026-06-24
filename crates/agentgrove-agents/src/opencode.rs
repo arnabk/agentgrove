@@ -257,7 +257,8 @@ impl AgentProvider for OpencodeProvider {
         });
 
         let stderr = child.stderr.take();
-        let events_for_stderr = events.clone();
+        let stderr_lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let stderr_capture = stderr_lines.clone();
         let stderr_task = stderr.map(|stderr| {
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
@@ -265,9 +266,9 @@ impl AgentProvider for OpencodeProvider {
                     if line.trim().is_empty() {
                         continue;
                     }
-                    let _ = events_for_stderr.send(AgentEvent::Error {
-                        message: line.trim().to_string(),
-                    });
+                    if let Ok(mut guard) = stderr_capture.lock() {
+                        guard.push(line.trim().to_string());
+                    }
                 }
             })
         });
@@ -288,9 +289,30 @@ impl AgentProvider for OpencodeProvider {
                 cost_usd: None,
             });
         } else {
-            let _ = events.send(AgentEvent::Error {
-                message: format!("opencode exited with status {status}"),
+            // Collect the first meaningful line from stderr — ignore
+            // Node.js / Bun stack traces and focus on the actual error.
+            let stderr_msg = stderr_lines.lock().ok().and_then(|guard| {
+                guard
+                    .iter()
+                    .find(|l| {
+                        // Skip stack frames, internal paths, and empty lines.
+                        l.len() < 200
+                            && !l.starts_with("    at ")
+                            && !l.starts_with("\tat ")
+                            && !l.starts_with("  cause:")
+                            && !l.contains("/chunk-")
+                            && !l.contains("native:")
+                    })
+                    .cloned()
             });
+            let msg = match stderr_msg {
+                Some(ref s) if s.contains("SQLiteError") || s.contains("no such column") => {
+                    "The opencode CLI has a stale internal database. Run `opencode upgrade` or `rm -rf ~/.local/share/opencode/data` and try again.".to_string()
+                }
+                Some(s) => format!("opencode failed: {s}"),
+                None => format!("opencode exited with status {status}"),
+            };
+            let _ = events.send(AgentEvent::Error { message: msg });
         }
 
         Ok(())
