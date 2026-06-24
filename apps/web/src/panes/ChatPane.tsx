@@ -230,7 +230,15 @@ export default function ChatPane() {
       return next;
     });
   }
-  const queueItems = () => queueState()?.items ?? [];
+  const queueItems = () => {
+    const items = queueState()?.items ?? [];
+    // Filter out queue items whose body already exists as a prompt
+    // in the timeline. This prevents the brief duplicate where a
+    // drained item (now a real prompt) is still visible as a
+    // "running" queue card before the next poll removes it.
+    const promptContents = new Set(chatStore.prompts.map((p) => p.content));
+    return items.filter((i) => i.status === "pending" || !promptContents.has(i.body));
+  };
   const queueMode = () => queueState()?.mode ?? "auto";
   // Lock the whole queue while the agent is working (product decision):
   // queued items can't be edited / removed / reordered mid-turn.
