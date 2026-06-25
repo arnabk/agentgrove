@@ -796,7 +796,12 @@ pub async fn remote_status(
     };
 
     // PR + forge detection (runs in parallel with drift for speed).
-    let pr = git::check_pr(&wt.path, &wt.branch).await;
+    // Read the actual branch from the worktree's git HEAD so renames
+    // are picked up — the stored branch may be stale.
+    let head_branch = git::get_current_branch(&wt.path)
+        .await
+        .unwrap_or_else(|| wt.branch.clone());
+    let pr = git::check_pr(&wt.path, &head_branch).await;
     let forge = git::detect_forge(&wt.path).await;
 
     Ok(Json(RemoteStatusDto {

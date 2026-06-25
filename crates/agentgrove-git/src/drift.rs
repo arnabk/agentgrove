@@ -244,6 +244,16 @@ async fn try_glab(cwd: &Path, branch: &str) -> Option<PrInfo> {
     })
 }
 
+/// Read the current branch name from a git worktree's HEAD.
+/// Returns `None` if the directory isn't a git repo or HEAD is detached.
+pub async fn get_current_branch(cwd: &Path) -> Option<String> {
+    let head = cmd(cwd, &["rev-parse", "--abbrev-ref", "HEAD"]).await?;
+    if head.is_empty() || head == "HEAD" {
+        return None;
+    }
+    Some(head)
+}
+
 // ---- Forge detection + CLI suggestion -----------------------------------
 
 /// Detected forge and whether the matching CLI is installed.
