@@ -1659,13 +1659,17 @@ function VirtualizedTimeline(props: {
 
   // Live token / thinking deltas grow the active prompt's bubble —
   // tell the virtualizer to re-measure so the row height stays in
-  // sync.
+  // sync. Also re-measure when any prompt's event content changes
+  // (streamed tokens often arrive via reconcile, not live maps).
   createEffect(() => {
-    // Touch both maps so the effect re-runs on append.
     void Object.keys(props.liveTokens).length;
     void Object.values(props.liveTokens).reduce((n, s) => n + s.length, 0);
     void Object.keys(props.liveThinking).length;
     void Object.values(props.liveThinking).reduce((n, s) => n + s.length, 0);
+    // Serialise the full prompts array so the effect re-runs on ANY
+    // change — new prompts, appended events, or live map updates
+    // that were reconciled into the canonical events array.
+    for (const p of props.prompts) void p.events.length;
     virtualizer.measure();
   });
 
