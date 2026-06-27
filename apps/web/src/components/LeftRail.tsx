@@ -118,6 +118,7 @@ export default function LeftRail() {
   // a couple of quick-create icons + a kebab — nothing clips when the
   // rail is narrowed; the project name truncates instead.
   const [openMenuFor, setOpenMenuFor] = createSignal<string | null>(null);
+  const [mergingWt, setMergingWt] = createSignal<string | null>(null);
   onMount(() => {
     // Close the menu on a click that lands OUTSIDE the kebab button + its
     // dropdown, or on Escape. We test the event target rather than relying
@@ -811,7 +812,7 @@ export default function LeftRail() {
                                         pr.state === "open" &&
                                         checksOk &&
                                         (pr.review_decision === "approved" || !pr.review_decision);
-                                      const [merging, setMerging] = createSignal(false);
+                                      const isMerging = () => mergingWt() === w.id;
                                       return (
                                         <>
                                           <a
@@ -828,17 +829,17 @@ export default function LeftRail() {
                                           <Show when={canMerge}>
                                             <button
                                               type="button"
-                                              disabled={merging()}
+                                              disabled={isMerging()}
                                               class="ag-chip ag-chip-success !text-[0.6em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80 font-semibold disabled:opacity-50"
                                               title={
-                                                merging()
+                                                isMerging()
                                                   ? "Merging…"
                                                   : `Merge ${label} #${pr.number}`
                                               }
                                               onClick={async (ev) => {
                                                 ev.stopPropagation();
-                                                if (merging()) return;
-                                                setMerging(true);
+                                                if (isMerging()) return;
+                                                setMergingWt(w.id);
                                                 try {
                                                   await api.mergePr(w.id, pr.number, pr.source);
                                                   pushToast({
@@ -858,12 +859,12 @@ export default function LeftRail() {
                                                   });
                                                   fetchDrift(w.id);
                                                 } finally {
-                                                  setMerging(false);
+                                                  setMergingWt(null);
                                                 }
                                               }}
                                               data-testid={`merge-pr-${w.id}`}
                                             >
-                                              {merging() ? "▸ …" : "▸ Merge"}
+                                              {isMerging() ? "▸ …" : "▸ Merge"}
                                             </button>
                                           </Show>
                                           <Show when={!canMerge && pr.checks_status === "pending"}>
