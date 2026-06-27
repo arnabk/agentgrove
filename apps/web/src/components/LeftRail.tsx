@@ -27,6 +27,7 @@ import {
   type TerminalTab,
 } from "../stores/app";
 import { confirm } from "./dialog";
+import { pushToast } from "./Toast";
 import FolderPicker from "./FolderPicker";
 import NewChatDialog from "./NewChatDialog";
 import WorktreeDialog from "./WorktreeDialog";
@@ -869,11 +870,22 @@ export default function LeftRail() {
                                                 ev.stopPropagation();
                                                 try {
                                                   await api.mergePr(w.id, pr.number, pr.source);
+                                                  pushToast({
+                                                    title: "Merge queued",
+                                                    message: `${label} #${pr.number} — merging once checks pass.`,
+                                                  });
                                                   fetchDrift(w.id);
                                                 } catch (e) {
-                                                  setErr(
-                                                    e instanceof Error ? e.message : String(e),
-                                                  );
+                                                  const msg =
+                                                    e instanceof Error ? e.message : String(e);
+                                                  pushToast({
+                                                    title: "Merge failed",
+                                                    message:
+                                                      msg.length > 120
+                                                        ? msg.slice(0, 120) + "…"
+                                                        : msg,
+                                                  });
+                                                  fetchDrift(w.id);
                                                 }
                                               }}
                                               data-testid={`merge-pr-${w.id}`}

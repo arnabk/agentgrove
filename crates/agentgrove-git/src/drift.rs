@@ -326,6 +326,7 @@ pub async fn merge_pr(cwd: &Path, pr_number: u64, source: &str) -> Result<(), St
                 "merge".into(),
                 pr_number.to_string(),
                 "--merge".into(),
+                "--auto".into(),
                 "--delete-branch".into(),
             ],
         ),
