@@ -807,11 +807,11 @@ export default function LeftRail() {
                                       const pr = remoteStatus[w.id]!.pr!;
                                       const label = pr.source === "glab" ? "MR" : "PR";
                                       const checksOk = pr.checks_status === "success";
-                                      const approved = pr.review_decision === "approved";
                                       const canMerge =
                                         pr.state === "open" &&
                                         checksOk &&
-                                        (approved || !pr.review_decision);
+                                        (pr.review_decision === "approved" || !pr.review_decision);
+                                      const [merging, setMerging] = createSignal(false);
                                       return (
                                         <>
                                           <a
@@ -825,49 +825,20 @@ export default function LeftRail() {
                                           >
                                             {label} #{pr.number}
                                           </a>
-                                          <Show when={pr.checks_status}>
-                                            <span
-                                              class="ag-chip !text-[0.6em] !py-[1px] shrink-0"
-                                              classList={{
-                                                "ag-chip-success": checksOk,
-                                                "ag-chip-warn": pr.checks_status === "pending",
-                                                "ag-chip-danger": pr.checks_status === "failure",
-                                              }}
-                                              title={`CI: ${pr.checks_status}`}
-                                            >
-                                              {checksOk
-                                                ? "✓ CI"
-                                                : pr.checks_status === "pending"
-                                                  ? "⏳ CI"
-                                                  : "✗ CI"}
-                                            </span>
-                                          </Show>
-                                          <Show when={pr.review_decision}>
-                                            <span
-                                              class="ag-chip !text-[0.6em] !py-[1px] shrink-0"
-                                              classList={{
-                                                "ag-chip-success": approved,
-                                                "ag-chip-warn":
-                                                  pr.review_decision === "review_required",
-                                                "ag-chip-danger":
-                                                  pr.review_decision === "changes_requested",
-                                              }}
-                                              title={`Review: ${pr.review_decision}`}
-                                            >
-                                              {approved
-                                                ? "✓ approved"
-                                                : pr.review_decision === "changes_requested"
-                                                  ? "✗ changes"
-                                                  : "👁 review"}
-                                            </span>
-                                          </Show>
                                           <Show when={canMerge}>
                                             <button
                                               type="button"
-                                              class="ag-chip ag-chip-success !text-[0.6em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80 font-semibold"
-                                              title={`Merge ${label} #${pr.number}`}
+                                              disabled={merging()}
+                                              class="ag-chip ag-chip-success !text-[0.6em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80 font-semibold disabled:opacity-50"
+                                              title={
+                                                merging()
+                                                  ? "Merging…"
+                                                  : `Merge ${label} #${pr.number}`
+                                              }
                                               onClick={async (ev) => {
                                                 ev.stopPropagation();
+                                                if (merging()) return;
+                                                setMerging(true);
                                                 try {
                                                   await api.mergePr(w.id, pr.number, pr.source);
                                                   pushToast({
@@ -886,12 +857,46 @@ export default function LeftRail() {
                                                         : msg,
                                                   });
                                                   fetchDrift(w.id);
+                                                } finally {
+                                                  setMerging(false);
                                                 }
                                               }}
                                               data-testid={`merge-pr-${w.id}`}
                                             >
-                                              ▸ Merge
+                                              {merging() ? "▸ …" : "▸ Merge"}
                                             </button>
+                                          </Show>
+                                          <Show when={!canMerge && pr.checks_status === "pending"}>
+                                            <span
+                                              class="ag-chip ag-chip-warn !text-[0.6em] !py-[1px] shrink-0"
+                                              title="CI checks in progress"
+                                            >
+                                              ⏳ checks
+                                            </span>
+                                          </Show>
+                                          <Show when={!canMerge && pr.checks_status === "failure"}>
+                                            <span
+                                              class="ag-chip ag-chip-danger !text-[0.6em] !py-[1px] shrink-0"
+                                              title="CI checks failing"
+                                            >
+                                              ✗ checks
+                                            </span>
+                                          </Show>
+                                          <Show
+                                            when={
+                                              !canMerge &&
+                                              pr.review_decision &&
+                                              pr.checks_status === "success"
+                                            }
+                                          >
+                                            <span
+                                              class="ag-chip ag-chip-warn !text-[0.6em] !py-[1px] shrink-0"
+                                              title={`Review: ${pr.review_decision}`}
+                                            >
+                                              {pr.review_decision === "review_required"
+                                                ? "👁 review"
+                                                : "✗ changes"}
+                                            </span>
                                           </Show>
                                         </>
                                       );
