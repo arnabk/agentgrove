@@ -151,6 +151,23 @@ impl TerminalManager {
         });
         let mut cmd = CommandBuilder::new(shell);
         cmd.cwd(&cwd);
+        // Advertise a real terminal type. portable_pty inherits the
+        // server's environment, and when AgentGrove is launched head-
+        // lessly (nohup / launchd / systemd) the parent has no TERM,
+        // so the child shell would start with TERM unset. With an
+        // unknown TERM, zsh line-editor plugins (zsh-autosuggestions,
+        // zsh-syntax-highlighting) emit broken cursor-repositioning
+        // sequences when they repaint the input line — every keystroke
+        // gets re-echoed at the wrong column, so typing "ls" renders as
+        // "lls" and the prompt scrambles. Pinning a 256-colour xterm
+        // (plus COLORTERM for truecolor) makes their redraw math line
+        // up with what xterm.js renders.
+        if std::env::var_os("TERM").is_none() {
+            cmd.env("TERM", "xterm-256color");
+        }
+        if std::env::var_os("COLORTERM").is_none() {
+            cmd.env("COLORTERM", "truecolor");
+        }
         let child = pty
             .slave
             .spawn_command(cmd)
