@@ -72,6 +72,7 @@ export default [
         requestAnimationFrame: "readonly",
         cancelAnimationFrame: "readonly",
         AudioContext: "readonly",
+        DOMParser: "readonly",
       },
     },
     plugins: {
