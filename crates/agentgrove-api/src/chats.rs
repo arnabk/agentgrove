@@ -824,6 +824,36 @@ pub async fn restore_chat(
     Ok(Json(rec))
 }
 
+/// One active (mid-turn) chat, with the project/worktree it belongs
+/// to so the FE can light up the matching left-rail row.
+#[derive(Debug, Serialize)]
+pub struct ActiveChat {
+    pub chat_id: String,
+    pub project_id: String,
+    pub worktree_id: Option<String>,
+}
+
+/// `GET /api/chats/active` — chats that currently have an in-flight
+/// agent turn (server truth, from `state.dispatching`). The FE polls
+/// this to show a per-project/worktree "working" indicator in the
+/// left rail, independent of which chat tab is open. Cheap: a single
+/// set intersection under two short-lived read locks.
+pub async fn active_chats(State(state): State<AppState>) -> Json<Vec<ActiveChat>> {
+    let dispatching = state.dispatching.lock().await;
+    let reg = state.chats.read().await;
+    let out: Vec<ActiveChat> = dispatching
+        .iter()
+        .filter_map(|id| {
+            reg.get(id).map(|c| ActiveChat {
+                chat_id: c.id.clone(),
+                project_id: c.project_id.clone(),
+                worktree_id: c.worktree_id.clone(),
+            })
+        })
+        .collect();
+    Json(out)
+}
+
 /// Body for `PATCH /api/chats/:id`. Each field is optional; unset
 /// fields leave the corresponding chat property unchanged.
 #[derive(Debug, Deserialize)]

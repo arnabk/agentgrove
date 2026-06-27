@@ -38,12 +38,14 @@ import {
   routeError,
   selectedChatId,
   setActiveChat,
+  setActiveWork,
   setRouteError,
   setSettingsOpen,
   setTheme,
   state,
   toggleSidebar,
 } from "./stores/app";
+import { api } from "./api/client";
 import { pushToast } from "./components/Toast";
 import { playNotificationSound } from "./lib/notificationSound";
 
@@ -90,6 +92,39 @@ export default function App() {
   onMount(() => {
     const dispose = installCrossInstanceSync();
     onCleanup(dispose);
+  });
+
+  // Poll the set of chats with an in-flight agent turn (server truth)
+  // and project it into `activeWork` so the left rail can show a
+  // "working" indicator on each busy project/worktree row — even for
+  // background chats the user isn't currently viewing. Cheap GET; 3s
+  // cadence is responsive enough without being chatty.
+  onMount(() => {
+    let stopped = false;
+    const poll = async () => {
+      try {
+        const rows = await api.activeChats();
+        const next = new Set<string>();
+        for (const r of rows) {
+          // Worktree (or root) scope key for an exact-row match.
+          next.add(r.worktree_id ? `${r.project_id}::${r.worktree_id}` : r.project_id);
+          // Bare project id so the collapsed project row lights up
+          // when any of its worktrees/root is working.
+          next.add(r.project_id);
+        }
+        setActiveWork(next);
+      } catch {
+        // Transient failure: leave the last known state in place.
+      }
+    };
+    void poll();
+    const t = setInterval(() => {
+      if (!stopped) void poll();
+    }, 3000);
+    onCleanup(() => {
+      stopped = true;
+      clearInterval(t);
+    });
   });
 
   createEffect(() => {

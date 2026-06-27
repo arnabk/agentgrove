@@ -14,6 +14,8 @@ import {
   addTerminalTab,
   currentScopeKey,
   currentWorktreeId,
+  isProjectWorking,
+  isScopeWorking,
   refreshProjects,
   refreshWorktreesForProject,
   selectFile,
@@ -538,6 +540,21 @@ export default function LeftRail() {
                     {isWorktree ? <WorktreeIcon /> : <FolderIcon />}
                     <span class="truncate text-[0.97em] min-w-0 flex-1">{p.name}</span>
 
+                    {/* "Working" dot. While collapsed it summarises ANY
+                        busy chat under the project (root or worktree);
+                        once expanded it narrows to the root scope so the
+                        busy worktree rows below carry their own dots and
+                        we don't show two indicators for the same turn. */}
+                    <Show when={open() ? isScopeWorking(p.id, null) : isProjectWorking(p.id)}>
+                      <WorkingDot
+                        title={
+                          open()
+                            ? "A chat in this project's root is working…"
+                            : "A chat in this project is working…"
+                        }
+                      />
+                    </Show>
+
                     {/* Right-edge cluster: branch chip + a single overflow
                         (kebab) menu holding every row action. Keeping just
                         the kebab inline means the cluster never outgrows the
@@ -747,6 +764,9 @@ export default function LeftRail() {
                                   <span class="truncate text-[0.83em] font-mono min-w-0 flex-1">
                                     {w.branch}
                                   </span>
+                                  <Show when={isScopeWorking(p.id, w.id)}>
+                                    <WorkingDot title="A chat in this worktree is working…" />
+                                  </Show>
                                   <Show
                                     when={
                                       remoteStatus[w.id]?.diverged ||
@@ -1230,6 +1250,21 @@ export default function LeftRail() {
         )}
       </Show>
     </aside>
+  );
+}
+
+/** Pulsing accent dot shown on a project/worktree row when a chat
+ *  under it has an in-flight agent turn. Mirrors the per-tab busy dot
+ *  in TabStrip so "something is working here" reads the same way in
+ *  both places. */
+function WorkingDot(props: { title: string }) {
+  return (
+    <span
+      class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse shrink-0"
+      title={props.title}
+      data-testid="rail-working-dot"
+      aria-label="Working"
+    />
   );
 }
 

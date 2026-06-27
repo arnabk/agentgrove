@@ -126,6 +126,15 @@ export type SendMessageResponse =
   | { kind: "dispatched"; prompt: Prompt }
   | { kind: "queued"; item_id: string };
 
+/** One mid-turn chat from `GET /api/chats/active`, tagged with the
+ *  project/worktree it belongs to so the left rail can show which
+ *  scopes are actively working. */
+export interface ActiveChat {
+  chat_id: string;
+  project_id: string;
+  worktree_id: string | null;
+}
+
 /** Backfill page returned by `GET /api/chats/:id/prompts?before=`. */
 export interface PromptsBackfill {
   prompts: Prompt[];
@@ -378,6 +387,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  /** Chats with an in-flight agent turn (server truth). Used to show
+   *  a per-project/worktree "working" indicator in the left rail. */
+  activeChats: () => req<ActiveChat[]>(`/api/chats/active`),
   /** Windowed chat view (last N prompts; older fetched via listPrompts). */
   getChat: (id: string) => req<ChatView>(`/api/chats/${encodeURIComponent(id)}`),
   /** Backfill older prompts. Returns at most 200 (server-clamped). */

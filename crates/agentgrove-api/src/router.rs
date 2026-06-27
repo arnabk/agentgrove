@@ -68,6 +68,7 @@ pub fn build_router(state: AppState) -> Router {
                 .delete(chats::delete_chat),
         )
         .route("/api/chats/history", get(chats::chat_history))
+        .route("/api/chats/active", get(chats::active_chats))
         .route("/api/chats/:id/restore", post(chats::restore_chat))
         .route(
             "/api/chats/:id/prompts",
