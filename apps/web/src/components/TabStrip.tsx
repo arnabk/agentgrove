@@ -11,6 +11,8 @@ import {
 } from "../stores/app";
 import { api } from "../api/client";
 import { confirm } from "./dialog";
+import { exportChat } from "../lib/exportChat";
+import { pushToast } from "./Toast";
 
 /**
  * Unified tab strip: flat row of mixed-type tabs (chat, terminal,
@@ -47,6 +49,15 @@ export default function TabStrip() {
     closeTab(tab.id);
     if (tab.kind === "chat") {
       void api.deleteChat(tab.id).catch(() => {});
+    }
+  }
+
+  async function exportTab(tab: UnifiedTab) {
+    if (tab.kind !== "chat") return;
+    try {
+      await exportChat(tab.id, tab.title);
+    } catch {
+      pushToast({ title: "Export failed", message: "Could not export this chat." });
     }
   }
 
@@ -168,6 +179,35 @@ export default function TabStrip() {
                 }}
                 data-testid={`tab-rename-input-${t.id}`}
               />
+            </Show>
+            <Show when={t.kind === "chat"}>
+              <button
+                type="button"
+                class="ml-0.5 px-0.5 text-fg-subtle hover:text-accent opacity-0 group-hover:opacity-100"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void exportTab(t);
+                }}
+                aria-label={`Export ${label(t)}`}
+                title="Export chat as Markdown"
+                data-testid={`tab-export-${t.id}`}
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <path d="M7 10l5 5 5-5" />
+                  <path d="M12 15V3" />
+                </svg>
+              </button>
             </Show>
             <button
               type="button"
