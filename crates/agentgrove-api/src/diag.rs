@@ -6,8 +6,9 @@
 //! renders this as a small live indicator in the top-right corner.
 
 use crate::state::AppState;
-use axum::{extract::State, Json};
-use serde::Serialize;
+use axum::{extract::State, http::StatusCode, Json};
+use serde::{Deserialize, Serialize};
+use std::io::Write;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
 
 #[derive(Debug, Serialize)]
@@ -89,4 +90,74 @@ pub async fn memory(State(state): State<AppState>) -> Json<MemoryReport> {
         children,
         total_rss_bytes: total,
     })
+}
+
+/// One client-side log line forwarded from the FE. Every toast the UI
+/// shows is sent here so transient error messages (which otherwise
+/// vanish after ~8s and live only in the browser) are persisted to
+/// `<state_dir>/logs/client.log` and the server tracing stream. This
+/// is what makes a user-reported "I got an error toast" debuggable
+/// after the fact without having to reproduce it live.
+#[derive(Debug, Deserialize)]
+pub struct ClientLogEntry {
+    /// "error" | "warn" | "info". Defaults to "info" if omitted.
+    #[serde(default)]
+    pub level: Option<String>,
+    /// Short headline (toast title).
+    pub title: String,
+    /// Body / detail (toast message).
+    #[serde(default)]
+    pub message: Option<String>,
+    /// Optional structured context (route, ids, etc.) the FE wants to
+    /// attach. Serialized verbatim into the log line.
+    #[serde(default)]
+    pub context: Option<serde_json::Value>,
+}
+
+/// `POST /api/diag/client-log` — persist a single FE log/toast line.
+///
+/// Best-effort: a logging failure must never break the UI, so we
+/// always return 204 even if the file append errors (the tracing
+/// event still fires). Appends are line-buffered JSON so the file is
+/// greppable.
+pub async fn client_log(
+    State(state): State<AppState>,
+    Json(entry): Json<ClientLogEntry>,
+) -> StatusCode {
+    let level = entry.level.as_deref().unwrap_or("info");
+    let msg = entry.message.clone().unwrap_or_default();
+
+    // Mirror to the server tracing stream at a matching level so it
+    // shows up in dev-backend.log alongside backend events.
+    match level {
+        "error" => {
+            tracing::error!(target: "client", title = %entry.title, message = %msg, "client toast")
+        }
+        "warn" => {
+            tracing::warn!(target: "client", title = %entry.title, message = %msg, "client toast")
+        }
+        _ => tracing::info!(target: "client", title = %entry.title, message = %msg, "client toast"),
+    }
+
+    // Append a structured line to <state_dir>/logs/client.log.
+    let line = serde_json::json!({
+        "ts": chrono::Utc::now().to_rfc3339(),
+        "level": level,
+        "title": entry.title,
+        "message": msg,
+        "context": entry.context,
+    });
+    let logs_dir = state.state_dir.join("logs");
+    if std::fs::create_dir_all(&logs_dir).is_ok() {
+        let path = logs_dir.join("client.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+
+    StatusCode::NO_CONTENT
 }

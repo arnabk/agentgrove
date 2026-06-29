@@ -8,7 +8,13 @@ import {
   onMount,
 } from "solid-js";
 import { createStore, produce } from "solid-js/store";
-import { api, type Project, type TreeEntry, type WorktreeRemoteStatus } from "../api/client";
+import {
+  api,
+  logClient,
+  type Project,
+  type TreeEntry,
+  type WorktreeRemoteStatus,
+} from "../api/client";
 import {
   addChatTab,
   addTerminalTab,
@@ -870,7 +876,22 @@ export default function LeftRail() {
                                                 } catch (e) {
                                                   const msg =
                                                     e instanceof Error ? e.message : String(e);
+                                                  // Persist the FULL error (untruncated) to the
+                                                  // client log for debugging; show a trimmed
+                                                  // version in the toast so it stays readable.
+                                                  logClient({
+                                                    level: "error",
+                                                    title: "Merge failed",
+                                                    message: msg,
+                                                    context: {
+                                                      worktreeId: w.id,
+                                                      branch: w.branch,
+                                                      prNumber: pr.number,
+                                                      source: pr.source,
+                                                    },
+                                                  });
                                                   pushToast({
+                                                    level: "error",
                                                     title: "Merge failed",
                                                     message:
                                                       msg.length > 120

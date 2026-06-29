@@ -1,4 +1,5 @@
 import { For, Show, createSignal, onMount } from "solid-js";
+import { logClient } from "../api/client";
 
 export interface ToastItem {
   id: string;
@@ -6,6 +7,9 @@ export interface ToastItem {
   message: string;
   action?: { label: string; onClick: () => void };
   timeoutMs?: number;
+  /** Severity. Drives the persisted log level on the BE. Defaults to
+   *  "info"; callers showing failures should pass "error". */
+  level?: "error" | "warn" | "info";
 }
 
 const [toasts, setToasts] = createSignal<ToastItem[]>([]);
@@ -16,6 +20,19 @@ export function pushToast(item: Omit<ToastItem, "id">) {
   setToasts((prev) => [...prev, full]);
   const ms = item.timeoutMs ?? 8000;
   setTimeout(() => dismissToast(id), ms);
+  // Persist every toast to the BE so transient messages (especially
+  // errors that vanish after a few seconds) are debuggable later from
+  // logs/client.log instead of living only in the browser. Heuristic:
+  // if the caller didn't set a level, treat titles that read like a
+  // failure as errors so they're easy to grep.
+  const level =
+    item.level ?? (/(fail|error|could not|unable|denied)/i.test(item.title) ? "error" : "info");
+  logClient({
+    level,
+    title: item.title,
+    message: item.message,
+    context: { route: window.location.href },
+  });
 }
 
 export function dismissToast(id: string) {

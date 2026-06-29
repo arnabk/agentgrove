@@ -799,6 +799,32 @@ export function openWs(topic: string): WebSocket {
 /** Open the bidirectional terminal WebSocket for a session. Output
  *  streams as binary frames; keystrokes are sent back over the same
  *  socket. This is the low-latency path that replaces HTTP polling. */
+/** A client-side log line to persist on the BE for later debugging. */
+export interface ClientLog {
+  level?: "error" | "warn" | "info";
+  title: string;
+  message?: string;
+  context?: unknown;
+}
+
+/** Fire-and-forget: forward a client log/toast to the BE so it lands
+ *  in `<state_dir>/logs/client.log` and the server tracing stream.
+ *  Deliberately does NOT use `req` (no throw, no JSON-error parsing)
+ *  because a logging failure must never disrupt the UI or recurse
+ *  back into another error toast. */
+export function logClient(entry: ClientLog): void {
+  try {
+    void fetch(`${baseUrl()}/api/diag/client-log`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(entry),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // never throw from a logging path
+  }
+}
+
 export function openTerminalWs(id: string): WebSocket {
   const url = new URL(baseUrl() || window.location.origin);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
