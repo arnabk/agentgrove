@@ -315,48 +315,106 @@ pub async fn detect_forge(cwd: &Path) -> ForgeInfo {
     }
 }
 
+/// Run a forge CLI merge invocation once, returning the trimmed
+/// stderr on failure. Separated out so `merge_pr` can attempt a
+/// graceful fallback (auto-merge -> direct merge) without duplicating
+/// the spawn/diagnostics plumbing.
+async fn run_merge(cmd_name: &str, args: &[String], cwd: &Path) -> Result<(), String> {
+    let out = Command::new(cmd_name)
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .await
+        .map_err(|e| format!("failed to run {cmd_name}: {e}"))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    Err(if stderr.is_empty() {
+        format!("{cmd_name} exited with {}", out.status)
+    } else {
+        stderr
+    })
+}
+
 /// Merge a PR/MR via the forge CLI. Returns Ok(()) on success or an
 /// error message on failure.
+///
+/// For GitHub we first try `--auto` (queue the merge so protected
+/// branches with required checks merge themselves once green). Many
+/// repos, however, do NOT have the "Allow auto-merge" setting enabled
+/// — there `gh pr merge --auto` fails outright with a message like
+/// "Auto-merge is not allowed for this repository". In that case we
+/// retry immediately without `--auto`, which performs a normal merge
+/// when the PR is already mergeable. Every attempt is logged so a
+/// failed merge can be diagnosed from the server log instead of only
+/// surfacing as a transient FE toast.
 pub async fn merge_pr(cwd: &Path, pr_number: u64, source: &str) -> Result<(), String> {
-    let (cmd_name, args): (&str, Vec<String>) = match source {
-        "gh" => (
-            "gh",
-            vec![
+    match source {
+        "gh" => {
+            let n = pr_number.to_string();
+            let auto_args: Vec<String> = vec![
                 "pr".into(),
                 "merge".into(),
-                pr_number.to_string(),
+                n.clone(),
                 "--merge".into(),
                 "--auto".into(),
                 "--delete-branch".into(),
-            ],
-        ),
-        "glab" => (
-            "glab",
-            vec![
+            ];
+            tracing::info!(pr = pr_number, "merge_pr: attempting gh auto-merge");
+            match run_merge("gh", &auto_args, cwd).await {
+                Ok(()) => Ok(()),
+                Err(e) if auto_merge_unsupported(&e) => {
+                    tracing::warn!(
+                        pr = pr_number,
+                        error = %e,
+                        "merge_pr: auto-merge unavailable, retrying direct merge"
+                    );
+                    let direct_args: Vec<String> = vec![
+                        "pr".into(),
+                        "merge".into(),
+                        n,
+                        "--merge".into(),
+                        "--delete-branch".into(),
+                    ];
+                    run_merge("gh", &direct_args, cwd).await.map_err(|e2| {
+                        tracing::error!(pr = pr_number, error = %e2, "merge_pr: direct merge failed");
+                        e2
+                    })
+                }
+                Err(e) => {
+                    tracing::error!(pr = pr_number, error = %e, "merge_pr: gh auto-merge failed");
+                    Err(e)
+                }
+            }
+        }
+        "glab" => {
+            let args: Vec<String> = vec![
                 "mr".into(),
                 "merge".into(),
                 pr_number.to_string(),
                 "--yes".into(),
                 "--remove-source-branch".into(),
-            ],
-        ),
-        other => return Err(format!("unsupported forge CLI: {other}")),
-    };
-    let out = Command::new(cmd_name)
-        .args(&args)
-        .current_dir(cwd)
-        .output()
-        .await
-        .map_err(|e| format!("failed to run {cmd_name}: {e}"))?;
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            format!("{cmd_name} exited with {}", out.status)
-        } else {
-            stderr
-        });
+            ];
+            tracing::info!(pr = pr_number, "merge_pr: attempting glab merge");
+            run_merge("glab", &args, cwd).await.map_err(|e| {
+                tracing::error!(pr = pr_number, error = %e, "merge_pr: glab merge failed");
+                e
+            })
+        }
+        other => Err(format!("unsupported forge CLI: {other}")),
     }
-    Ok(())
+}
+
+/// Heuristic: does this `gh pr merge --auto` error mean the repo
+/// simply doesn't permit auto-merge (so a direct merge might still
+/// work), rather than the PR being un-mergeable? GitHub's wording has
+/// varied over versions, so match the stable substrings.
+fn auto_merge_unsupported(stderr: &str) -> bool {
+    let s = stderr.to_ascii_lowercase();
+    s.contains("auto-merge is not allowed")
+        || s.contains("auto-merge is not enabled")
+        || (s.contains("auto") && s.contains("not") && s.contains("allow"))
 }
 
 #[cfg(test)]
