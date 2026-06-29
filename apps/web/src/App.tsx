@@ -31,9 +31,9 @@ const ChangesPanel = lazy(() => import("./components/ChangesPanel"));
 import {
   activeTab,
   bootstrap,
-  busyChats,
   changesScope,
   currentScope,
+  findChatTab,
   isSidebarOpen,
   routeError,
   selectedChatId,
@@ -99,20 +99,54 @@ export default function App() {
   // "working" indicator on each busy project/worktree row — even for
   // background chats the user isn't currently viewing. Cheap GET; 3s
   // cadence is responsive enough without being chatty.
+  //
+  // This same poll also drives the "Response ready" notification.
+  // Using server truth here (vs. the FE-local `busyChats` set) is
+  // essential: `busyChats` is only maintained for the *mounted*
+  // ChatPane, so switching scope/chat unmounts a still-running chat
+  // and removes it from the set — which a busy→idle watcher would
+  // misread as "finished" and fire a false toast while the agent is
+  // still streaming. The BE's active set only drops a chat when its
+  // turn genuinely ends, so a finish is a real finish.
+  let prevActiveChatIds = new Set<string>();
+  let firstActivePoll = true;
   onMount(() => {
     let stopped = false;
     const poll = async () => {
       try {
         const rows = await api.activeChats();
-        const next = new Set<string>();
+        const scopeKeys = new Set<string>();
+        const chatIds = new Set<string>();
         for (const r of rows) {
+          chatIds.add(r.chat_id);
           // Worktree (or root) scope key for an exact-row match.
-          next.add(r.worktree_id ? `${r.project_id}::${r.worktree_id}` : r.project_id);
+          scopeKeys.add(r.worktree_id ? `${r.project_id}::${r.worktree_id}` : r.project_id);
           // Bare project id so the collapsed project row lights up
           // when any of its worktrees/root is working.
-          next.add(r.project_id);
+          scopeKeys.add(r.project_id);
         }
-        setActiveWork(next);
+        setActiveWork(scopeKeys);
+
+        // Fire a notification for any chat that WAS running on the
+        // previous poll but isn't anymore — a genuine turn completion.
+        // Skip the first poll so chats already idle at load don't toast,
+        // and skip the currently-viewed chat (the user can see it).
+        if (!firstActivePoll) {
+          const active = selectedChatId();
+          for (const id of prevActiveChatIds) {
+            if (chatIds.has(id) || id === active) continue;
+            const tab = findChatTab(id);
+            playNotificationSound();
+            pushToast({
+              title: "Response ready",
+              message: tab ? `${tab.title} has finished.` : "A background chat has finished.",
+              action: { label: "→ Go to chat", onClick: () => setActiveChat(id) },
+              timeoutMs: 8000,
+            });
+          }
+        }
+        prevActiveChatIds = chatIds;
+        firstActivePoll = false;
       } catch {
         // Transient failure: leave the last known state in place.
       }
@@ -176,44 +210,6 @@ export default function App() {
     if (!routeError()) return;
     const t = setTimeout(() => setRouteError(null), 4000);
     onCleanup(() => clearTimeout(t));
-  });
-
-  // Notify when a background chat finishes its agent turn.
-  // Tracks busyChats transitions: when a chat id leaves the set
-  // AND it's not the currently active chat, fire a toast + sound.
-  // We snapshot prevBusy outside the effect so a scope switch
-  // (which may clear + repopulate busyChats) doesn't cause false
-  // notifications — only genuine busy→idle transitions fire.
-  let prevBusy = new Set<string>();
-  createEffect(() => {
-    const curr = busyChats();
-    const active = selectedChatId();
-    // Skip the very first run (bootstrap) so we don't fire for
-    // chats that were already idle when the page loaded.
-    if (prevBusy.size === 0 && curr.size === 0) {
-      prevBusy = new Set(curr);
-      return;
-    }
-    for (const id of prevBusy) {
-      if (!curr.has(id) && id !== active) {
-        const scope = currentScope();
-        const tab = scope?.tabs.find((t) => t.kind === "chat" && t.id === id) as
-          | { title: string; id: string }
-          | undefined;
-        if (!tab) continue;
-        playNotificationSound();
-        pushToast({
-          title: "Response ready",
-          message: `${tab.title} has finished.`,
-          action: {
-            label: "→ Go to chat",
-            onClick: () => setActiveChat(id),
-          },
-          timeoutMs: 8000,
-        });
-      }
-    }
-    prevBusy = new Set(curr);
   });
 
   return (

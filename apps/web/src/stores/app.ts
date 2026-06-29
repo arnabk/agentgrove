@@ -252,6 +252,17 @@ export function currentScope(): Scope | undefined {
   return state.byScope[key];
 }
 
+/** Find an open chat tab by id across ALL scopes (not just the active
+ *  one). Used by the background-finish notifier, which must resolve a
+ *  chat's title even when it lives in a scope the user isn't viewing. */
+export function findChatTab(chatId: string): { id: string; title: string } | undefined {
+  for (const key of Object.keys(state.byScope)) {
+    const tab = state.byScope[key]?.tabs.find((t) => t.kind === "chat" && t.id === chatId);
+    if (tab && tab.kind === "chat") return { id: tab.id, title: tab.title };
+  }
+  return undefined;
+}
+
 // ---- Unified tab helpers -----------------------------------------------
 //
 // The new model: a flat `tabs: UnifiedTab[]` + `activeTab: string | null`.
