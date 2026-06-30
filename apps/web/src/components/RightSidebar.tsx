@@ -1,5 +1,21 @@
 import { createSignal, Show, onMount, onCleanup } from "solid-js";
-import NotesPane, { notesSaving, notesSavedAt, notesErr } from "../panes/NotesPane";
+import NotesPane, {
+  notesSaving,
+  notesErr,
+  notesActions,
+  notesSelVersion,
+  notesTaskCounts,
+  showDone,
+  setShowDone,
+  NotesToolBtn,
+  NotesDivider,
+  HeadingIcon,
+  TaskListIcon,
+  UndoIcon,
+  RedoIcon,
+  EyeIcon,
+  EyeOffIcon,
+} from "../panes/NotesPane";
 import { isSidebarOpen, toggleSidebar } from "../stores/app";
 
 /**
@@ -96,24 +112,97 @@ export default function RightSidebar() {
         />
 
         {/* Notes — fills the whole sidebar now that the queue moved
-            inline into the chat timeline. */}
+            inline into the chat timeline. The editor's old toolbar now
+            lives here in the title row: title on the left, all controls
+            (todo, headings, undo/redo, show/hide done) on the right. */}
         <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
-          <header class="h-8 px-3 flex items-center gap-2 border-b border-border bg-bg-1 text-[12px] font-semibold text-fg-muted shrink-0">
-            Notes
-            <div class="ml-auto flex items-center gap-2 text-[11px] font-normal text-fg-subtle">
-              <Show when={notesSaving()}>
-                <span data-testid="notes-saving">saving…</span>
-              </Show>
-              <Show when={!notesSaving() && notesSavedAt()}>
-                <span class="ag-chip ag-chip-success" data-testid="notes-saved-at">
-                  saved {notesSavedAt()}
+          <header class="h-9 px-3 flex items-center gap-1 border-b border-border bg-bg-1 shrink-0">
+            <span class="text-[12px] font-semibold text-fg-muted shrink-0">Notes</span>
+            {/* save state — small + unobtrusive, no persistent "saved" pill */}
+            <Show when={notesSaving()}>
+              <span class="text-[10px] text-fg-subtle" data-testid="notes-saving">
+                saving…
+              </span>
+            </Show>
+            <Show when={notesErr()}>
+              <span
+                class="text-[10px] text-danger"
+                data-testid="notes-error"
+                title={notesErr() ?? ""}
+              >
+                save failed
+              </span>
+            </Show>
+
+            {/* Formatting controls, right-aligned. `notesSelVersion()` is
+                read so the active-state highlights re-render on every
+                selection/transaction. */}
+            <div class="ml-auto flex items-center gap-0.5">
+              <NotesToolBtn
+                label={<TaskListIcon />}
+                title="Todo item"
+                active={(notesSelVersion(), notesActions()?.isActive("taskList"))}
+                onClick={() => notesActions()?.toggleTask()}
+              />
+              <NotesDivider />
+              <NotesToolBtn
+                label={<HeadingIcon level={1} />}
+                title="Heading 1"
+                active={(notesSelVersion(), notesActions()?.isActive("heading", { level: 1 }))}
+                onClick={() => notesActions()?.toggleHeading(1)}
+              />
+              <NotesToolBtn
+                label={<HeadingIcon level={2} />}
+                title="Heading 2"
+                active={(notesSelVersion(), notesActions()?.isActive("heading", { level: 2 }))}
+                onClick={() => notesActions()?.toggleHeading(2)}
+              />
+              <NotesToolBtn
+                label={<HeadingIcon level={3} />}
+                title="Heading 3"
+                active={(notesSelVersion(), notesActions()?.isActive("heading", { level: 3 }))}
+                onClick={() => notesActions()?.toggleHeading(3)}
+              />
+              <NotesDivider />
+              <NotesToolBtn
+                label={<UndoIcon />}
+                title="Undo"
+                onClick={() => notesActions()?.undo()}
+              />
+              <NotesToolBtn
+                label={<RedoIcon />}
+                title="Redo"
+                onClick={() => notesActions()?.redo()}
+              />
+              <NotesDivider />
+              {/* Show/Hide done: a solid accent pill when completed todos
+                  are being shown, an outlined eye-off pill (the default)
+                  when they're hidden. The count badge always shows how
+                  many are done. */}
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 pl-1.5 pr-1 h-7 rounded-md text-[11px] font-medium border transition-colors"
+                classList={{
+                  "border-accent bg-accent text-white": showDone(),
+                  "border-transparent text-fg-muted hover:text-fg hover:bg-bg-2": !showDone(),
+                }}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setShowDone((v) => !v)}
+                title={showDone() ? "Hide completed todos" : "Show completed todos"}
+                aria-pressed={showDone()}
+                data-testid="notes-toggle-done"
+              >
+                {showDone() ? <EyeOffIcon /> : <EyeIcon />}
+                <span
+                  class="inline-flex items-center justify-center min-w-[15px] h-[15px] px-1 rounded-full text-[10px] font-semibold"
+                  classList={{
+                    "bg-white/25 text-white": showDone(),
+                    "bg-bg-3 text-fg-muted": !showDone(),
+                  }}
+                >
+                  {notesTaskCounts().done}
                 </span>
-              </Show>
-              <Show when={notesErr()}>
-                <span class="text-danger" data-testid="notes-error" title={notesErr() ?? ""}>
-                  save failed
-                </span>
-              </Show>
+              </button>
             </div>
           </header>
           <div class="flex-1 min-h-0 overflow-hidden">

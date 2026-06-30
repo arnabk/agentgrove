@@ -36,6 +36,35 @@ export const [notesSavedAt, setNotesSavedAt] = createSignal<string | null>(null)
 export const [notesSaving, setNotesSaving] = createSignal(false);
 export const [notesErr, setNotesErr] = createSignal<string | null>(null);
 
+// Done-section state lives at module scope so the Notes title row in
+// RightSidebar can render the "Show/Hide done" toggle while the editor
+// (which owns the actual visibility CSS + task tallies) drives the
+// numbers. `showDone` = completed todos are currently revealed.
+// Default false → completed todos are hidden out of the box.
+export const [showDone, setShowDone] = createSignal(false);
+export const [notesTaskCounts, setNotesTaskCounts] = createSignal<{
+  total: number;
+  done: number;
+}>({ total: 0, done: 0 });
+
+/** Imperative editor controls exposed to the Notes title row (which
+ *  lives in RightSidebar, outside this component). Set when the editor
+ *  mounts, cleared on unmount. All formatting buttons — Todo, headings,
+ *  undo/redo — call through here so there's a single owner of the
+ *  ProseMirror instance. `version` bumps on every transaction so the
+ *  title row's active-state highlights re-render reactively. */
+export interface NotesActions {
+  toggleTask: () => void;
+  toggleHeading: (level: 1 | 2 | 3) => void;
+  undo: () => void;
+  redo: () => void;
+  isActive: (name: string, opts?: Record<string, unknown>) => boolean;
+}
+export const [notesActions, setNotesActions] = createSignal<NotesActions | null>(null);
+// Bumped on every editor transaction so reactive consumers (the title
+// row toolbar) recompute `isActive(...)` highlights.
+export const [notesSelVersion, setNotesSelVersion] = createSignal(0);
+
 export default function NotesPane() {
   let host!: HTMLDivElement;
   let editor: Editor | null = null;
@@ -51,16 +80,8 @@ export default function NotesPane() {
   // parsed back into a millisecond value reliably.
   let lastSavedMs = 0;
   const setErr = setNotesErr;
-  // Whether the collapsible "Done" section is expanded. Checked todos
-  // are hidden from the main list (visually "closed out") and revealed
-  // here on demand. Nothing is deleted — un-checking restores an item.
-  const [showDone, setShowDone] = createSignal(false);
-  // Live task tallies, recomputed on every edit so the "Done (N)"
-  // toggle label and the empty-state hint stay accurate.
-  const [taskCounts, setTaskCounts] = createSignal<{ total: number; done: number }>({
-    total: 0,
-    done: 0,
-  });
+  // Done-section visibility + task tallies are module-level (declared
+  // above) so the title row in RightSidebar can render the toggle.
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   // Data-loss guards. A save must only ever persist content that the
   // user actually edited — never the transient empty doc that exists
@@ -102,8 +123,7 @@ export default function NotesPane() {
           HTMLAttributes: { rel: "noopener noreferrer", target: "_blank" },
         }),
         Placeholder.configure({
-          placeholder:
-            "Start writing… use the toolbar above, markdown shortcuts, or paste markdown directly.",
+          placeholder: "Add a todo… press Enter for the next one.",
         }),
         // Block-level drag handle: hovering any paragraph / heading
         // / list-item reveals a `⠿` grab handle in the left gutter
@@ -129,7 +149,19 @@ export default function NotesPane() {
       onUpdate: () => {
         scheduleSave();
         recomputeCounts();
+        setNotesSelVersion((v) => v + 1);
       },
+      onSelectionUpdate: () => setNotesSelVersion((v) => v + 1),
+    });
+
+    // Publish the editor's controls so the Notes title row (rendered in
+    // RightSidebar) can drive formatting without owning the instance.
+    setNotesActions({
+      toggleTask: () => editor?.chain().focus().toggleTaskList().run(),
+      toggleHeading: (level) => editor?.chain().focus().toggleHeading({ level }).run(),
+      undo: () => editor?.chain().focus().undo().run(),
+      redo: () => editor?.chain().focus().redo().run(),
+      isActive: (name, opts) => Boolean(editor?.isActive(name, opts)),
     });
   });
 
@@ -157,6 +189,7 @@ export default function NotesPane() {
     }
     editor?.destroy();
     editor = null;
+    setNotesActions(null);
   });
 
   // Load the global note once the editor exists. Notes are no longer
@@ -232,7 +265,7 @@ export default function NotesPane() {
    *  "Done (N)" toggle + empty hint stay in sync after every edit. */
   function recomputeCounts() {
     if (!editor) return;
-    setTaskCounts(countTasks(editor.getHTML()));
+    setNotesTaskCounts(countTasks(editor.getHTML()));
   }
 
   function scheduleSave() {
@@ -286,69 +319,8 @@ export default function NotesPane() {
     void loadNote();
   });
 
-  // ---- toolbar actions ----
-  function chain() {
-    return editor?.chain().focus();
-  }
-  const isActive = (name: string, opts?: Record<string, unknown>) =>
-    Boolean(editor?.isActive(name, opts));
-
   return (
     <section data-testid="notes-pane" class="flex flex-col h-full">
-      <header class="px-3 py-2 border-b border-border bg-bg-1 flex items-center gap-1 flex-wrap">
-        <ToolbarGroup>
-          <ToolBtn
-            label={<TaskListIcon />}
-            title="Todo item (checkbox)"
-            active={isActive("taskList")}
-            onClick={() => chain()?.toggleTaskList().run()}
-          />
-        </ToolbarGroup>
-        <Divider />
-        {/* Headings stay so the checklist can be grouped into sections. */}
-        <ToolbarGroup>
-          <ToolBtn
-            label={<HeadingIcon level={1} />}
-            title="Heading 1"
-            active={isActive("heading", { level: 1 })}
-            onClick={() => chain()?.toggleHeading({ level: 1 }).run()}
-          />
-          <ToolBtn
-            label={<HeadingIcon level={2} />}
-            title="Heading 2"
-            active={isActive("heading", { level: 2 })}
-            onClick={() => chain()?.toggleHeading({ level: 2 }).run()}
-          />
-          <ToolBtn
-            label={<HeadingIcon level={3} />}
-            title="Heading 3"
-            active={isActive("heading", { level: 3 })}
-            onClick={() => chain()?.toggleHeading({ level: 3 }).run()}
-          />
-        </ToolbarGroup>
-        <Divider />
-        <ToolbarGroup>
-          <ToolBtn label={<UndoIcon />} title="Undo (⌘Z)" onClick={() => chain()?.undo().run()} />
-          <ToolBtn label={<RedoIcon />} title="Redo (⌘⇧Z)" onClick={() => chain()?.redo().run()} />
-        </ToolbarGroup>
-
-        {/* "Done (N)" toggle. Checked todos are hidden from the main
-            list (the "close out" behaviour); this reveals them so they
-            can be reviewed or un-checked to restore. */}
-        <button
-          type="button"
-          class="ml-auto inline-flex items-center gap-1.5 px-2 h-7 rounded-md text-[12px] text-fg-muted hover:text-fg hover:bg-bg-2 transition-colors"
-          classList={{ "!bg-bg-3 !text-fg": showDone() }}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => setShowDone((v) => !v)}
-          title={showDone() ? "Hide completed todos" : "Show completed todos"}
-          data-testid="notes-toggle-done"
-        >
-          <CheckCircleIcon />
-          Done ({taskCounts().done})
-        </button>
-      </header>
-
       {/* Editor host. The `notes-hide-done` class hides checked todos
           from the main view (the "close out" behaviour); toggling the
           Done button removes it so completed items reappear in place.
@@ -368,18 +340,14 @@ export default function NotesPane() {
   );
 }
 
-function ToolbarGroup(props: { children: import("solid-js").JSX.Element }) {
-  return <div class="flex items-center gap-0.5">{props.children}</div>;
-}
-
-function Divider() {
+export function NotesDivider() {
   return <div class="w-px h-5 bg-border" />;
 }
 
-function ToolBtn(props: {
+export function NotesToolBtn(props: {
   label: import("solid-js").JSX.Element;
   title: string;
-  active?: boolean;
+  active?: boolean | undefined;
   onClick: () => void;
 }) {
   return (
@@ -422,7 +390,7 @@ const SVG_DEFAULTS = {
   "aria-hidden": true,
 } as const;
 
-function HeadingIcon(props: { level: 1 | 2 | 3 }) {
+export function HeadingIcon(props: { level: 1 | 2 | 3 }) {
   return (
     <svg {...SVG_DEFAULTS}>
       <path d="M6 4v16M14 4v16M6 12h8" />
@@ -441,7 +409,7 @@ function HeadingIcon(props: { level: 1 | 2 | 3 }) {
   );
 }
 
-function CheckCircleIcon() {
+export function CheckCircleIcon() {
   return (
     <svg {...SVG_DEFAULTS}>
       <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
@@ -450,7 +418,27 @@ function CheckCircleIcon() {
   );
 }
 
-function TaskListIcon() {
+export function EyeIcon() {
+  return (
+    <svg {...SVG_DEFAULTS}>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+export function EyeOffIcon() {
+  return (
+    <svg {...SVG_DEFAULTS}>
+      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+      <path d="M6.61 6.61A13.5 13.5 0 0 0 2 12s3.5 7 10 7a9.12 9.12 0 0 0 5.39-1.61" />
+      <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+      <path d="m2 2 20 20" />
+    </svg>
+  );
+}
+
+export function TaskListIcon() {
   return (
     <svg {...SVG_DEFAULTS}>
       <path d="M11 6h10M11 12h10M11 18h10" />
@@ -462,7 +450,7 @@ function TaskListIcon() {
   );
 }
 
-function UndoIcon() {
+export function UndoIcon() {
   return (
     <svg {...SVG_DEFAULTS}>
       <path d="M3 7v6h6" />
@@ -471,7 +459,7 @@ function UndoIcon() {
   );
 }
 
-function RedoIcon() {
+export function RedoIcon() {
   return (
     <svg {...SVG_DEFAULTS}>
       <path d="M21 7v6h-6" />
