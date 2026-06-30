@@ -54,6 +54,7 @@ Rust backend + SolidJS frontend. Cross-platform (Linux, macOS, Windows).
 - **Chat forking** — fork a conversation from any point to explore a different direction
 - **Message resend** — re-trigger any user message to re-run it through the agent
 - **Prompt revert** — ask AI to undo the file changes a specific prompt produced
+- **Delete from point** — truncate the conversation from any prompt onwards, clearing the timeline to that point
 - **Copy buttons** — hover to copy user or assistant messages
 - **Smart input** — Tiptap rich-text composer with bullet/number/blockquote/code-fence autoformat
 - **Slash commands** — `/` menu with provider commands + user-defined prompt templates

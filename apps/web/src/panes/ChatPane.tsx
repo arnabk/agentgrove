@@ -976,6 +976,25 @@ export default function ChatPane() {
     }
   }
 
+  async function truncateFromPrompt(p: Prompt) {
+    const id = activeId();
+    if (!id) return;
+    const ok = await confirm({
+      title: `Delete from prompt #${p.seq}?`,
+      body: "This will permanently remove this message and everything after it from the conversation. This cannot be undone.",
+      confirmLabel: "Delete",
+      danger: true,
+      testId: "confirm-truncate-chat",
+    });
+    if (!ok) return;
+    try {
+      await api.truncateChat(id, p.seq);
+      await loadChat();
+    } catch {
+      setErr("Failed to delete messages");
+    }
+  }
+
   const chat = createMemo(() => chatStore.view);
 
   /** Dropdown options for the inline composer-row model picker.
@@ -1219,6 +1238,7 @@ export default function ChatPane() {
               onRevert={(p) => void revert(p)}
               onFork={(p) => void forkFromPrompt(p)}
               onResend={(p) => void resendPrompt(p)}
+              onTruncate={(p) => void truncateFromPrompt(p)}
             />
           </Show>
 
@@ -1572,6 +1592,7 @@ function VirtualizedTimeline(props: {
   onRevert: (p: Prompt) => void;
   onFork: (p: Prompt) => void;
   onResend: (p: Prompt) => void;
+  onTruncate: (p: Prompt) => void;
 }) {
   let scrollRef!: HTMLDivElement;
   let prevLength = props.prompts.length;
@@ -1813,6 +1834,7 @@ function VirtualizedTimeline(props: {
                     onRevert={() => props.onRevert(prompt()!)}
                     onFork={() => props.onFork(prompt()!)}
                     onResend={() => props.onResend(prompt()!)}
+                    onTruncate={() => props.onTruncate(prompt()!)}
                   />
                 </div>
               </Show>
@@ -1834,6 +1856,7 @@ function PromptRow(props: {
   onRevert: () => void;
   onFork: () => void;
   onResend: () => void;
+  onTruncate: () => void;
 }) {
   function assistantText(): string {
     if (props.liveToken !== undefined) return props.liveToken;
@@ -2112,6 +2135,14 @@ function PromptRow(props: {
           title="Ask AI to revert this prompt's changes"
         >
           ↺ Revert
+        </button>
+        <button
+          class="ag-btn ag-btn-ghost !py-0.5 !px-1.5 !text-[11px] text-danger"
+          onClick={() => props.onTruncate()}
+          data-testid={`truncate-${props.prompt.id}`}
+          title="Delete this message and everything after it"
+        >
+          ✂ Delete from here
         </button>
       </div>
     </article>

@@ -419,6 +419,15 @@ export const api = {
     req<void>(`/api/chats/${encodeURIComponent(chatId)}/stop`, {
       method: "POST",
     }),
+  truncateChat: (chatId: string, fromSeq: number) =>
+    req<{ deleted_count: number; deleted_prompt_ids: string[] }>(
+      `/api/chats/${encodeURIComponent(chatId)}/truncate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from_seq: fromSeq }),
+      },
+    ),
   forkChat: (chatId: string, promptSeq: number) =>
     req<{
       id: string;

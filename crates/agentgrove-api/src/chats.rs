@@ -264,6 +264,20 @@ impl ChatRegistry {
         Some(rec)
     }
 
+    /// Delete all prompts from `from_seq` onwards (inclusive). Returns
+    /// the ids of deleted prompts, or None if the chat doesn't exist.
+    pub fn truncate_from_seq(&mut self, chat_id: &str, from_seq: u32) -> Option<Vec<String>> {
+        let chat = self.by_id.get_mut(chat_id)?;
+        let removed: Vec<String> = chat
+            .prompts
+            .iter()
+            .filter(|p| p.seq >= from_seq)
+            .map(|p| p.id.clone())
+            .collect();
+        chat.prompts.retain(|p| p.seq < from_seq);
+        Some(removed)
+    }
+
     /// Insert a pre-built chat (used by hydration to load rows from
     /// the SQLite store at startup). Skips the usual id-generation
     /// because the caller already has the persisted id.
@@ -1308,7 +1322,7 @@ pub async fn stop_turn(State(state): State<AppState>, Path(id): Path<String>) ->
                         // Notify FE to reload
                         state.logbus.publish(
                             &format!("chat:{id}"),
-                            &serde_json::json!({"type":"chat_idle"}).to_string(),
+                            serde_json::json!({"type":"chat_idle"}).to_string(),
                         );
                         return StatusCode::NO_CONTENT;
                     }
@@ -1384,7 +1398,7 @@ pub async fn fork_chat(
 
     state.logbus.publish(
         "sync",
-        &serde_json::json!({
+        serde_json::json!({
             "kind": "chat_created",
             "project_id": forked.project_id,
             "chat_id": forked.id,
@@ -1400,6 +1414,37 @@ pub async fn fork_chat(
         "project_id": forked.project_id,
         "worktree_id": forked.worktree_id,
         "prompts_count": forked.prompts.len(),
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct TruncateBody {
+    pub from_seq: u32,
+}
+
+pub async fn truncate_chat(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<TruncateBody>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let removed = {
+        let mut reg = state.chats.write().await;
+        reg.truncate_from_seq(&id, body.from_seq)
+    };
+    let removed = removed.ok_or((StatusCode::NOT_FOUND, "chat not found".into()))?;
+
+    for pid in &removed {
+        let _ = state.chat_store.delete_prompt(pid).await;
+    }
+
+    state.logbus.publish(
+        &format!("chat:{id}"),
+        serde_json::json!({"type":"chat_idle"}).to_string(),
+    );
+
+    Ok(Json(serde_json::json!({
+        "deleted_count": removed.len(),
+        "deleted_prompt_ids": removed,
     })))
 }
 
