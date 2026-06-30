@@ -11,6 +11,7 @@ import { Markdown } from "tiptap-markdown";
 import { api } from "../api/client";
 import { useSyncSubscription } from "../lib/crossInstanceSync";
 import { listsToTaskLists, countTasks, emptyTodoDoc } from "../lib/notesTodo";
+import { CollapsibleHeading } from "../lib/collapsibleHeading";
 
 /**
  * One large workspace-**global** rich-text scratchpad. Persists to the
@@ -108,6 +109,10 @@ export default function NotesPane() {
         }),
         TaskList,
         TaskItem.configure({ nested: true }),
+        // Adds a persisted `collapsed` attribute to headings + the
+        // ▸/▾ fold toggle. Lets the user group todos under a heading
+        // and collapse the whole group.
+        CollapsibleHeading,
         Typography,
         Markdown.configure({
           html: true,

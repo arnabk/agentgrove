@@ -866,6 +866,47 @@ textarea::placeholder {
   color: var(--ag-fg-muted);
   text-decoration: line-through;
 }
+/* Collapsible headings (Notes todo groups). The ▸/▾ toggle is a widget
+   decoration drawn just inside each heading; we pull it into the left
+   gutter so it doesn't push the heading text. */
+.ag-prose h1,
+.ag-prose h2,
+.ag-prose h3 {
+  position: relative;
+}
+.ag-heading-toggle {
+  position: absolute;
+  left: -1.25em;
+  top: 0.08em;
+  width: 1em;
+  height: 1em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ag-fg-subtle);
+  font-size: 0.7em;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    transform 120ms ease,
+    color 120ms ease;
+}
+.ag-heading-toggle:hover {
+  color: var(--ag-accent);
+}
+/* Caret points right when collapsed, rotates down when expanded. */
+.ag-heading-toggle[data-collapsed="false"] {
+  transform: rotate(90deg);
+}
+/* Blocks folded away under a collapsed heading. */
+.ag-prose .ag-collapsed-hidden {
+  display: none;
+}
+
 /* "Close out the item": when the Notes pane is in its default mode
    (Done section collapsed), checked todos are hidden from the main
    list. Toggling "Done" removes `.notes-hide-done`, revealing them in
