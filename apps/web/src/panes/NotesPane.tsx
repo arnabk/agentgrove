@@ -56,7 +56,10 @@ export const [notesTaskCounts, setNotesTaskCounts] = createSignal<{
  *  title row's active-state highlights re-render reactively. */
 export interface NotesActions {
   toggleTask: () => void;
-  toggleHeading: (level: 1 | 2 | 3) => void;
+  /** Toggle the current line to/from a section heading. We use a single
+   *  fixed level (H3) — the editor is a checklist, not a document, so
+   *  the only structural unit above a todo is a collapsible "section". */
+  toggleSection: () => void;
   undo: () => void;
   redo: () => void;
   isActive: (name: string, opts?: Record<string, unknown>) => boolean;
@@ -163,7 +166,7 @@ export default function NotesPane() {
     // RightSidebar) can drive formatting without owning the instance.
     setNotesActions({
       toggleTask: () => editor?.chain().focus().toggleTaskList().run(),
-      toggleHeading: (level) => editor?.chain().focus().toggleHeading({ level }).run(),
+      toggleSection: () => editor?.chain().focus().toggleHeading({ level: 3 }).run(),
       undo: () => editor?.chain().focus().undo().run(),
       redo: () => editor?.chain().focus().redo().run(),
       isActive: (name, opts) => Boolean(editor?.isActive(name, opts)),
@@ -395,21 +398,12 @@ const SVG_DEFAULTS = {
   "aria-hidden": true,
 } as const;
 
-export function HeadingIcon(props: { level: 1 | 2 | 3 }) {
+/** Section-heading glyph: a clean "H" mark (the editor only has one
+ *  heading level now, so no number needed). */
+export function SectionIcon() {
   return (
     <svg {...SVG_DEFAULTS}>
-      <path d="M6 4v16M14 4v16M6 12h8" />
-      <text
-        x="16.5"
-        y="20"
-        fill="currentColor"
-        stroke="none"
-        font-size="9"
-        font-weight="700"
-        font-family="ui-sans-serif, system-ui, sans-serif"
-      >
-        {props.level}
-      </text>
+      <path d="M6 4v16M18 4v16M6 12h12" />
     </svg>
   );
 }

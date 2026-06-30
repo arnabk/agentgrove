@@ -9,7 +9,7 @@ import NotesPane, {
   setShowDone,
   NotesToolBtn,
   NotesDivider,
-  HeadingIcon,
+  SectionIcon,
   TaskListIcon,
   UndoIcon,
   RedoIcon,
@@ -145,23 +145,15 @@ export default function RightSidebar() {
                 onClick={() => notesActions()?.toggleTask()}
               />
               <NotesDivider />
+              {/* Single "Section heading" toggle. The editor is a
+                  checklist, so the only structural unit above a todo is a
+                  collapsible section — always H3. Active when the cursor
+                  sits in any heading. */}
               <NotesToolBtn
-                label={<HeadingIcon level={1} />}
-                title="Heading 1"
-                active={(notesSelVersion(), notesActions()?.isActive("heading", { level: 1 }))}
-                onClick={() => notesActions()?.toggleHeading(1)}
-              />
-              <NotesToolBtn
-                label={<HeadingIcon level={2} />}
-                title="Heading 2"
-                active={(notesSelVersion(), notesActions()?.isActive("heading", { level: 2 }))}
-                onClick={() => notesActions()?.toggleHeading(2)}
-              />
-              <NotesToolBtn
-                label={<HeadingIcon level={3} />}
-                title="Heading 3"
-                active={(notesSelVersion(), notesActions()?.isActive("heading", { level: 3 }))}
-                onClick={() => notesActions()?.toggleHeading(3)}
+                label={<SectionIcon />}
+                title="Section heading"
+                active={(notesSelVersion(), notesActions()?.isActive("heading"))}
+                onClick={() => notesActions()?.toggleSection()}
               />
               <NotesDivider />
               <NotesToolBtn
