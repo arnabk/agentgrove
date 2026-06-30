@@ -29,6 +29,7 @@ import ChatComposer, { type ChatComposerHandle } from "../components/ChatCompose
 import { ToolRail } from "./chat/ToolRail";
 import { useSyncSubscription } from "../lib/crossInstanceSync";
 import {
+  addChatTab,
   currentScope,
   currentWorktreeId,
   getChatDraft,
@@ -953,6 +954,28 @@ export default function ChatPane() {
     await loadChat();
   }
 
+  async function forkFromPrompt(p: Prompt) {
+    const id = activeId();
+    if (!id) return;
+    try {
+      const result = await api.forkChat(id, p.seq);
+      addChatTab({ id: result.id, title: result.title });
+    } catch {
+      setErr("Failed to fork chat");
+    }
+  }
+
+  async function resendPrompt(p: Prompt) {
+    const id = activeId();
+    if (!id) return;
+    try {
+      await api.sendMessage(id, p.content);
+      await loadChat();
+    } catch {
+      setErr("Failed to resend message");
+    }
+  }
+
   const chat = createMemo(() => chatStore.view);
 
   /** Dropdown options for the inline composer-row model picker.
@@ -1194,6 +1217,8 @@ export default function ChatPane() {
               loadingOlder={chatStore.loadingOlder}
               onLoadOlder={() => void loadOlder()}
               onRevert={(p) => void revert(p)}
+              onFork={(p) => void forkFromPrompt(p)}
+              onResend={(p) => void resendPrompt(p)}
             />
           </Show>
 
@@ -1545,6 +1570,8 @@ function VirtualizedTimeline(props: {
   loadingOlder: boolean;
   onLoadOlder: () => void;
   onRevert: (p: Prompt) => void;
+  onFork: (p: Prompt) => void;
+  onResend: (p: Prompt) => void;
 }) {
   let scrollRef!: HTMLDivElement;
   let prevLength = props.prompts.length;
@@ -1784,6 +1811,8 @@ function VirtualizedTimeline(props: {
                     liveToken={props.liveTokens[prompt()!.id]}
                     liveThinking={props.liveThinking[prompt()!.id]}
                     onRevert={() => props.onRevert(prompt()!)}
+                    onFork={() => props.onFork(prompt()!)}
+                    onResend={() => props.onResend(prompt()!)}
                   />
                 </div>
               </Show>
@@ -1803,6 +1832,8 @@ function PromptRow(props: {
   liveToken: string | undefined;
   liveThinking: string | undefined;
   onRevert: () => void;
+  onFork: () => void;
+  onResend: () => void;
 }) {
   function assistantText(): string {
     if (props.liveToken !== undefined) return props.liveToken;
@@ -2058,6 +2089,22 @@ function PromptRow(props: {
       </Show>
       <div class="flex items-center gap-2 text-[11px] text-fg-subtle opacity-0 group-hover:opacity-100 transition-opacity">
         <span class="ag-chip">#{props.prompt.seq}</span>
+        <button
+          class="ag-btn ag-btn-ghost !py-0.5 !px-1.5 !text-[11px]"
+          onClick={() => props.onResend()}
+          data-testid={`resend-${props.prompt.id}`}
+          title="Re-send this message to the agent"
+        >
+          ↻ Resend
+        </button>
+        <button
+          class="ag-btn ag-btn-ghost !py-0.5 !px-1.5 !text-[11px]"
+          onClick={() => props.onFork()}
+          data-testid={`fork-${props.prompt.id}`}
+          title="Fork a new chat from this point in the conversation"
+        >
+          ⑂ Fork
+        </button>
         <button
           class="ag-btn ag-btn-ghost !py-0.5 !px-1.5 !text-[11px]"
           onClick={() => props.onRevert()}

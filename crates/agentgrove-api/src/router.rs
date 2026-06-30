@@ -83,6 +83,7 @@ pub fn build_router(state: AppState) -> Router {
         // subprocess, appends a synthetic `cancelled by user`
         // error event, frees the chat for the next message).
         .route("/api/chats/:id/stop", post(chats::stop_turn))
+        .route("/api/chats/:id/fork", post(chats::fork_chat))
         .route(
             "/api/chats/:chat_id/prompts/:prompt_id/revert",
             post(chats::revert_prompt),

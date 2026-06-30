@@ -419,6 +419,20 @@ export const api = {
     req<void>(`/api/chats/${encodeURIComponent(chatId)}/stop`, {
       method: "POST",
     }),
+  forkChat: (chatId: string, promptSeq: number) =>
+    req<{
+      id: string;
+      title: string;
+      provider: string;
+      model: string;
+      project_id: string;
+      worktree_id: string | null;
+      prompts_count: number;
+    }>(`/api/chats/${encodeURIComponent(chatId)}/fork`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt_seq: promptSeq }),
+    }),
   revertPrompt: (chatId: string, promptId: string) =>
     req<Prompt>(
       `/api/chats/${encodeURIComponent(chatId)}/prompts/${encodeURIComponent(promptId)}/revert`,

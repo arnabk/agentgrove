@@ -20,7 +20,7 @@ dependencies = [
 
 [[package]]
 name = "agentgrove-agents"
-version = "0.0.70"
+version = "0.0.99"
 dependencies = [
  "agentgrove-core",
  "async-trait",
@@ -40,7 +40,7 @@ dependencies = [
 
 [[package]]
 name = "agentgrove-api"
-version = "0.0.70"
+version = "0.0.99"
 dependencies = [
  "agentgrove-agents",
  "agentgrove-core",
@@ -80,7 +80,7 @@ dependencies = [
 
 [[package]]
 name = "agentgrove-core"
-version = "0.0.70"
+version = "0.0.99"
 dependencies = [
  "chrono",
  "serde",
@@ -91,7 +91,7 @@ dependencies = [
 
 [[package]]
 name = "agentgrove-fswatch"
-version = "0.0.70"
+version = "0.0.99"
 dependencies = [
  "notify",
  "notify-debouncer-full",
@@ -102,7 +102,7 @@ dependencies = [
 
 [[package]]
 name = "agentgrove-git"
-version = "0.0.70"
+version = "0.0.99"
 dependencies = [
  "agentgrove-core",
  "gix",
@@ -111,12 +111,13 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "which",
 ]
 
 [[package]]
 name = "agentgrove-pty"
-version = "0.0.70"
+version = "0.0.99"
 dependencies = [
  "portable-pty",
  "thiserror 1.0.69",
@@ -125,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "agentgrove-scripts"
-version = "0.0.70"
+version = "0.0.99"
 dependencies = [
  "futures",
  "serde",
@@ -138,7 +139,7 @@ dependencies = [
 
 [[package]]
 name = "agentgrove-server"
-version = "0.0.70"
+version = "0.0.99"
 dependencies = [
  "agentgrove-api",
  "agentgrove-core",
@@ -155,7 +156,7 @@ dependencies = [
 
 [[package]]
 name = "agentgrove-store"
-version = "0.0.70"
+version = "0.0.99"
 dependencies = [
  "agentgrove-core",
  "base64",

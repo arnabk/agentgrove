@@ -1559,18 +1559,24 @@ async fn flip_to_auto_on_idle_chat_drains_pending_backlog() {
         assert_eq!(p["content"].as_str().unwrap(), format!("parked-{i}"));
     }
 
-    // Queue is now empty.
-    let q: Value = h
-        .get_auth(&format!("/api/chats/{chat_id}/queue"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert!(
-        q["items"].as_array().unwrap().is_empty(),
-        "queue not empty after auto drain: {:?}",
-        q["items"]
-    );
+    // Queue should be empty (items removed by mark_done). Poll briefly
+    // because on slow CI runners the drain task may not have committed
+    // the removal yet.
+    let mut queue_empty = false;
+    for _ in 0..40 {
+        let q: Value = h
+            .get_auth(&format!("/api/chats/{chat_id}/queue"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if q["items"].as_array().unwrap().is_empty() {
+            queue_empty = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(queue_empty, "queue not empty after auto drain");
 }

@@ -225,6 +225,45 @@ impl ChatRegistry {
         }
     }
 
+    /// Fork a chat at a given prompt sequence number. Creates a new
+    /// chat with all prompts up to and including `up_to_seq`, copying
+    /// metadata (project, worktree, provider, model, effort) but
+    /// clearing the session_id so the new chat starts a fresh provider
+    /// session. Returns the new chat or `None` if the source chat or
+    /// seq is invalid.
+    pub fn fork(&mut self, source_id: &str, up_to_seq: u32) -> Option<ChatRecord> {
+        let source = self.by_id.get(source_id)?.clone();
+        let forked_prompts: Vec<PromptRecord> = source
+            .prompts
+            .iter()
+            .filter(|p| p.seq <= up_to_seq)
+            .cloned()
+            .collect();
+        if forked_prompts.is_empty() {
+            return None;
+        }
+        let new_id = Uuid::now_v7().to_string();
+        let new_title = format!("Fork of {} (from #{})", source.title, up_to_seq);
+        let rec = ChatRecord {
+            id: new_id.clone(),
+            project_id: source.project_id.clone(),
+            worktree_id: source.worktree_id.clone(),
+            title: new_title,
+            provider: source.provider.clone(),
+            model: source.model.clone(),
+            created_at: Utc::now(),
+            prompts: forked_prompts,
+            session_id: None,
+            effort: source.effort.clone(),
+        };
+        self.by_project
+            .entry(rec.project_id.clone())
+            .or_default()
+            .push(new_id);
+        self.by_id.insert(rec.id.clone(), rec.clone());
+        Some(rec)
+    }
+
     /// Insert a pre-built chat (used by hydration to load rows from
     /// the SQLite store at startup). Skips the usual id-generation
     /// because the caller already has the persisted id.
@@ -1248,6 +1287,12 @@ pub async fn stop_turn(State(state): State<AppState>, Path(id): Path<String>) ->
                             .unwrap_or(false)
                     });
                     if !has_terminal {
+                        let err_event = AgentEvent::Error {
+                            message:
+                                "Turn did not complete — the agent may have crashed or timed out."
+                                    .into(),
+                        };
+                        // Update the persisted store
                         let mut patched = events;
                         patched.push(serde_json::json!({
                             "type": "error",
@@ -1255,6 +1300,17 @@ pub async fn stop_turn(State(state): State<AppState>, Path(id): Path<String>) ->
                         }));
                         let patched_json = serde_json::Value::Array(patched);
                         let _ = state.chat_store.write_events(&tail.id, &patched_json).await;
+                        // Update the in-memory registry so the FE sees it immediately
+                        {
+                            let mut reg = state.chats.write().await;
+                            reg.append_event(&id, &tail.id, err_event);
+                        }
+                        // Notify FE to reload
+                        state.logbus.publish(
+                            &format!("chat:{id}"),
+                            &serde_json::json!({"type":"chat_idle"}).to_string(),
+                        );
+                        return StatusCode::NO_CONTENT;
                     }
                 }
             }
@@ -1289,6 +1345,62 @@ pub async fn stop_turn(State(state): State<AppState>, Path(id): Path<String>) ->
     }
 
     result
+}
+
+#[derive(Deserialize)]
+pub struct ForkBody {
+    pub prompt_seq: u32,
+}
+
+pub async fn fork_chat(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<ForkBody>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let forked = {
+        let mut reg = state.chats.write().await;
+        reg.fork(&id, body.prompt_seq)
+    };
+    let forked = forked.ok_or((StatusCode::NOT_FOUND, "chat or prompt_seq not found".into()))?;
+
+    let _ = state
+        .chat_store
+        .create(
+            &forked.project_id,
+            forked.worktree_id.as_deref(),
+            &forked.title,
+            &forked.provider,
+            &forked.model,
+            forked.effort.as_deref(),
+        )
+        .await;
+
+    for p in &forked.prompts {
+        if let Ok(row) = state.chat_store.add_prompt(&forked.id, &p.content).await {
+            let events_json = serde_json::to_value(&p.events).unwrap_or_default();
+            let _ = state.chat_store.write_events(&row.id, &events_json).await;
+        }
+    }
+
+    state.logbus.publish(
+        "sync",
+        &serde_json::json!({
+            "kind": "chat_created",
+            "project_id": forked.project_id,
+            "chat_id": forked.id,
+        })
+        .to_string(),
+    );
+
+    Ok(Json(serde_json::json!({
+        "id": forked.id,
+        "title": forked.title,
+        "provider": forked.provider,
+        "model": forked.model,
+        "project_id": forked.project_id,
+        "worktree_id": forked.worktree_id,
+        "prompts_count": forked.prompts.len(),
+    })))
 }
 
 /// RAII guard that clears the chat's `dispatching` flag on drop.

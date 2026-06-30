@@ -269,29 +269,41 @@ export default function App() {
               >
                 {/* Top bar: unified tab strip + settings + indicators */}
                 <div class="flex items-center border-b border-border bg-bg-1 shrink-0">
-                  {/* Left rail toggle */}
-                  <button
-                    type="button"
-                    class="ag-btn ag-btn-ghost ag-btn-icon shrink-0 ml-1"
-                    onClick={toggleLeftRail}
-                    title={leftRailOpen() ? "Hide projects" : "Show projects"}
-                    data-testid="left-rail-toggle"
-                  >
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="1.8"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      aria-hidden="true"
+                  {/* App icon + left rail toggle */}
+                  <div class="flex items-center shrink-0 ml-1 gap-0.5">
+                    <Show when={!leftRailOpen()}>
+                      <span class="flex items-center justify-center w-7 h-7" title="AgentGrove">
+                        <svg width="20" height="20" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+                          <rect x="2" y="2" width="28" height="28" rx="6" fill="var(--ag-accent, #7c5cff)" opacity="0.15" />
+                          <path d="M10 22V12l6-4 6 4v10" stroke="var(--ag-accent, #7c5cff)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                          <path d="M14 22v-5h4v5" stroke="var(--ag-accent, #7c5cff)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                          <circle cx="16" cy="13" r="1.5" fill="var(--ag-accent, #7c5cff)" />
+                        </svg>
+                      </span>
+                    </Show>
+                    <button
+                      type="button"
+                      class="ag-btn ag-btn-ghost ag-btn-icon"
+                      onClick={toggleLeftRail}
+                      title={leftRailOpen() ? "Hide projects" : "Show projects"}
+                      data-testid="left-rail-toggle"
                     >
-                      <rect x="3" y="3" width="18" height="18" rx="2" />
-                      <path d="M9 3v18" />
-                    </svg>
-                  </button>
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                      >
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <path d="M9 3v18" />
+                      </svg>
+                    </button>
+                  </div>
                   <div class="flex-1 min-w-0 overflow-hidden">
                     <TabStrip />
                   </div>

@@ -935,10 +935,12 @@ textarea::placeholder {
    (Done section collapsed), checked todos are hidden from the main
    list. Toggling "Done" removes `.notes-hide-done`, revealing them in
    place. Visibility only — the underlying document is untouched, so an
-   item is restored simply by un-checking it. We hide only TOP-LEVEL
-   checked items (`> ul > li`) so a checked sub-task inside a still-open
-   parent stays visible with its parent. */
-.notes-hide-done .ag-prose > ul[data-type="taskList"] > li[data-checked="true"] {
+   item is restored simply by un-checking it.
+
+   Hide checked items at ANY nesting depth: checking a parent hides it
+   (and its whole subtree); checking a nested sub-task hides just that
+   sub-task. */
+.notes-hide-done .ag-prose ul[data-type="taskList"] li[data-checked="true"] {
   display: none;
 }
 /* Nested task lists indent under their parent. */
