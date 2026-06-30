@@ -273,10 +273,36 @@ export default function App() {
                   <div class="flex items-center shrink-0 ml-1 gap-0.5">
                     <Show when={!leftRailOpen()}>
                       <span class="flex items-center justify-center w-7 h-7" title="AgentGrove">
-                        <svg width="20" height="20" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-                          <rect x="2" y="2" width="28" height="28" rx="6" fill="var(--ag-accent, #7c5cff)" opacity="0.15" />
-                          <path d="M10 22V12l6-4 6 4v10" stroke="var(--ag-accent, #7c5cff)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                          <path d="M14 22v-5h4v5" stroke="var(--ag-accent, #7c5cff)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                        <svg
+                          width="20"
+                          height="20"
+                          viewBox="0 0 32 32"
+                          fill="none"
+                          aria-hidden="true"
+                        >
+                          <rect
+                            x="2"
+                            y="2"
+                            width="28"
+                            height="28"
+                            rx="6"
+                            fill="var(--ag-accent, #7c5cff)"
+                            opacity="0.15"
+                          />
+                          <path
+                            d="M10 22V12l6-4 6 4v10"
+                            stroke="var(--ag-accent, #7c5cff)"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          />
+                          <path
+                            d="M14 22v-5h4v5"
+                            stroke="var(--ag-accent, #7c5cff)"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          />
                           <circle cx="16" cy="13" r="1.5" fill="var(--ag-accent, #7c5cff)" />
                         </svg>
                       </span>

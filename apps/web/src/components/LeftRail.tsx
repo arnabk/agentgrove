@@ -612,46 +612,127 @@ export default function LeftRail() {
                             data-testid={`project-menu-list-${p.id}`}
                           >
                             {/* ── Create ── */}
-                            <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2" onClick={() => { setOpenMenuFor(null); openNewChatDialog(p.id, null, p.name); }} data-testid={`new-chat-${p.id}`}>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                              onClick={() => {
+                                setOpenMenuFor(null);
+                                openNewChatDialog(p.id, null, p.name);
+                              }}
+                              data-testid={`new-chat-${p.id}`}
+                            >
                               <ChatPlusIcon /> New chat
                             </button>
-                            <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2" onClick={() => { setOpenMenuFor(null); void openTerminalAt(p.id, null, p.name); }} data-testid={`new-terminal-${p.id}`}>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                              onClick={() => {
+                                setOpenMenuFor(null);
+                                void openTerminalAt(p.id, null, p.name);
+                              }}
+                              data-testid={`new-terminal-${p.id}`}
+                            >
                               <TerminalPlusIcon /> New terminal
                             </button>
 
                             {/* ── Git ── */}
                             <Show when={p.is_git}>
                               <div class="my-1 border-t border-border" />
-                              <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2" onClick={() => { setOpenMenuFor(null); setChangesScope({ path: p.root, label: p.name }); }} data-testid={`changes-${p.id}`}>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                onClick={() => {
+                                  setOpenMenuFor(null);
+                                  setChangesScope({ path: p.root, label: p.name });
+                                }}
+                                data-testid={`changes-${p.id}`}
+                              >
                                 <DiffIcon /> View changes
                               </button>
                             </Show>
                             <Show when={p.has_remote}>
-                              <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2" onClick={() => { setOpenMenuFor(null); setWtFor(p.id); }} data-testid={`new-worktree-${p.id}`}>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                onClick={() => {
+                                  setOpenMenuFor(null);
+                                  setWtFor(p.id);
+                                }}
+                                data-testid={`new-worktree-${p.id}`}
+                              >
                                 <BranchPlusIcon /> New worktree
                               </button>
-                              <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2" onClick={() => { setOpenMenuFor(null); setHistoryFor(p.id); }} data-testid={`worktree-history-${p.id}`}>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                onClick={() => {
+                                  setOpenMenuFor(null);
+                                  setHistoryFor(p.id);
+                                }}
+                                data-testid={`worktree-history-${p.id}`}
+                              >
                                 <HistoryIcon /> Worktree history
                               </button>
                             </Show>
 
                             {/* ── Manage ── */}
                             <div class="my-1 border-t border-border" />
-                            <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2" onClick={() => { setOpenMenuFor(null); setChatHistoryFor({ projectId: p.id }); }} data-testid={`chat-history-${p.id}`}>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                              onClick={() => {
+                                setOpenMenuFor(null);
+                                setChatHistoryFor({ projectId: p.id });
+                              }}
+                              data-testid={`chat-history-${p.id}`}
+                            >
                               <ChatHistoryIcon /> Chat history
                             </button>
-                            <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2" onClick={() => { setOpenMenuFor(null); refreshTree(p.root); }} data-testid={`refresh-tree-${p.id}`}>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                              onClick={() => {
+                                setOpenMenuFor(null);
+                                refreshTree(p.root);
+                              }}
+                              data-testid={`refresh-tree-${p.id}`}
+                            >
                               <RefreshIcon /> Refresh files
                             </button>
                             <Show when={p.is_git}>
-                              <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2" onClick={() => { setOpenMenuFor(null); setSettingsFor(p); }} data-testid={`project-settings-${p.id}`}>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                onClick={() => {
+                                  setOpenMenuFor(null);
+                                  setSettingsFor(p);
+                                }}
+                                data-testid={`project-settings-${p.id}`}
+                              >
                                 <GearIcon /> Project settings
                               </button>
                             </Show>
 
                             {/* ── Danger ── */}
                             <div class="my-1 border-t border-border" />
-                            <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 text-danger hover:bg-bg-2" onClick={(e) => { setOpenMenuFor(null); deleteProject(p.id, e); }} data-testid={`remove-project-${p.id}`}>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              class="w-full text-left px-3 py-1.5 flex items-center gap-2 text-danger hover:bg-bg-2"
+                              onClick={(e) => {
+                                setOpenMenuFor(null);
+                                deleteProject(p.id, e);
+                              }}
+                              data-testid={`remove-project-${p.id}`}
+                            >
                               <XIcon /> Remove project
                             </button>
                           </div>
@@ -985,34 +1066,104 @@ export default function LeftRail() {
                                         data-testid={`project-menu-list-wt-${w.id}`}
                                       >
                                         {/* ── Create ── */}
-                                        <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2" onClick={() => { setOpenMenuFor(null); openNewChatDialog(p.id, w.id, w.branch); }} data-testid={`new-chat-wt-${w.id}`}>
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                          onClick={() => {
+                                            setOpenMenuFor(null);
+                                            openNewChatDialog(p.id, w.id, w.branch);
+                                          }}
+                                          data-testid={`new-chat-wt-${w.id}`}
+                                        >
                                           <ChatPlusIcon /> New chat
                                         </button>
-                                        <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2" onClick={() => { setOpenMenuFor(null); void openTerminalAt(p.id, w.id, w.branch); }} data-testid={`new-terminal-wt-${w.id}`}>
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                          onClick={() => {
+                                            setOpenMenuFor(null);
+                                            void openTerminalAt(p.id, w.id, w.branch);
+                                          }}
+                                          data-testid={`new-terminal-wt-${w.id}`}
+                                        >
                                           <TerminalPlusIcon /> New terminal
                                         </button>
 
                                         {/* ── Git ── */}
                                         <div class="my-1 border-t border-border" />
-                                        <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2" onClick={() => { setOpenMenuFor(null); setChangesScope({ path: w.path, label: w.branch }); }} data-testid={`changes-wt-${w.id}`}>
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                          onClick={() => {
+                                            setOpenMenuFor(null);
+                                            setChangesScope({ path: w.path, label: w.branch });
+                                          }}
+                                          data-testid={`changes-wt-${w.id}`}
+                                        >
                                           <DiffIcon /> View changes
                                         </button>
-                                        <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2" onClick={() => { setOpenMenuFor(null); setRenameFor({ projectId: p.id, worktreeId: w.id, currentBranch: w.branch }); }} data-testid={`rename-wt-${w.id}`}>
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                          onClick={() => {
+                                            setOpenMenuFor(null);
+                                            setRenameFor({
+                                              projectId: p.id,
+                                              worktreeId: w.id,
+                                              currentBranch: w.branch,
+                                            });
+                                          }}
+                                          data-testid={`rename-wt-${w.id}`}
+                                        >
                                           <PencilIcon /> Rename branch
                                         </button>
 
                                         {/* ── Manage ── */}
                                         <div class="my-1 border-t border-border" />
-                                        <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2" onClick={() => { setOpenMenuFor(null); setChatHistoryFor({ projectId: p.id, worktreeId: w.id }); }} data-testid={`chat-history-wt-${w.id}`}>
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                          onClick={() => {
+                                            setOpenMenuFor(null);
+                                            setChatHistoryFor({
+                                              projectId: p.id,
+                                              worktreeId: w.id,
+                                            });
+                                          }}
+                                          data-testid={`chat-history-wt-${w.id}`}
+                                        >
                                           <ChatHistoryIcon /> Chat history
                                         </button>
-                                        <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2" onClick={() => { setOpenMenuFor(null); refreshTree(w.path); }} data-testid={`refresh-tree-wt-${w.id}`}>
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                          onClick={() => {
+                                            setOpenMenuFor(null);
+                                            refreshTree(w.path);
+                                          }}
+                                          data-testid={`refresh-tree-wt-${w.id}`}
+                                        >
                                           <RefreshIcon /> Refresh files
                                         </button>
 
                                         {/* ── Danger ── */}
                                         <div class="my-1 border-t border-border" />
-                                        <button type="button" role="menuitem" class="w-full text-left px-3 py-1.5 flex items-center gap-2 text-danger hover:bg-bg-2" onClick={(e) => { setOpenMenuFor(null); deleteWorktree(p.id, w.id, e); }} data-testid={`remove-wt-${w.id}`}>
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 text-danger hover:bg-bg-2"
+                                          onClick={(e) => {
+                                            setOpenMenuFor(null);
+                                            deleteWorktree(p.id, w.id, e);
+                                          }}
+                                          data-testid={`remove-wt-${w.id}`}
+                                        >
                                           <XIcon /> Remove worktree
                                         </button>
                                       </div>
@@ -1024,7 +1175,12 @@ export default function LeftRail() {
                                     worktree's path. Hidden when the
                                     rail's Files toggle is off. */}
                                 <Show when={wtOpen() && showFiles()}>
-                                  <DirNode path={w.path} depth={2} initiallyOpen refreshKey={treeRefreshKey(w.path)} />
+                                  <DirNode
+                                    path={w.path}
+                                    depth={2}
+                                    initiallyOpen
+                                    refreshKey={treeRefreshKey(w.path)}
+                                  />
                                 </Show>
                               </li>
                             );
@@ -1047,7 +1203,12 @@ export default function LeftRail() {
                   {/* Inline file tree for the project (when expanded).
                       Hidden when the rail's Files toggle is off. */}
                   <Show when={open() && showFiles()}>
-                    <DirNode path={p.root} depth={1} initiallyOpen refreshKey={treeRefreshKey(p.root)} />
+                    <DirNode
+                      path={p.root}
+                      depth={1}
+                      initiallyOpen
+                      refreshKey={treeRefreshKey(p.root)}
+                    />
                   </Show>
                 </li>
               );
@@ -1311,7 +1472,17 @@ function GearIcon() {
 
 function ChatHistoryIcon() {
   return (
-    <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <svg
+      width="1em"
+      height="1em"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
       <circle cx="12" cy="10" r="3" stroke-width="1.5" />
       <path d="M12 8.5v1.5l1 .5" stroke-width="1.5" />
@@ -1321,7 +1492,17 @@ function ChatHistoryIcon() {
 
 function RefreshIcon() {
   return (
-    <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <svg
+      width="1em"
+      height="1em"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
       <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
       <path d="M3 3v5h5" />
       <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
@@ -1568,7 +1749,12 @@ function DirNode(props: DirNodeProps) {
             when={entry.is_dir}
             fallback={<FileRow path={entry.path} name={entry.name} depth={props.depth} />}
           >
-            <FolderRow path={entry.path} name={entry.name} depth={props.depth} refreshKey={props.refreshKey} />
+            <FolderRow
+              path={entry.path}
+              name={entry.name}
+              depth={props.depth}
+              refreshKey={props.refreshKey}
+            />
           </Show>
         )}
       </For>
@@ -1584,7 +1770,12 @@ function DirNode(props: DirNodeProps) {
   );
 }
 
-function FolderRow(props: { path: string; name: string; depth: number; refreshKey?: number | undefined }) {
+function FolderRow(props: {
+  path: string;
+  name: string;
+  depth: number;
+  refreshKey?: number | undefined;
+}) {
   const [open, setOpen] = createSignal(false);
   return (
     <li>
