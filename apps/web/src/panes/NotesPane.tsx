@@ -1,4 +1,4 @@
-import { Show, createSignal, onCleanup, onMount } from "solid-js";
+import { createSignal, onCleanup, onMount } from "solid-js";
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import TaskList from "@tiptap/extension-task-list";
@@ -10,6 +10,7 @@ import GlobalDragHandle from "tiptap-extension-global-drag-handle";
 import { Markdown } from "tiptap-markdown";
 import { api } from "../api/client";
 import { useSyncSubscription } from "../lib/crossInstanceSync";
+import { listsToTaskLists, countTasks, emptyTodoDoc } from "../lib/notesTodo";
 
 /**
  * One large workspace-**global** rich-text scratchpad. Persists to the
@@ -50,8 +51,16 @@ export default function NotesPane() {
   // parsed back into a millisecond value reliably.
   let lastSavedMs = 0;
   const setErr = setNotesErr;
-  const [linkBarOpen, setLinkBarOpen] = createSignal(false);
-  const [linkValue, setLinkValue] = createSignal("https://");
+  // Whether the collapsible "Done" section is expanded. Checked todos
+  // are hidden from the main list (visually "closed out") and revealed
+  // here on demand. Nothing is deleted — un-checking restores an item.
+  const [showDone, setShowDone] = createSignal(false);
+  // Live task tallies, recomputed on every edit so the "Done (N)"
+  // toggle label and the empty-state hint stay accurate.
+  const [taskCounts, setTaskCounts] = createSignal<{ total: number; done: number }>({
+    total: 0,
+    done: 0,
+  });
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   // Data-loss guards. A save must only ever persist content that the
   // user actually edited — never the transient empty doc that exists
@@ -117,7 +126,10 @@ export default function NotesPane() {
           spellcheck: "true",
         },
       },
-      onUpdate: () => scheduleSave(),
+      onUpdate: () => {
+        scheduleSave();
+        recomputeCounts();
+      },
     });
   });
 
@@ -161,7 +173,14 @@ export default function NotesPane() {
     loading = true;
     try {
       const pad = await api.getNotes();
-      const newBody = pad.body || "";
+      const rawBody = pad.body || "";
+      // Todo-first transform: convert any plain bullet/numbered lists
+      // the user already had into unchecked task lists. Headings and
+      // paragraphs are preserved; existing task lists are untouched.
+      // Idempotent + unit-tested (see notesTodo.test.ts) so it can't
+      // silently mangle content. An empty doc is seeded with one blank
+      // todo so the first keystroke is a checklist item.
+      const newBody = rawBody ? listsToTaskLists(rawBody) : emptyTodoDoc();
       // Remember the loaded baseline so flushSave can tell a genuine
       // edit apart from an untouched doc (and never re-save the latter).
       loadedBody = newBody || EMPTY_DOC;
@@ -187,8 +206,18 @@ export default function NotesPane() {
           editor.commands.setTextSelection({ from: safeAnchor, to: safeHead });
         }
       }
+      // Re-baseline against the editor's NORMALISED html. Tiptap
+      // reformats markup on parse, and our list→todo transform changes
+      // the stored html, so `newBody` won't byte-match what the editor
+      // now holds. Capturing the normalised form here means the load
+      // itself never triggers an autosave — the converted document is
+      // only persisted once the user actually edits something. This
+      // keeps the conversion non-destructive until the user opts in by
+      // touching the note.
+      loadedBody = editor?.getHTML() ?? loadedBody;
       editor?.setEditable(true);
       setLoaded(true);
+      recomputeCounts();
       if (pad.body && pad.updated_at) {
         setSavedAt(formatTime(pad.updated_at));
       }
@@ -197,6 +226,13 @@ export default function NotesPane() {
     } finally {
       loading = false;
     }
+  }
+
+  /** Recompute the total/done task tallies from the live editor so the
+   *  "Done (N)" toggle + empty hint stay in sync after every edit. */
+  function recomputeCounts() {
+    if (!editor) return;
+    setTaskCounts(countTasks(editor.getHTML()));
   }
 
   function scheduleSave() {
@@ -262,6 +298,16 @@ export default function NotesPane() {
       <header class="px-3 py-2 border-b border-border bg-bg-1 flex items-center gap-1 flex-wrap">
         <ToolbarGroup>
           <ToolBtn
+            label={<TaskListIcon />}
+            title="Todo item (checkbox)"
+            active={isActive("taskList")}
+            onClick={() => chain()?.toggleTaskList().run()}
+          />
+        </ToolbarGroup>
+        <Divider />
+        {/* Headings stay so the checklist can be grouped into sections. */}
+        <ToolbarGroup>
+          <ToolBtn
             label={<HeadingIcon level={1} />}
             title="Heading 1"
             active={isActive("heading", { level: 1 })}
@@ -282,131 +328,39 @@ export default function NotesPane() {
         </ToolbarGroup>
         <Divider />
         <ToolbarGroup>
-          <ToolBtn
-            label={<BoldIcon />}
-            title="Bold (⌘B)"
-            active={isActive("bold")}
-            onClick={() => chain()?.toggleBold().run()}
-          />
-          <ToolBtn
-            label={<ItalicIcon />}
-            title="Italic (⌘I)"
-            active={isActive("italic")}
-            onClick={() => chain()?.toggleItalic().run()}
-          />
-          <ToolBtn
-            label={<StrikeIcon />}
-            title="Strikethrough"
-            active={isActive("strike")}
-            onClick={() => chain()?.toggleStrike().run()}
-          />
-          <ToolBtn
-            label={<CodeInlineIcon />}
-            title="Inline code"
-            active={isActive("code")}
-            onClick={() => chain()?.toggleCode().run()}
-          />
-        </ToolbarGroup>
-        <Divider />
-        <ToolbarGroup>
-          <ToolBtn
-            label={<BulletListIcon />}
-            title="Bullet list"
-            active={isActive("bulletList")}
-            onClick={() => chain()?.toggleBulletList().run()}
-          />
-          <ToolBtn
-            label={<NumberedListIcon />}
-            title="Numbered list"
-            active={isActive("orderedList")}
-            onClick={() => chain()?.toggleOrderedList().run()}
-          />
-          <ToolBtn
-            label={<TaskListIcon />}
-            title="Task list (checkboxes)"
-            active={isActive("taskList")}
-            onClick={() => chain()?.toggleTaskList().run()}
-          />
-        </ToolbarGroup>
-        <Divider />
-        <ToolbarGroup>
-          <ToolBtn
-            label={<QuoteIcon />}
-            title="Blockquote"
-            active={isActive("blockquote")}
-            onClick={() => chain()?.toggleBlockquote().run()}
-          />
-          <ToolBtn
-            label={<CodeBlockIcon />}
-            title="Code block"
-            active={isActive("codeBlock")}
-            onClick={() => chain()?.toggleCodeBlock().run()}
-          />
-          <ToolBtn
-            label={<LinkIcon />}
-            title="Add/remove link"
-            active={isActive("link")}
-            onClick={() => {
-              if (!editor) return;
-              if (editor.isActive("link")) {
-                chain()?.unsetLink().run();
-                return;
-              }
-              setLinkValue("https://");
-              setLinkBarOpen(true);
-            }}
-          />
-        </ToolbarGroup>
-        <Divider />
-        <ToolbarGroup>
           <ToolBtn label={<UndoIcon />} title="Undo (⌘Z)" onClick={() => chain()?.undo().run()} />
           <ToolBtn label={<RedoIcon />} title="Redo (⌘⇧Z)" onClick={() => chain()?.redo().run()} />
         </ToolbarGroup>
+
+        {/* "Done (N)" toggle. Checked todos are hidden from the main
+            list (the "close out" behaviour); this reveals them so they
+            can be reviewed or un-checked to restore. */}
+        <button
+          type="button"
+          class="ml-auto inline-flex items-center gap-1.5 px-2 h-7 rounded-md text-[12px] text-fg-muted hover:text-fg hover:bg-bg-2 transition-colors"
+          classList={{ "!bg-bg-3 !text-fg": showDone() }}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setShowDone((v) => !v)}
+          title={showDone() ? "Hide completed todos" : "Show completed todos"}
+          data-testid="notes-toggle-done"
+        >
+          <CheckCircleIcon />
+          Done ({taskCounts().done})
+        </button>
       </header>
 
-      <Show when={linkBarOpen()}>
-        <form
-          class="px-3 py-2 border-b border-border bg-bg-2 flex items-center gap-2"
-          data-testid="notes-link-bar"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const url = linkValue().trim();
-            if (url && editor) {
-              chain()?.extendMarkRange("link").setLink({ href: url }).run();
-            }
-            setLinkBarOpen(false);
-          }}
-        >
-          <input
-            class="ag-input !py-1 !text-[12.5px] font-mono"
-            value={linkValue()}
-            onInput={(e) => setLinkValue(e.currentTarget.value)}
-            placeholder="https://example.com"
-            autofocus
-            data-testid="notes-link-input"
-          />
-          <button
-            type="submit"
-            class="ag-btn ag-btn-primary ag-btn-sm"
-            data-testid="notes-link-apply"
-          >
-            Apply
-          </button>
-          <button
-            type="button"
-            class="ag-btn ag-btn-ghost ag-btn-sm"
-            onClick={() => setLinkBarOpen(false)}
-            data-testid="notes-link-cancel"
-          >
-            Cancel
-          </button>
-        </form>
-      </Show>
-
+      {/* Editor host. The `notes-hide-done` class hides checked todos
+          from the main view (the "close out" behaviour); toggling the
+          Done button removes it so completed items reappear in place.
+          Visibility only — the document is never mutated, so a checked
+          item is one un-click away from coming back. */}
       <div
         class="flex-1 overflow-auto bg-bg-1"
         data-testid="notes-host"
-        classList={{ "opacity-50 pointer-events-none": !loaded() }}
+        classList={{
+          "opacity-50 pointer-events-none": !loaded(),
+          "notes-hide-done": !showDone(),
+        }}
       >
         <div ref={(el) => (host = el)} class="min-h-full" />
       </div>
@@ -487,86 +441,11 @@ function HeadingIcon(props: { level: 1 | 2 | 3 }) {
   );
 }
 
-function BoldIcon() {
+function CheckCircleIcon() {
   return (
     <svg {...SVG_DEFAULTS}>
-      <path d="M7 4h6.5a3.5 3.5 0 0 1 0 7H7zM7 11h7a3.5 3.5 0 0 1 0 7H7z" />
-    </svg>
-  );
-}
-
-function ItalicIcon() {
-  return (
-    <svg {...SVG_DEFAULTS}>
-      <path d="M14 4h-4M14 20h-4M15 4l-6 16" />
-    </svg>
-  );
-}
-
-function StrikeIcon() {
-  return (
-    <svg {...SVG_DEFAULTS}>
-      <path d="M16 4H9a3 3 0 0 0-2.83 4M14 12a4 4 0 0 1 1 7.8 11 11 0 0 1-9-.2M4 12h16" />
-    </svg>
-  );
-}
-
-function CodeInlineIcon() {
-  return (
-    <svg {...SVG_DEFAULTS}>
-      <path d="M8 6 2 12l6 6M16 6l6 6-6 6" />
-    </svg>
-  );
-}
-
-function BulletListIcon() {
-  return (
-    <svg {...SVG_DEFAULTS}>
-      <path d="M9 6h12M9 12h12M9 18h12" />
-      <circle cx="4" cy="6" r="1.2" fill="currentColor" stroke="none" />
-      <circle cx="4" cy="12" r="1.2" fill="currentColor" stroke="none" />
-      <circle cx="4" cy="18" r="1.2" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
-function NumberedListIcon() {
-  return (
-    <svg {...SVG_DEFAULTS}>
-      <path d="M10 6h11M10 12h11M10 18h11" />
-      <text
-        x="2"
-        y="8"
-        fill="currentColor"
-        stroke="none"
-        font-size="7"
-        font-weight="600"
-        font-family="ui-sans-serif, system-ui, sans-serif"
-      >
-        1
-      </text>
-      <text
-        x="2"
-        y="14"
-        fill="currentColor"
-        stroke="none"
-        font-size="7"
-        font-weight="600"
-        font-family="ui-sans-serif, system-ui, sans-serif"
-      >
-        2
-      </text>
-      <text
-        x="2"
-        y="20"
-        fill="currentColor"
-        stroke="none"
-        font-size="7"
-        font-weight="600"
-        font-family="ui-sans-serif, system-ui, sans-serif"
-      >
-        3
-      </text>
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <path d="M22 4 12 14.01l-3-3" />
     </svg>
   );
 }
@@ -579,32 +458,6 @@ function TaskListIcon() {
       <rect x="2.5" y="9.5" width="6" height="6" rx="3" />
       <path d="M4 12.5l1.5 1.5L7 11" />
       <rect x="2.5" y="15.5" width="6" height="6" rx="3" />
-    </svg>
-  );
-}
-
-function QuoteIcon() {
-  return (
-    <svg {...SVG_DEFAULTS}>
-      <path d="M4 7c0-1.7 1.3-3 3-3M4 11c0-1.7 1.3-3 3-3M4 7v8h4V7M14 7c0-1.7 1.3-3 3-3M14 11c0-1.7 1.3-3 3-3M14 7v8h4V7" />
-    </svg>
-  );
-}
-
-function CodeBlockIcon() {
-  return (
-    <svg {...SVG_DEFAULTS}>
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <path d="M9 10l-2 2 2 2M15 10l2 2-2 2" />
-    </svg>
-  );
-}
-
-function LinkIcon() {
-  return (
-    <svg {...SVG_DEFAULTS}>
-      <path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 1 0-7-7l-1 1" />
-      <path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 1 0 7 7l1-1" />
     </svg>
   );
 }
