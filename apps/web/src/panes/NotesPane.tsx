@@ -138,11 +138,11 @@ export default function NotesPane() {
         GlobalDragHandle.configure({
           dragHandleWidth: 24,
           scrollTreshold: 100,
-          // Default excludes already cover code blocks / horizontal
-          // rules; we add task-list children so dragging a parent
-          // task moves the whole subtree instead of orphaning the
-          // nested checks.
-          excludedTags: [],
+          // Exclude headings so the drag handle doesn't sit in the same
+          // left-gutter slot as the collapse caret (they were
+          // overlapping, and the fixed-position handle stole the
+          // caret's clicks). Lists/paragraphs keep their drag handle.
+          excludedTags: ["h1", "h2", "h3"],
         }),
       ],
       editorProps: {

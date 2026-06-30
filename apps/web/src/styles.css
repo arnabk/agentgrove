@@ -876,30 +876,54 @@ textarea::placeholder {
 }
 .ag-heading-toggle {
   position: absolute;
-  left: -1.25em;
-  top: 0.08em;
-  width: 1em;
-  height: 1em;
+  /* Sit just left of the heading text, inside the editor's pl-10
+     gutter. Headings are excluded from the drag handle, so this slot is
+     ours alone now. Centred vertically against the heading's cap height. */
+  left: -1.35em;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1.1em;
+  height: 1.1em;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   border: 0;
+  border-radius: 5px;
   background: transparent;
+  /* Chevron is small relative to the heading font and muted until hover
+     so it reads as a quiet affordance, not a loud control. */
   color: var(--ag-fg-subtle);
-  font-size: 0.7em;
-  line-height: 1;
+  font-size: 0.62em;
+  line-height: 0;
   cursor: pointer;
   user-select: none;
+  opacity: 0.55;
+  /* Above the (fixed) drag handle so a stray overlap can't steal the
+     click. */
+  z-index: 5;
   transition:
-    transform 120ms ease,
-    color 120ms ease;
+    color 120ms ease,
+    background-color 120ms ease,
+    opacity 120ms ease;
+}
+.ag-heading-toggle svg {
+  transition: transform 150ms ease;
 }
 .ag-heading-toggle:hover {
   color: var(--ag-accent);
+  background: var(--ag-bg-2);
+  opacity: 1;
 }
-/* Caret points right when collapsed, rotates down when expanded. */
-.ag-heading-toggle[data-collapsed="false"] {
+/* Reveal more strongly when hovering anywhere on the editor, like the
+   drag handle, so the fold affordance is discoverable. */
+.ag-prose:hover .ag-heading-toggle {
+  opacity: 0.8;
+}
+/* Chevron points right when collapsed, rotates down when expanded.
+   Only the inner SVG rotates so the button's own translateY centring is
+   preserved. */
+.ag-heading-toggle[data-collapsed="false"] svg {
   transform: rotate(90deg);
 }
 /* Blocks folded away under a collapsed heading. */

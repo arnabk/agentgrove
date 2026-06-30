@@ -108,8 +108,13 @@ function makeToggle(collapsed: boolean): HTMLElement {
   btn.setAttribute("contenteditable", "false");
   btn.setAttribute("aria-label", collapsed ? "Expand section" : "Collapse section");
   btn.setAttribute("data-collapsed", collapsed ? "true" : "false");
-  btn.textContent = "▸";
   btn.dataset.headingToggle = "true";
+  // Clean chevron SVG (rotated via CSS for the expanded state) instead
+  // of a raw ▸ glyph, which rendered chunky and baseline-misaligned.
+  btn.innerHTML =
+    '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" ' +
+    'stroke="currentColor" stroke-width="2.5" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
   return btn;
 }
 
@@ -141,26 +146,33 @@ function collapsiblePlugin() {
   });
 }
 
-/** Flip the `collapsed` attribute of the clicked heading. */
+/** Flip the `collapsed` attribute of the clicked heading. We locate the
+ *  heading's document position by matching the clicked <h*> element
+ *  against each top-level heading node's DOM (`view.nodeDOM`). This is
+ *  more robust than `posAtDOM` on a widget, which can resolve to the
+ *  widget rather than the heading. */
 function toggleHeadingAt(view: EditorView, toggle: HTMLElement) {
   const headingEl = toggle.closest("h1, h2, h3") as HTMLElement | null;
   if (!headingEl) return;
-  let pos: number;
-  try {
-    pos = view.posAtDOM(headingEl, 0);
-  } catch {
-    return;
-  }
-  if (pos == null) return;
-  const safe = Math.max(0, Math.min(pos, view.state.doc.content.size));
-  const $pos = view.state.doc.resolve(safe);
-  for (let d = $pos.depth; d >= 0; d--) {
-    const node = $pos.node(d);
-    if (node.type.name === "heading") {
-      const before = $pos.before(d);
-      const tr = view.state.tr.setNodeAttribute(before, "collapsed", !node.attrs.collapsed);
-      view.dispatch(tr);
-      return;
+
+  const doc = view.state.doc;
+  let foundPos: number | null = null;
+  let foundNode: PMNode | null = null;
+  doc.forEach((node, offset) => {
+    if (foundPos != null) return;
+    if (node.type.name !== "heading") return;
+    const dom = view.nodeDOM(offset) as HTMLElement | null;
+    if (dom === headingEl) {
+      foundPos = offset;
+      foundNode = node;
     }
-  }
+  });
+
+  if (foundPos == null || foundNode == null) return;
+  const tr = view.state.tr.setNodeAttribute(
+    foundPos,
+    "collapsed",
+    !(foundNode as PMNode).attrs.collapsed,
+  );
+  view.dispatch(tr);
 }
