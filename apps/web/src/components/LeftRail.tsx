@@ -248,14 +248,18 @@ export default function LeftRail() {
     // can roll back if the BE call ultimately fails. The active-scope
     // fallback also runs optimistically — otherwise the user would
     // see a phantom worktree pane until the BE responded.
-    const prevList = state.worktrees[projectId] ?? [];
-    const optimistic = prevList.filter((w) => w.id !== wtId);
-    setState("worktrees", projectId, optimistic);
+    // Navigate away from the worktree FIRST (before mutating the
+    // worktree list) so the route-sync guard never sees a stale URL
+    // pointing at a deleted worktree — which would trigger the red
+    // "That worktree no longer exists" error toast.
     const wasActiveScope =
       state.selectedProjectId === projectId && state.selectedWorktreeByProject[projectId] === wtId;
     if (wasActiveScope) {
       selectWorktree(projectId, null);
     }
+    const prevList = state.worktrees[projectId] ?? [];
+    const optimistic = prevList.filter((w) => w.id !== wtId);
+    setState("worktrees", projectId, optimistic);
     try {
       await api.deleteWorktree(projectId, wtId, {
         deleteBranch: alsoDeleteBranch(),
