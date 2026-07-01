@@ -503,13 +503,17 @@ pub async fn delete(
     // signal of what (if anything) is left to clean up manually.
     if q.delete_branch {
         if let Err(e) = git::delete_branch(&project.root, &wt.branch).await {
-            // Mark the metadata row deleted first so the UI doesn't
-            // keep showing a stale "removing" entry indefinitely.
-            let _ = state.worktrees.delete(&worktree_id).await;
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("worktree removed, but git branch -D failed: {e}"),
-            ));
+            let msg = e.to_string();
+            // "branch not found" is harmless — the branch was already
+            // gone (e.g. it was a remote-tracking branch, or someone
+            // deleted it manually). Treat it as success.
+            if !msg.contains("not found") {
+                let _ = state.worktrees.delete(&worktree_id).await;
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("worktree removed, but git branch -D failed: {e}"),
+                ));
+            }
         }
     }
 
