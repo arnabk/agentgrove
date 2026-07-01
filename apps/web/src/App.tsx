@@ -33,6 +33,7 @@ import {
   bootstrap,
   changesScope,
   currentScope,
+  currentWorktreeId,
   findChatTab,
   isSidebarOpen,
   routeError,
@@ -40,6 +41,7 @@ import {
   setActiveChat,
   setActiveWork,
   setRouteError,
+  setScopeChats,
   setSettingsOpen,
   setTheme,
   state,
@@ -62,6 +64,43 @@ export default function App() {
 
   onMount(async () => {
     await bootstrap();
+    // After bootstrap, seed chat tabs for the active scope if empty.
+    // This MUST happen here (not in ChatPane) because ChatPane only
+    // mounts when a chat tab already exists — circular dependency.
+    await seedScopeChatTabs();
+  });
+
+  // Seed chat tabs for the active scope when it has 0 tabs but the BE
+  // has chats. Must live in App (not ChatPane) because ChatPane only
+  // mounts when a chat tab already exists.
+  let seedingChats = false;
+  async function seedScopeChatTabs() {
+    if (seedingChats) return;
+    seedingChats = true;
+    try {
+      const pid = state.selectedProjectId;
+      if (!pid) return;
+      const wt = currentWorktreeId();
+      const scope = currentScope();
+      const chatTabs = scope?.tabs?.filter((t: any) => t.kind === "chat") ?? [];
+      if (chatTabs.length > 0) return;
+      const all = await api.listProjectChats(pid);
+      const beChats = all.filter((c: any) => (c.worktree_id ?? null) === wt);
+      if (beChats.length > 0) {
+        setScopeChats(beChats.map((c: any) => ({ id: c.id, title: c.title })));
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      seedingChats = false;
+    }
+  }
+
+  createEffect(() => {
+    void state.selectedProjectId;
+    void currentWorktreeId();
+    if (!state.ready) return;
+    void seedScopeChatTabs();
   });
 
   // CSS zoom on <html> (from font-size scaling in app.ts) makes body's
