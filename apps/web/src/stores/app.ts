@@ -457,17 +457,17 @@ export function setScopeChats(chats: ChatTab[]) {
       s.tabs = s.tabs.filter((t) => t.kind !== "chat" || chatIds.has(t.id));
 
       // Then, for each incoming chat...
+      const isBootstrap = !s.chatsHydrated;
       for (const c of chats) {
         const existingTabIndex = s.tabs.findIndex((t) => t.id === c.id && t.kind === "chat");
         if (existingTabIndex !== -1) {
-          // If the chat already exists as a tab, update its title
           const tab = s.tabs[existingTabIndex];
           if (tab && tab.kind === "chat") {
             tab.title = c.title;
           }
-        } else if (s.activeTab === c.id) {
-          // If it doesn't exist, but it is currently active, push it into tabs.
-          // This ensures that an actively selected chat remains in tabs
+        } else if (isBootstrap || s.activeTab === c.id) {
+          // Bootstrap: add ALL incoming chats as tabs (first visit).
+          // Otherwise only add if it's the currently active tab.
           s.tabs.push({
             kind: "chat",
             id: c.id,
@@ -475,6 +475,10 @@ export function setScopeChats(chats: ChatTab[]) {
             ...(c.draft ? { draft: c.draft } : {}),
           });
         }
+      }
+      // On bootstrap, activate the first chat if nothing is active
+      if (isBootstrap && !s.activeTab && s.tabs.length > 0) {
+        s.activeTab = s.tabs[0]!.id;
       }
       s.chatsHydrated = true;
       // If the currently active tab was removed (e.g. deleted), pick another tab
