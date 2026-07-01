@@ -1328,7 +1328,20 @@ pub async fn stop_turn(State(state): State<AppState>, Path(id): Path<String>) ->
                     }
                 }
             }
-            StatusCode::NOT_FOUND
+            // Even if there's no stuck prompt, force-clear the
+            // dispatching flag — it may be stale from a crashed or
+            // silently-failed dispatch task whose DispatchGuard
+            // didn't run. Without this, the chat is permanently
+            // stuck (run_next → 409, smart-send → always queued).
+            {
+                let mut d = state.dispatching.lock().await;
+                d.remove(&id);
+            }
+            state.logbus.publish(
+                &format!("chat:{id}"),
+                serde_json::json!({"type":"chat_idle"}).to_string(),
+            );
+            StatusCode::NO_CONTENT
         }
     };
 
@@ -1377,7 +1390,9 @@ pub async fn fork_chat(
     };
     let forked = forked.ok_or((StatusCode::NOT_FOUND, "chat or prompt_seq not found".into()))?;
 
-    let _ = state
+    // Persist the forked chat to SQLite. The store issues its own ID,
+    // so we must re-key the in-memory registry to match.
+    let store_row = state
         .chat_store
         .create(
             &forked.project_id,
@@ -1387,10 +1402,27 @@ pub async fn fork_chat(
             &forked.model,
             forked.effort.as_deref(),
         )
-        .await;
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("store: {e}")))?;
 
+    let store_id = store_row.id.clone();
+
+    // Re-key the in-memory registry: remove the temp id, insert under store id
+    {
+        let mut reg = state.chats.write().await;
+        if let Some(mut rec) = reg.by_id.remove(&forked.id) {
+            if let Some(ids) = reg.by_project.get_mut(&rec.project_id) {
+                ids.retain(|i| i != &forked.id);
+                ids.push(store_id.clone());
+            }
+            rec.id = store_id.clone();
+            reg.by_id.insert(store_id.clone(), rec);
+        }
+    }
+
+    // Persist prompts under the correct (store-issued) chat ID
     for p in &forked.prompts {
-        if let Ok(row) = state.chat_store.add_prompt(&forked.id, &p.content).await {
+        if let Ok(row) = state.chat_store.add_prompt(&store_id, &p.content).await {
             let events_json = serde_json::to_value(&p.events).unwrap_or_default();
             let _ = state.chat_store.write_events(&row.id, &events_json).await;
         }
@@ -1401,13 +1433,13 @@ pub async fn fork_chat(
         serde_json::json!({
             "kind": "chat_created",
             "project_id": forked.project_id,
-            "chat_id": forked.id,
+            "chat_id": store_id,
         })
         .to_string(),
     );
 
     Ok(Json(serde_json::json!({
-        "id": forked.id,
+        "id": store_id,
         "title": forked.title,
         "provider": forked.provider,
         "model": forked.model,
