@@ -218,7 +218,8 @@ export default function App() {
           project/worktree that no longer exists). Auto-dismissable. */}
       <Show when={routeError()}>
         <div
-          class="fixed top-3 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-3 px-4 py-2 rounded-lg bg-danger text-white shadow-xl text-[13px]"
+          class="fixed top-3 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-3 px-4 py-2.5 rounded-lg text-white shadow-xl text-[13px] font-medium"
+          style={{ "background-color": "#dc2626" }}
           role="alert"
           data-testid="route-error-toast"
         >
