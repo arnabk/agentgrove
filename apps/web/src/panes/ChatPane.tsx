@@ -31,6 +31,7 @@ import { useSyncSubscription } from "../lib/crossInstanceSync";
 import {
   addChatTab,
   currentScope,
+  currentScopeKey,
   currentWorktreeId,
   getChatDraft,
   pendingChatInjection,
@@ -361,9 +362,17 @@ export default function ChatPane() {
       setScopeChats([]);
       return;
     }
+    // Read the worktree ID from the store at call time. If we're called
+    // during mount before route-sync has set selectedWorktreeByProject,
+    // this will be null — defer to the next effect run when the scope
+    // settles rather than bootstrapping with the wrong filter.
+    const wt = currentWorktreeId();
+    const key = currentScopeKey();
+    // Guard: if the scope key contains a worktree segment but wt is
+    // still null, the store hasn't caught up yet — skip this run.
+    if (key && key.includes("::") && key.split("::")[1] && !wt) return;
     try {
       const all = await api.listProjectChats(pid);
-      const wt = currentWorktreeId();
       const beChats = all.filter((c) => (c.worktree_id ?? null) === wt);
       const beById = new Map(beChats.map((c) => [c.id, c]));
       const current = scope()?.tabs.filter((t) => t.kind === "chat") ?? [];
@@ -376,9 +385,16 @@ export default function ChatPane() {
         setScopeChats(beChats.map((c) => ({ id: c.id, title: c.title })));
         return;
       }
-      if (current.length === 0 && hydrated) {
-        // User has explicitly closed every tab in this scope.
-        // Don't resurrect them — leave the tab strip empty.
+      if (current.length === 0 && hydrated && beChats.length === 0) {
+        // User has explicitly closed every tab AND there are no
+        // BE chats — leave the tab strip empty.
+        return;
+      }
+      if (current.length === 0 && hydrated && beChats.length > 0) {
+        // Edge case: hydrated flag was set (possibly from a buggy
+        // earlier run) but BE has chats the user never saw. Re-seed
+        // rather than hiding them forever.
+        setScopeChats(beChats.map((c) => ({ id: c.id, title: c.title })));
         return;
       }
       // Reconcile: keep the local tab order, drop tabs whose chat
