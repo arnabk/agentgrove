@@ -43,8 +43,8 @@ if ! command -v cargo-watch >/dev/null 2>&1; then
   cargo install --locked cargo-watch
 fi
 
-echo "[dev] launching backend on http://127.0.0.1:$BE_PORT with hot reload..."
-AGENTGROVE_PORT="$BE_PORT" cargo watch -q -c -w crates \
+echo "[dev] launching backend on http://0.0.0.0:$BE_PORT with hot reload..."
+AGENTGROVE_BIND="0.0.0.0" AGENTGROVE_PORT="$BE_PORT" cargo watch -q -c -w crates \
   -s "cargo run -q -p agentgrove-server" >"$BE_LOG" 2>&1 &
 BE_PID=$!
 
@@ -58,7 +58,7 @@ for i in $(seq 1 60); do
 done
 
 echo "[dev] backend ready"
-echo "[dev]   url: http://127.0.0.1:$BE_PORT"
+echo "[dev]   url: http://0.0.0.0:$BE_PORT (all interfaces)"
 echo "[dev]   log: $BE_LOG"
 
 echo "[dev] launching frontend with HMR..."
@@ -66,12 +66,12 @@ pnpm -C apps/web dev >"$FE_LOG" 2>&1 &
 FE_PID=$!
 
 for i in $(seq 1 30); do
-  curl -fsS "http://localhost:5173" >/dev/null 2>&1 && break
+  curl -fsS "http://127.0.0.1:5173" >/dev/null 2>&1 && break
   sleep 1
 done
 
 echo "[dev] frontend ready"
-echo "[dev]   url: http://localhost:5173"
+echo "[dev]   url: http://0.0.0.0:5173 (all interfaces)"
 echo "[dev]   log: $FE_LOG"
 echo
 echo "[dev] hot reload active. Edit code; both BE + FE reload on save."
