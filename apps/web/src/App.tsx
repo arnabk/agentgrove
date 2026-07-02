@@ -46,8 +46,9 @@ import {
   setTheme,
   state,
   toggleSidebar,
+  type UnifiedTab,
 } from "./stores/app";
-import { api } from "./api/client";
+import { api, type Chat } from "./api/client";
 import { pushToast } from "./components/Toast";
 import { playNotificationSound } from "./lib/notificationSound";
 
@@ -64,44 +65,38 @@ export default function App() {
 
   onMount(async () => {
     await bootstrap();
-    // After bootstrap, seed chat tabs for the active scope if empty.
-    // This MUST happen here (not in ChatPane) because ChatPane only
-    // mounts when a chat tab already exists — circular dependency.
     await seedScopeChatTabs();
   });
 
   // Seed chat tabs for the active scope when it has 0 tabs but the BE
   // has chats. Must live in App (not ChatPane) because ChatPane only
   // mounts when a chat tab already exists.
-  let seedingChats = false;
+  const seededScopes = new Set<string>();
   async function seedScopeChatTabs() {
-    if (seedingChats) return;
-    seedingChats = true;
+    const pid = state.selectedProjectId;
+    if (!pid) return;
+    const wt = currentWorktreeId();
+    const scopeKey = pid + (wt ? "::" + wt : "");
+    if (seededScopes.has(scopeKey)) return;
+    seededScopes.add(scopeKey);
+    const scope = currentScope();
+    const chatTabs = scope?.tabs?.filter((t: UnifiedTab) => t.kind === "chat") ?? [];
+    if (chatTabs.length > 0) return;
     try {
-      const pid = state.selectedProjectId;
-      if (!pid) return;
-      const wt = currentWorktreeId();
-      const scope = currentScope();
-      const chatTabs = scope?.tabs?.filter((t: any) => t.kind === "chat") ?? [];
-      if (chatTabs.length > 0) return;
       const all = await api.listProjectChats(pid);
-      const beChats = all.filter((c: any) => (c.worktree_id ?? null) === wt);
+      const beChats = all.filter((c: Chat) => (c.worktree_id ?? null) === wt);
       if (beChats.length > 0) {
-        setScopeChats(beChats.map((c: any) => ({ id: c.id, title: c.title })));
+        setScopeChats(beChats.map((c: Chat) => ({ id: c.id, title: c.title })));
       }
     } catch {
       /* ignore */
-    } finally {
-      seedingChats = false;
     }
   }
 
-  createEffect(() => {
-    void state.selectedProjectId;
-    void currentWorktreeId();
-    if (!state.ready) return;
-    void seedScopeChatTabs();
-  });
+  // NOTE: seedScopeChatTabs is called once from onMount (above).
+  // Subsequent scope switches are handled by ChatPane's own
+  // refreshScopeChats once it mounts (the initial seed creates tabs
+  // so ChatPane can mount).
 
   // CSS zoom on <html> (from font-size scaling in app.ts) makes body's
   // 100vh render taller than the viewport, creating a ~149 px scroll gap
@@ -119,8 +114,8 @@ export default function App() {
   });
 
   // Bidirectional sync between the URL and the active workspace
-  // state. Refreshing keeps you on the same scope + pane + chat +
-  // file; copy-pasting the URL into another tab opens the same view.
+  // state. Must be called during render (not onMount) because it uses
+  // useNavigate/useLocation which require the Router context.
   installRouteSync();
 
   // Cross-browser-instance sync: open one WS to `/ws?topic=sync`

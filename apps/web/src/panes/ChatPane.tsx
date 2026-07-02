@@ -1919,10 +1919,6 @@ function PromptRow(props: {
     return last.type !== "done" && last.type !== "error";
   }
 
-  // Thinking blocks collapse by default — they're verbose and most
-  // users don't want them in the way. Sticky to true once expanded.
-  const [thinkingOpen, setThinkingOpen] = createSignal(false);
-
   // Very long user messages (e.g. a pasted transcript) would otherwise
   // render as one giant bubble that fills the whole timeline. Collapse
   // them to a capped height with a "Show more" toggle. We gate on a
@@ -1941,6 +1937,26 @@ function PromptRow(props: {
   // the model is almost certainly returning the whole reply at once, so
   // we surface a friendly note instead of leaving them guessing.
   const [elapsed, setElapsed] = createSignal(0);
+
+  // Internals (thinking + tools) start open while the turn is in
+  // flight so the user can watch the agent work, then auto-collapse
+  // once the final response arrives. `autoClosedInternals` tracks the
+  // one-time auto-close so user re-opens aren't repeatedly closed.
+  let autoClosedInternals = false;
+  const [internalsOpen, setInternalsOpen] = createSignal(true);
+
+  createEffect(() => {
+    if (!isPending() && !autoClosedInternals) {
+      setInternalsOpen(false);
+      autoClosedInternals = true;
+    }
+  });
+
+  function onToggleInternals(e: Event & { currentTarget: { open: boolean } }) {
+    if (e.isTrusted) autoClosedInternals = true;
+    setInternalsOpen(e.currentTarget.open);
+  }
+
   const waiting = () => isPending() && !assistantText() && !thinkingText();
   createEffect(() => {
     if (!waiting()) {
@@ -2008,19 +2024,39 @@ function PromptRow(props: {
           />
         </div>
       </div>
-      <Show when={thinkingText()}>
+      {/*
+        Internals: thinking trace + tool activity. Rendered above the
+        assistant bubble and collapsed automatically when the turn finishes.
+      */}
+      <Show when={thinkingText() || tools().length > 0}>
         <div class="flex justify-start">
           <details
             class="w-full rounded-xl bg-bg-2/40 border border-dashed border-border text-[12.5px] px-3 py-2 text-fg-muted"
-            data-testid={`thinking-${props.prompt.id}`}
-            open={thinkingOpen()}
-            onToggle={(e) => setThinkingOpen(e.currentTarget.open)}
+            data-testid={`internals-${props.prompt.id}`}
+            open={internalsOpen()}
+            onToggle={onToggleInternals}
           >
             <summary class="cursor-pointer select-none text-[11.5px] uppercase tracking-wide text-fg-subtle">
-              ✦ Thinking <span class="text-fg-subtle">({fmtBytes(thinkingText().length)})</span>
+              ✦ Internals
+              <Show when={thinkingText()}>
+                <span class="text-fg-subtle"> · Thinking {fmtBytes(thinkingText().length)}</span>
+              </Show>
+              <Show when={tools().length > 0}>
+                <span class="text-fg-subtle">
+                  {" "}
+                  · {tools().length} tool{tools().length === 1 ? "" : "s"}
+                </span>
+              </Show>
             </summary>
-            <div class="mt-2 ag-prose">
-              <Markdown source={thinkingText()} />
+            <div class="mt-2 space-y-3">
+              <Show when={thinkingText()}>
+                <div class="ag-prose">
+                  <Markdown source={thinkingText()} />
+                </div>
+              </Show>
+              <Show when={tools().length > 0}>
+                <ToolRail events={tools()} promptId={props.prompt.id} />
+              </Show>
             </div>
           </details>
         </div>
@@ -2035,18 +2071,6 @@ function PromptRow(props: {
             instead of leaving the user staring at their own
             bubble wondering if anything happened.
       */}
-      {/*
-        Tool-activity rail. Rendered ABOVE the assistant bubble as
-        full-width rows (icon · label · monospace command preview)
-        so long commands get the room they need. Calls without a
-        result yet (in-flight) render at full opacity; once paired
-        with their `tool_result` they dim to indicate completion.
-        Errors + truncation pills follow underneath the rail since
-        they aren't tied to a specific call.
-      */}
-      <Show when={tools().length > 0}>
-        <ToolRail events={tools()} promptId={props.prompt.id} />
-      </Show>
       <Show when={assistantText() || isPending()}>
         <div class="flex justify-start">
           <div class="relative group/bubble w-full">
@@ -2075,15 +2099,14 @@ function PromptRow(props: {
                         <span class="text-[11px] tabular-nums opacity-70">{elapsed()}s</span>
                       </Show>
                     </span>
-                    <Show when={looksNonStreaming()}>
-                      <span
-                        class="text-[11.5px] text-fg-subtle inline-flex items-center gap-1.5"
-                        data-testid={`nonstream-note-${props.prompt.id}`}
-                      >
-                        <span class="ag-chip !text-[10px] !py-[1px]">no live stream</span>
-                        This model returns the full reply at once — generating it now.
-                      </span>
-                    </Show>
+                    <span
+                      class="text-[11.5px] text-fg-subtle inline-flex items-center gap-1.5 transition-opacity"
+                      classList={{ "opacity-0 invisible": !looksNonStreaming() }}
+                      data-testid={`nonstream-note-${props.prompt.id}`}
+                    >
+                      <span class="ag-chip !text-[10px] !py-[1px]">no live stream</span>
+                      This model returns the full reply at once — generating it now.
+                    </span>
                   </div>
                 }
               >

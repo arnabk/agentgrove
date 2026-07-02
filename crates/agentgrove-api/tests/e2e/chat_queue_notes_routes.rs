@@ -1394,12 +1394,11 @@ async fn rapid_fire_10_then_followup_send_runs_immediately() {
     panic!("follow-up send was never dispatched immediately (dispatching flag stuck?)");
 }
 
-/// `POST /api/chats/:id/stop` returns 404 when no turn is in
-/// flight. Sending a message on an idle chat that immediately
-/// completes (echo provider) leaves the chat idle by the time we
-/// poll, so the second stop should also 404.
+/// `POST /api/chats/:id/stop` returns 204 on an idle chat. The
+/// endpoint force-clears any stale dispatching flag as a last-resort
+/// unstick, so the response is 204 rather than 404.
 #[tokio::test]
-async fn stop_turn_returns_404_when_chat_is_idle() {
+async fn stop_turn_returns_204_when_chat_is_idle() {
     let h = BeHarness::start().await;
     let chat_id = make_chat(&h, "stop-idle", "fake", "echo").await;
 
@@ -1408,21 +1407,21 @@ async fn stop_turn_returns_404_when_chat_is_idle() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 404);
+    assert_eq!(res.status(), 204);
 }
 
-/// Stop works against the unknown-chat path too — the BE just sees
-/// "no token for that id" and returns 404. The endpoint doesn't
-/// need a separate path check.
+/// Stop works against the unknown-chat path too — without a chat
+/// record there is no dispatching flag to clear, but the endpoint
+/// still returns 204 (it is a no-op safety call).
 #[tokio::test]
-async fn stop_turn_unknown_chat_returns_404() {
+async fn stop_turn_unknown_chat_returns_204() {
     let h = BeHarness::start().await;
     let res = h
         .post_auth("/api/chats/does-not-exist/stop")
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 404);
+    assert_eq!(res.status(), 204);
 }
 
 #[tokio::test]

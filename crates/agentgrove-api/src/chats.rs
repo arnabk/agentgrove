@@ -1272,9 +1272,10 @@ pub async fn send_message(
 /// message immediately.
 ///
 /// Returns:
-///   - 204 if we successfully tripped a running turn.
-///   - 404 if there's no in-flight turn for the chat (idle, or
-///     already cancelled).
+///   - 204 if we tripped a running turn, or if the chat was idle and
+///     we force-cleared a stale dispatching flag (last-resort unstick
+///     so smart-send / run_next don't stay permanently blocked).
+///   - 404 only if the endpoint is not found (this route always exists).
 pub async fn stop_turn(State(state): State<AppState>, Path(id): Path<String>) -> StatusCode {
     let token = {
         let map = state.cancel_tokens.lock().await;

@@ -47,8 +47,8 @@ jobs:
           if git rev-parse "refs/tags/v$CURRENT" >/dev/null 2>&1; then
             IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
             PATCH=$((PATCH + 1))
-            # Bump minor every 50 patches to signal meaningful progress
-            if [ "$PATCH" -ge 50 ]; then
+            # Bump minor every 100 patches to signal meaningful progress
+            if [ "$PATCH" -ge 100 ]; then
               MINOR=$((MINOR + 1))
               PATCH=0
             fi

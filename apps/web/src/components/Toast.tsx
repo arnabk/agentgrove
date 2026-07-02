@@ -49,7 +49,7 @@ function ToastCard(props: { toast: ToastItem }) {
 
   return (
     <div
-      class="pointer-events-auto rounded-xl border border-border bg-bg-1/95 backdrop-blur-sm shadow-xl transition-all duration-300 ease-out overflow-hidden"
+      class="pointer-events-auto rounded-xl border border-border bg-bg-1 shadow-xl transition-all duration-300 ease-out overflow-hidden"
       classList={{
         "translate-x-0 opacity-100": visible(),
         "translate-x-full opacity-0": !visible(),
