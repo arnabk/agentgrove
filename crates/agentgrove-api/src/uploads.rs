@@ -112,6 +112,22 @@ pub async fn create(
                 format!("failed to write upload: {e}"),
             ));
         }
+        // Persist metadata so the raw endpoint can serve the correct
+        // Content-Type even when the filename has no extension (common
+        // for pasted images from the clipboard).
+        let meta_path = dir.join("meta.json");
+        let meta = serde_json::json!({
+            "content_type": content_type,
+            "filename": safe_name,
+            "size": size,
+        });
+        if let Err(e) = tokio::fs::write(&meta_path, meta.to_string()).await {
+            let _ = tokio::fs::remove_dir_all(&dir).await;
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to write upload metadata: {e}"),
+            ));
+        }
         out.push(UploadDto {
             id,
             filename: safe_name,
@@ -144,26 +160,49 @@ pub async fn raw(
     let mut entries = tokio::fs::read_dir(&dir)
         .await
         .map_err(|_| (StatusCode::NOT_FOUND, "upload not found".into()))?;
-    let entry = entries
-        .next_entry()
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("failed to read upload dir: {e}"),
-            )
-        })?
-        .ok_or((StatusCode::NOT_FOUND, "upload empty".into()))?;
-    let path = entry.path();
+
+    // Find the uploaded file, skipping the metadata sidecar and any
+    // hidden files. Pasted images often arrive without an extension, so
+    // the Content-Type from the multipart part (stored in meta.json)
+    // is more reliable than guessing from the filename.
+    let mut file_path: Option<std::path::PathBuf> = None;
+    let mut stored_content_type: Option<String> = None;
+    while let Some(entry) = entries.next_entry().await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to read upload dir: {e}"),
+        )
+    })? {
+        let name = entry.file_name();
+        let lossy = name.to_string_lossy();
+        if lossy == "meta.json" {
+            if stored_content_type.is_none() {
+                if let Ok(text) = tokio::fs::read_to_string(entry.path()).await {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+                        stored_content_type = v["content_type"].as_str().map(String::from);
+                    }
+                }
+            }
+            continue;
+        }
+        if lossy.starts_with('.') {
+            continue;
+        }
+        file_path = Some(entry.path());
+    }
+
+    let path = file_path.ok_or((StatusCode::NOT_FOUND, "upload empty".into()))?;
     let bytes = tokio::fs::read(&path).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("failed to read upload: {e}"),
         )
     })?;
-    let mime = mime_guess::from_path(&path)
-        .first_or_octet_stream()
-        .to_string();
+    let mime = stored_content_type.unwrap_or_else(|| {
+        mime_guess::from_path(&path)
+            .first_or_octet_stream()
+            .to_string()
+    });
     Ok(([(header::CONTENT_TYPE, mime)], bytes))
 }
 

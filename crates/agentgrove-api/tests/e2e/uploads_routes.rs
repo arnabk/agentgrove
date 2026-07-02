@@ -116,3 +116,36 @@ async fn upload_post_with_no_file_part_returns_400() {
         .unwrap();
     assert_eq!(res.status(), 400);
 }
+
+#[tokio::test]
+async fn upload_raw_uses_stored_content_type_when_filename_has_no_extension() {
+    let h = BeHarness::start().await;
+    // Minimal PNG signature so the backend has real image bytes to serve.
+    let bytes: Vec<u8> = vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    let part = Part::bytes(bytes.clone())
+        .file_name("clipboard-image")
+        .mime_str("image/png")
+        .unwrap();
+    let form = Form::new().part("file", part);
+    let res = h
+        .post_auth("/api/uploads")
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200, "body={}", res.text().await.unwrap());
+    let v: Value = res.json().await.unwrap();
+    let id = v[0]["id"].as_str().unwrap().to_owned();
+    assert_eq!(v[0]["filename"], "clipboard-image");
+    assert_eq!(v[0]["content_type"], "image/png");
+
+    let raw = h
+        .get_auth(&format!("/api/uploads/{id}/raw"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(raw.status(), 200);
+    assert_eq!(raw.headers().get("content-type").unwrap(), "image/png");
+    let body = raw.bytes().await.unwrap();
+    assert_eq!(&body[..], &bytes[..]);
+}
