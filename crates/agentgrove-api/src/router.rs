@@ -22,7 +22,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/ws", get(ws::handler))
         // Team chat
         .route("/api/team-chat/whoami", get(team_chat::whoami))
-        .route("/api/team-chat/messages", get(team_chat::list).post(team_chat::send))
+        .route(
+            "/api/team-chat/messages",
+            get(team_chat::list).post(team_chat::send),
+        )
         // Projects
         .route("/api/projects", get(projects::list).post(projects::create))
         .route(

@@ -14,5 +14,7 @@ ignore = [
     "RUSTSEC-2025-0140",
     # memmap2 unchecked pointer offset (pinned by gix 0.66)
     "RUSTSEC-2026-0185",
-    "RUSTSEC-2026-0186"
+    "RUSTSEC-2026-0186",
+    # crossbeam-epoch invalid pointer dereference in fmt::Pointer (transitive dep)
+    "RUSTSEC-2026-0204"
 ]
