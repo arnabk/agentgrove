@@ -13,9 +13,19 @@ See [docs/features.md](docs/features.md) for the full feature list.
 
 ## Demo Videos
 
-AI chat with real streaming response and on-screen typing. Click the thumbnail to watch.
+Click any thumbnail to watch the screen recording. All videos are real captures of the live app on the demo stack.
 
-[![AI chat demo](./docs/demos/demo-capture-thumb.jpg)](./docs/demos/demo-capture.mp4)
+| Feature | Recording |
+| --- | --- |
+| **Overview** — workspace layout, rail, sidebar, project list | [![Overview demo](./docs/demos/overview-thumb.jpg)](./docs/demos/overview.mp4) |
+| **AI Chat** — streaming response with real typing and code blocks | [![AI chat demo](./docs/demos/ai-chat-thumb.jpg)](./docs/demos/ai-chat.mp4) |
+| **Terminal** — integrated shell running real commands | [![Terminal demo](./docs/demos/terminal-thumb.jpg)](./docs/demos/terminal.mp4) |
+| **File Search (Cmd+P)** — fuzzy file finder across the project | [![File search demo](./docs/demos/file-search-thumb.jpg)](./docs/demos/file-search.mp4) |
+| **Notes Scratchpad** — persistent markdown scratchpad | [![Notes demo](./docs/demos/notes-thumb.jpg)](./docs/demos/notes.mp4) |
+| **Prompt Queue** — queue a prompt and run it through the AI | [![Prompt queue demo](./docs/demos/prompt-queue-thumb.jpg)](./docs/demos/prompt-queue.mp4) |
+| **Team Chat** — shared channel with messages and reactions | [![Team chat demo](./docs/demos/team-chat-thumb.jpg)](./docs/demos/team-chat.mp4) |
+| **Settings** — appearance, themes, and preferences | [![Settings demo](./docs/demos/settings-thumb.jpg)](./docs/demos/settings.mp4) |
+| **Layout Toggles** — collapse and restore the left rail and sidebar | [![Layout demo](./docs/demos/layout-thumb.jpg)](./docs/demos/layout.mp4) |
 
 ## Quick Start
 
