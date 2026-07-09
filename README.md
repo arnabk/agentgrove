@@ -11,6 +11,12 @@ Rust backend + SolidJS frontend. Cross-platform (Linux, macOS, Windows).
 
 See [docs/features.md](docs/features.md) for the full feature list.
 
+## Demo Videos
+
+AI chat with real streaming response and on-screen typing. Click the thumbnail to watch.
+
+[![AI chat demo](./docs/demos/demo-capture-thumb.jpg)](./docs/demos/demo-capture.mp4)
+
 ## Quick Start
 
 ```sh

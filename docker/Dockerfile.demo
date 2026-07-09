@@ -52,7 +52,7 @@ COPY --from=rust-builder --chown=agentgrove:agentgrove /src/target/${BUILD_MODE}
 COPY --from=fe-builder --chown=agentgrove:agentgrove /src/apps/web/dist ./web-dist
 
 # Install the lightweight opencode shim as the opencode binary.
-COPY --chown=agentgrove:agentgrove demo-opencode-shim.js /home/agentgrove/.opencode-shim.js
+COPY --chown=agentgrove:agentgrove docker/demo-opencode-shim.js /home/agentgrove/.opencode-shim.js
 ENV PATH="/home/agentgrove:${PATH}"
 RUN ln -s /home/agentgrove/.opencode-shim.js /home/agentgrove/opencode \
     && chmod +x /home/agentgrove/.opencode-shim.js

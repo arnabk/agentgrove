@@ -2,10 +2,10 @@
 # FE static files on port 4318. The host's dev instance
 # (:4317 / :5173) is completely untouched.
 #
-#   docker compose up -d          # build + start
-#   open http://localhost:4318     # test (FE + BE on same origin)
-#   docker compose down           # stop + remove
-#   docker compose down -v        # also wipe test data volume
+#   docker compose -f docker/docker-compose.yml up -d    # build + start
+#   open http://localhost:4318                               # test (FE + BE on same origin)
+#   docker compose -f docker/docker-compose.yml down        # stop + remove
+#   docker compose -f docker/docker-compose.yml down -v     # also wipe test data volume
 #
 # Data lives in a named Docker volume (`ag-test-data`), fully
 # isolated from the host's `.data/` directory.
@@ -13,8 +13,8 @@
 services:
   agentgrove:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     environment:
       - AGENTGROVE_STATE_DIR=/home/agentgrove/.data
       - AGENTGROVE_BIND=0.0.0.0

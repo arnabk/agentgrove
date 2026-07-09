@@ -27,10 +27,10 @@ if ! curl -fsS "http://127.0.0.1:20128/v1/models" -H "Authorization: Bearer sk_9
 fi
 
 echo "[demo] building demo image..."
-docker compose -f docker-compose.demo.yml build
+docker compose -f docker/docker-compose.demo.yml build
 
 echo "[demo] starting demo container on :4320..."
-docker compose -f docker-compose.demo.yml up -d
+docker compose -f docker/docker-compose.demo.yml up -d
 
 # Wait for backend health.
 for i in $(seq 1 60); do
@@ -54,6 +54,6 @@ echo "[demo] videos are in docs/demos/"
 
 echo "[demo] stopping demo container..."
 cd "${REPO}"
-docker compose -f docker-compose.demo.yml down
+docker compose -f docker/docker-compose.demo.yml down
 
 echo "[demo] done"

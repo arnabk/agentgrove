@@ -1,15 +1,15 @@
 # Isolated demo recording stack.
 # Host dev instance (:4317 / :5173) is untouched.
 #
-#   docker compose -f docker-compose.demo.yml up -d
+#   docker compose -f docker/docker-compose.demo.yml up -d
 #   open http://localhost:4320
-#   docker compose -f docker-compose.demo.yml down -v
+#   docker compose -f docker/docker-compose.demo.yml down -v
 
 services:
   agentgrove-demo:
     build:
-      context: .
-      dockerfile: Dockerfile.demo
+      context: ..
+      dockerfile: docker/Dockerfile.demo
     environment:
       - AGENTGROVE_STATE_DIR=/home/agentgrove/.data
       - AGENTGROVE_BIND=0.0.0.0
