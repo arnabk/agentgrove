@@ -15,37 +15,37 @@ See [docs/features.md](docs/features.md) for the full feature list.
 
 A quick walkthrough of the AgentGrove workspace — project tree, new-chat dialog, and layout.
 
-<video src="./docs/demos/overview.webm" controls muted loop width="100%"></video>
+<video src="https://raw.githubusercontent.com/arnabk/agentgrove/main/docs/demos/overview.webm" controls muted loop width="100%"></video>
 
 ### AI Chat
 
 Ask questions with a real provider; watch token-by-token streaming and tool activity in the timeline.
 
-<video src="./docs/demos/ai-chat.webm" controls muted loop width="100%"></video>
+<video src="https://raw.githubusercontent.com/arnabk/agentgrove/main/docs/demos/ai-chat.webm" controls muted loop width="100%"></video>
 
 ### Team Chat
 
 Chat with other developers on the same instance from the right-side panel. Unread messages show a dot when the panel is closed.
 
-<video src="./docs/demos/team-chat.webm" controls muted loop width="100%"></video>
+<video src="https://raw.githubusercontent.com/arnabk/agentgrove/main/docs/demos/team-chat.webm" controls muted loop width="100%"></video>
 
 ### Prompt Queue
 
 Send follow-up messages while the agent is busy; they enqueue automatically and drain back-to-back.
 
-<video src="./docs/demos/prompt-queue.webm" controls muted loop width="100%"></video>
+<video src="https://raw.githubusercontent.com/arnabk/agentgrove/main/docs/demos/prompt-queue.webm" controls muted loop width="100%"></video>
 
 ### Settings
 
 Tabbed settings for appearance, prompt templates, providers, agents, and database backups.
 
-<video src="./docs/demos/settings.webm" controls muted loop width="100%"></video>
+<video src="https://raw.githubusercontent.com/arnabk/agentgrove/main/docs/demos/settings.webm" controls muted loop width="100%"></video>
 
 ### Layout Toggles
 
 Collapse and expand the left rail to make room for the main workspace.
 
-<video src="./docs/demos/left-rail-toggle.webm" controls muted loop width="100%"></video>
+<video src="https://raw.githubusercontent.com/arnabk/agentgrove/main/docs/demos/left-rail-toggle.webm" controls muted loop width="100%"></video>
 
 ## Quick Start
 
