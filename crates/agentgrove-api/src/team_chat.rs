@@ -48,7 +48,7 @@ pub async fn send(
 
     state.logbus.publish(
         "team-chat",
-        &serde_json::to_string(&TeamChatEvent::Message {
+        serde_json::to_string(&TeamChatEvent::Message {
             id: msg.id.clone(),
             sender: msg.sender.clone(),
             body: msg.body.clone(),
