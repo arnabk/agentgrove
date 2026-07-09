@@ -11,44 +11,6 @@ Rust backend + SolidJS frontend. Cross-platform (Linux, macOS, Windows).
 
 See [docs/features.md](docs/features.md) for the full feature list.
 
-## Demo Videos
-
-Click any thumbnail to watch the full `.webm` demo.
-
-A quick walkthrough of the AgentGrove workspace — project tree, new-chat dialog, and layout.
-
-[![AgentGrove overview demo](./docs/demos/overview-thumb.jpg)](./docs/demos/overview.webm)
-
-### AI Chat
-
-Ask questions with a real provider; watch token-by-token streaming and tool activity in the timeline.
-
-[![AI chat demo](./docs/demos/ai-chat-thumb.jpg)](./docs/demos/ai-chat.webm)
-
-### Team Chat
-
-Chat with other developers on the same instance from the right-side panel. Unread messages show a dot when the panel is closed.
-
-[![Team chat demo](./docs/demos/team-chat-thumb.jpg)](./docs/demos/team-chat.webm)
-
-### Prompt Queue
-
-Send follow-up messages while the agent is busy; they enqueue automatically and drain back-to-back.
-
-[![Prompt queue demo](./docs/demos/prompt-queue-thumb.jpg)](./docs/demos/prompt-queue.webm)
-
-### Settings
-
-Tabbed settings for appearance, prompt templates, providers, agents, and database backups.
-
-[![Settings demo](./docs/demos/settings-thumb.jpg)](./docs/demos/settings.webm)
-
-### Layout Toggles
-
-Collapse and expand the left rail to make room for the main workspace.
-
-[![Layout toggle demo](./docs/demos/left-rail-toggle-thumb.jpg)](./docs/demos/left-rail-toggle.webm)
-
 ## Quick Start
 
 ```sh
