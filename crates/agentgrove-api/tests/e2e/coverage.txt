@@ -1,6 +1,7 @@
 # Canonical list of routes covered by L4 BE endpoint tests.
 GET /health
 GET /ws
+GET /api/version
 GET /api/projects
 POST /api/projects
 GET /api/projects/{id}

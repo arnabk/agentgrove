@@ -289,23 +289,7 @@ Concrete scenarios where AgentGrove is the right answer:
   surfaces are friendlier. AgentGrove assumes you know `git
   worktree`.
 
-## Roadmap differences
-
-What AgentGrove is *actively* working on that the competitors aren't:
-
-- **Cmd+P file finder with live index** (designed, see issue tracker).
-  Will use the same `ignore` + `nucleo-matcher` stack as Helix / Zed,
-  sub-50 ms first-keystroke latency target.
-- **Slash-command discovery from the user's CLI configs**
-  (`~/.claude/commands/*.md`, `~/.config/opencode/command/*.md`),
-  including project-scoped commands at `<project>/.claude/commands/`.
-- **Pluggable HTTP-API providers** beyond Claude (the encrypted key
-  ring + provider-secrets table are in place; first non-Claude HTTP
-  provider returns when we pick the right one).
-- **A Backups panel** in Settings that exposes the snapshot history +
-  restore flow currently behind `just backups` / `just restore-db`.
-- **A migration playback test** that kills the server mid-`sqlx::migrate!`
-  to prove the restore path works under realistic failure modes.
+## Extensibility
 
 ---
 

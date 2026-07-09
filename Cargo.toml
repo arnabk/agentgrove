@@ -69,6 +69,7 @@ nucleo-matcher = "0.3"
 # Paths / dirs
 directories-next = "2"
 which = "6"
+whoami = "1.5"
 
 # Process / memory inspection
 sysinfo = { version = "0.32", default-features = false, features = ["system"] }

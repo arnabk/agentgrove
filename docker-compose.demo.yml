@@ -1,0 +1,27 @@
+# Isolated demo recording stack.
+# Host dev instance (:4317 / :5173) is untouched.
+#
+#   docker compose -f docker-compose.demo.yml up -d
+#   open http://localhost:4320
+#   docker compose -f docker-compose.demo.yml down -v
+
+services:
+  agentgrove-demo:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+    environment:
+      - AGENTGROVE_STATE_DIR=/home/agentgrove/.data
+      - AGENTGROVE_BIND=0.0.0.0
+      - AGENTGROVE_PORT=4317
+      - AGENTGROVE_STATIC_DIR=/home/agentgrove/web-dist
+    ports:
+      - "4320:4317"
+    volumes:
+      - ag-demo-data:/home/agentgrove/.data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: "no"
+
+volumes:
+  ag-demo-data:

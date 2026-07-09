@@ -178,7 +178,7 @@ export interface UploadDto {
   content_type: string;
   size: number;
   /** Absolute path on disk. Embedded in chat prompts so the agent's
-   *  Read tool can fetch the file. */
+   *   Read tool can fetch the file. */
   path: string;
 }
 
@@ -261,10 +261,20 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   return (await res.text()) as unknown as T;
 }
 
+export interface VersionInfo {
+  current: string;
+  latest: string | null;
+  html_url: string | null;
+  update_available: boolean;
+}
+
 export const api = {
   baseUrl,
   async health() {
     return req<{ status: string; version: string }>("/health");
+  },
+  async version() {
+    return req<VersionInfo>("/api/version");
   },
   // Projects
   listProjects: () => req<Project[]>("/api/projects"),

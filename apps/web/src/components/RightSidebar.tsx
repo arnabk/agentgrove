@@ -1,4 +1,4 @@
-import { createSignal, Show, onMount, onCleanup } from "solid-js";
+import { createSignal, Show, createMemo, onMount, onCleanup } from "solid-js";
 import NotesPane, {
   notesSaving,
   notesErr,
@@ -16,7 +16,15 @@ import NotesPane, {
   EyeIcon,
   EyeOffIcon,
 } from "../panes/NotesPane";
-import { isSidebarOpen, toggleSidebar } from "../stores/app";
+import TeamChatPane from "../panes/TeamChatPane";
+import {
+  isSidebarOpen,
+  teamChatOpen,
+  setTeamChatOpen,
+  unreadTeamChat,
+  setUnreadTeamChat,
+  toggleSidebar,
+} from "../stores/app";
 
 /**
  * Always-visible right sidebar: the workspace-global Notes scratchpad.
@@ -116,90 +124,118 @@ export default function RightSidebar() {
             lives here in the title row: title on the left, all controls
             (todo, headings, undo/redo, show/hide done) on the right. */}
         <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
-          <header class="h-9 px-3 flex items-center gap-1 border-b border-border bg-bg-1 shrink-0">
-            <span class="text-[12px] font-semibold text-fg-muted shrink-0">Notes</span>
-            {/* save state — small + unobtrusive, no persistent "saved" pill */}
-            <Show when={notesSaving()}>
-              <span class="text-[10px] text-fg-subtle" data-testid="notes-saving">
-                saving…
-              </span>
-            </Show>
-            <Show when={notesErr()}>
-              <span
-                class="text-[10px] text-danger"
-                data-testid="notes-error"
-                title={notesErr() ?? ""}
-              >
-                save failed
-              </span>
-            </Show>
-
-            {/* Formatting controls, right-aligned. `notesSelVersion()` is
-                read so the active-state highlights re-render on every
-                selection/transaction. */}
-            <div class="ml-auto flex items-center gap-0.5">
-              <NotesToolBtn
-                label={<TaskListIcon />}
-                title="Todo item"
-                active={(notesSelVersion(), notesActions()?.isActive("taskList"))}
-                onClick={() => notesActions()?.toggleTask()}
-              />
-              <NotesDivider />
-              {/* Single "Section heading" toggle. The editor is a
-                  checklist, so the only structural unit above a todo is a
-                  collapsible section — always H3. Active when the cursor
-                  sits in any heading. */}
-              <NotesToolBtn
-                label={<SectionIcon />}
-                title="Section heading"
-                active={(notesSelVersion(), notesActions()?.isActive("heading"))}
-                onClick={() => notesActions()?.toggleSection()}
-              />
-              <NotesDivider />
-              <NotesToolBtn
-                label={<UndoIcon />}
-                title="Undo"
-                onClick={() => notesActions()?.undo()}
-              />
-              <NotesToolBtn
-                label={<RedoIcon />}
-                title="Redo"
-                onClick={() => notesActions()?.redo()}
-              />
-              <NotesDivider />
-              {/* Show/Hide done: a solid accent pill when completed todos
-                  are being shown, an outlined eye-off pill (the default)
-                  when they're hidden. The count badge always shows how
-                  many are done. */}
-              <button
-                type="button"
-                class="inline-flex items-center gap-1 pl-1.5 pr-1 h-7 rounded-md text-[11px] font-medium border transition-colors"
-                classList={{
-                  "border-accent bg-accent text-white": showDone(),
-                  "border-transparent text-fg-muted hover:text-fg hover:bg-bg-2": !showDone(),
-                }}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setShowDone((v) => !v)}
-                title={showDone() ? "Hide completed todos" : "Show completed todos"}
-                aria-pressed={showDone()}
-                data-testid="notes-toggle-done"
-              >
-                {showDone() ? <EyeOffIcon /> : <EyeIcon />}
-                <span
-                  class="inline-flex items-center justify-center min-w-[15px] h-[15px] px-1 rounded-full text-[10px] font-semibold"
-                  classList={{
-                    "bg-white/25 text-white": showDone(),
-                    "bg-bg-3 text-fg-muted": !showDone(),
-                  }}
-                >
-                  {notesTaskCounts().done}
-                </span>
-              </button>
-            </div>
+          <header class="h-10 px-3 flex items-center gap-1 border-b border-border bg-bg-1 shrink-0">
+            <button
+              type="button"
+              class="ag-btn ag-btn-ghost !px-3 !py-1 text-[13px] rounded-b-none"
+              classList={{ "!bg-bg-3 !text-fg": !teamChatOpen(), "text-fg-subtle": teamChatOpen() }}
+              onClick={() => setTeamChatOpen(false)}
+            >
+              Notes
+            </button>
+            <button
+              type="button"
+              class="ag-btn ag-btn-ghost !px-3 !py-1 text-[13px] rounded-b-none relative"
+              classList={{ "!bg-bg-3 !text-fg": teamChatOpen(), "text-fg-subtle": !teamChatOpen() }}
+              onClick={() => {
+                setTeamChatOpen(true);
+                setUnreadTeamChat(false);
+              }}
+            >
+              Team Chat
+              <Show when={unreadTeamChat() && !teamChatOpen()}>
+                <span class="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent"></span>
+              </Show>
+            </button>
           </header>
-          <div class="flex-1 min-h-0 overflow-hidden">
-            <NotesPane />
-          </div>
+
+          <Show
+            when={teamChatOpen()}
+            fallback={
+              <>
+                <div class="h-9 px-3 flex items-center gap-1 border-b border-border bg-bg-2 shrink-0">
+                  {/* save state — small + unobtrusive, no persistent "saved" pill */}
+                  <Show when={notesSaving()}>
+                    <span class="text-[10px] text-fg-subtle" data-testid="notes-saving">
+                      saving…
+                    </span>
+                  </Show>
+                  <Show when={notesErr()}>
+                    <span
+                      class="text-[10px] text-danger"
+                      data-testid="notes-error"
+                      title={notesErr() ?? ""}
+                    >
+                      save failed
+                    </span>
+                  </Show>
+
+                  {/* Formatting controls, right-aligned. `notesSelVersion()` is
+                    read so the active-state highlights re-render on every
+                    selection/transaction. */}
+                  <div class="ml-auto flex items-center gap-0.5">
+                    <NotesToolBtn
+                      label={<TaskListIcon />}
+                      title="Todo item"
+                      active={(notesSelVersion(), notesActions()?.isActive("taskList"))}
+                      onClick={() => notesActions()?.toggleTask()}
+                    />
+                    <NotesDivider />
+                    {/* Single "Section heading" toggle. The editor is a
+                      checklist, so the only structural unit above a todo is a
+                      collapsible section — always H3. Active when the cursor
+                      sits in any heading. */}
+                    <NotesToolBtn
+                      label={<SectionIcon />}
+                      title="Section heading"
+                      active={(notesSelVersion(), notesActions()?.isActive("heading"))}
+                      onClick={() => notesActions()?.toggleSection()}
+                    />
+                    <NotesDivider />
+                    <NotesToolBtn
+                      label={<UndoIcon />}
+                      title="Undo"
+                      onClick={() => notesActions()?.undo()}
+                    />
+                    <NotesToolBtn
+                      label={<RedoIcon />}
+                      title="Redo"
+                      onClick={() => notesActions()?.redo()}
+                    />
+                    <NotesDivider />
+                    <button
+                      type="button"
+                      class="ag-btn ag-btn-ghost ag-btn-icon"
+                      classList={{
+                        "!text-fg !bg-bg-3": showDone(),
+                        "text-fg-subtle": !showDone(),
+                      }}
+                      onClick={() => setShowDone(!showDone())}
+                      title={showDone() ? "Hide completed tasks" : "Show completed tasks"}
+                    >
+                      <Show when={showDone()} fallback={<EyeOffIcon />}>
+                        <EyeIcon />
+                      </Show>
+                      <span
+                        class="ml-1 px-1 rounded-sm text-[9px] font-bold"
+                        classList={{
+                          "bg-white/25 text-white": showDone(),
+                          "bg-bg-3 text-fg-muted": !showDone(),
+                        }}
+                      >
+                        {notesTaskCounts().done}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+                <div class="flex-1 min-h-0 overflow-hidden">
+                  <NotesPane />
+                </div>
+              </>
+            }
+          >
+            <TeamChatPane />
+          </Show>
         </div>
       </aside>
     </Show>
@@ -211,13 +247,14 @@ export default function RightSidebar() {
  *  collapsed. */
 /** Exported for callers that want the toggle in a different spot. */
 export function SidebarToggle() {
+  const open = createMemo(() => isSidebarOpen());
   return (
     <button
       type="button"
       class="absolute right-0 top-1/2 -translate-y-1/2 translate-x-full z-20 bg-bg-2 border border-border rounded-r-md p-1 text-fg-subtle hover:text-fg hover:bg-bg-3"
       onClick={toggleSidebar}
-      title={isSidebarOpen() ? "Collapse sidebar" : "Expand sidebar"}
-      aria-label={isSidebarOpen() ? "Collapse sidebar" : "Expand sidebar"}
+      title={open() ? "Collapse sidebar" : "Expand sidebar"}
+      aria-label={open() ? "Collapse sidebar" : "Expand sidebar"}
       data-testid="sidebar-toggle-edge"
     >
       <svg

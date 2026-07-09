@@ -13,6 +13,7 @@ pub mod project;
 pub mod provider_secret;
 pub mod queue;
 pub mod secret;
+pub mod team_chat;
 pub mod worktree;
 
 pub use blob::{BlobStore, Sha256};
@@ -28,4 +29,5 @@ pub use provider_secret::{
 };
 pub use queue::{QueueError, QueueItemRow, QueueMode, QueueRepo, QueueStatus};
 pub use secret::{SecretError, SecretKeyring};
+pub use team_chat::TeamChatMessage;
 pub use worktree::{NewWorktree, WorktreeError, WorktreeRecord, WorktreeRepo, WorktreeStatus};

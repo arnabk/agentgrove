@@ -63,6 +63,54 @@
   --ag-accent-soft: rgba(91, 61, 245, 0.1);
 }
 
+[data-theme-id="solarized-dark"] {
+  --ag-bg: #002b36;
+  --ag-bg-1: #073642;
+  --ag-bg-2: #0e4b5e;
+  --ag-bg-3: #126a7c;
+  --ag-bg-4: #1a7a8c;
+
+  --ag-fg: #93a1a1;
+  --ag-fg-muted: #586e75;
+  --ag-fg-subtle: #657b83;
+
+  --ag-border: #073642;
+  --ag-border-strong: #586e75;
+
+  --ag-accent: #268bd2;
+  --ag-accent-hover: #4aa3e8;
+  --ag-accent-fg: #ffffff;
+  --ag-accent-soft: rgba(38, 139, 210, 0.14);
+
+  --ag-success: #859900;
+  --ag-warning: #b58900;
+  --ag-danger: #dc322f;
+}
+
+[data-theme-id="tokyo-night"] {
+  --ag-bg: #1a1b26;
+  --ag-bg-1: #24283b;
+  --ag-bg-2: #2a2e3f;
+  --ag-bg-3: #3b4261;
+  --ag-bg-4: #4a5173;
+
+  --ag-fg: #c0caf5;
+  --ag-fg-muted: #565f89;
+  --ag-fg-subtle: #787c99;
+
+  --ag-border: #2a2e3f;
+  --ag-border-strong: #3b4261;
+
+  --ag-accent: #7aa2f7;
+  --ag-accent-hover: #8db0ff;
+  --ag-accent-fg: #ffffff;
+  --ag-accent-soft: rgba(122, 162, 247, 0.14);
+
+  --ag-success: #9ece6a;
+  --ag-warning: #e0af68;
+  --ag-danger: #f7768e;
+}
+
 /* ---------- Base ---------- */
 
 :root {
@@ -482,6 +530,17 @@ textarea::placeholder {
     transform: translateY(0) scale(1);
   }
 }
+
+@keyframes ag-queue-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 .ag-select-option {
   /* Three columns — label | hint | check — so the hint and check line
      up vertically across every row regardless of label length. A flex
@@ -684,6 +743,12 @@ textarea::placeholder {
   font-size: inherit;
   line-height: 1.6;
 }
+.ag-notes-prose {
+  font-size: var(--ag-font-size, 15px);
+  font-family: var(--ag-font-ui);
+  line-height: 1.55;
+}
+
 .ag-prose:focus {
   outline: none;
 }

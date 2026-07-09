@@ -27,6 +27,7 @@
     "@codemirror/state": "^6.5.1",
     "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.36.1",
+    "@lezer/highlight": "^1.2.3",
     "@kobalte/core": "^0.13.7",
     "@solidjs/router": "^0.15.0",
     "@tanstack/solid-virtual": "^3.13.24",

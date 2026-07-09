@@ -1,0 +1,21 @@
+{
+  "provider": {
+    "9router": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "9router",
+      "options": {
+        "baseURL": "http://host.docker.internal:20128/v1",
+        "apiKey": "sk_9router"
+      },
+      "models": {
+        "Development": {
+          "name": "Development",
+          "modalities": {
+            "input": ["text"],
+            "output": ["text"]
+          }
+        }
+      }
+    }
+  }
+}

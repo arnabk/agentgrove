@@ -2,6 +2,8 @@ import { For, Show, createEffect, createSignal, createMemo, onCleanup, onMount }
 import { produce } from "solid-js/store";
 import { api, type PromptTemplate, type ProviderDescriptor } from "../api/client";
 import {
+  DEFAULT_MONO_FONT,
+  DEFAULT_UI_FONT,
   FONT_FAMILY_PRESETS,
   FONT_SIZES,
   MONO_FAMILY_PRESETS,
@@ -52,7 +54,7 @@ export default function SettingsModal() {
         data-testid="settings-modal"
       >
         <div class="absolute inset-0 bg-black/60" onClick={() => setSettingsOpen(false)} />
-        <div class="relative w-full max-w-2xl rounded-xl border border-border bg-bg-1 shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+        <div class="relative w-full max-w-2xl rounded-xl border border-border bg-bg-1 shadow-2xl overflow-hidden flex flex-col h-[min(80vh,800px)]">
           <header class="flex items-center justify-between px-5 py-3 border-b border-border">
             <h2 class="text-[15px] font-semibold tracking-tight">Settings</h2>
             <button
@@ -154,13 +156,13 @@ function AppearanceTab() {
   async function reset() {
     await saveSettings({
       theme: "dark-default",
-      ui_font: FONT_FAMILY_PRESETS[0]!.value,
-      mono_font: MONO_FAMILY_PRESETS[0]!.value,
+      ui_font: DEFAULT_UI_FONT,
+      mono_font: DEFAULT_MONO_FONT,
       font_size: 15,
     });
     setTheme("dark-default");
-    setUiFont(FONT_FAMILY_PRESETS[0]!.value);
-    setMonoFont(MONO_FAMILY_PRESETS[0]!.value);
+    setUiFont(DEFAULT_UI_FONT);
+    setMonoFont(DEFAULT_MONO_FONT);
     setSize(15);
   }
 

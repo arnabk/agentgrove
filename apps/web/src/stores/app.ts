@@ -124,9 +124,9 @@ export interface AppState {
 }
 
 const DEFAULT_UI_FONT =
-  'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+  '"IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const DEFAULT_MONO_FONT =
-  '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+  '"Cascadia Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 const DEFAULT_FONT_SIZE = 15;
 
 export const [state, setState] = createStore<AppState>({
@@ -145,6 +145,8 @@ export const [state, setState] = createStore<AppState>({
 
 /** Visibility of the global Settings modal. */
 export const [settingsOpen, setSettingsOpen] = createSignal(false);
+export const [teamChatOpen, setTeamChatOpen] = createSignal(false);
+export const [unreadTeamChat, setUnreadTeamChat] = createSignal(false);
 
 /** Chat ids that currently have an in-flight agent turn. ChatPane
  *  maintains this from its per-chat store; the TabStrip reads it to
@@ -496,6 +498,21 @@ export function setActiveChat(chatId: string) {
   setActiveTab(chatId);
 }
 
+/** Ensure a chat tab exists for `chatId` in the current scope and
+ *  activate it. If the chat isn't already open, a placeholder tab is
+ *  added synchronously so routeSync can win the race against the
+ *  store->URL effect that would otherwise overwrite ?chat=. */
+export function ensureChatTab(chatId: string): void {
+  const key = currentScopeKey();
+  if (!key) return;
+  const scope = currentScope();
+  if (scope?.tabs.some((t) => t.kind === "chat" && t.id === chatId)) {
+    setActiveTab(chatId);
+    return;
+  }
+  addChatTab({ id: chatId, title: "Chat" });
+}
+
 /** Persist an in-flight composer draft for `chatId`. */
 export function setChatDraft(chatId: string, draft: string) {
   const key = currentScopeKey();
@@ -766,6 +783,7 @@ export function setTheme(themeId: string) {
   if (!t) return;
   const root = document.documentElement;
   root.setAttribute("data-theme", t.kind);
+  root.setAttribute("data-theme-id", t.id);
   root.style.setProperty("--ag-bg", t.colors.bg);
   root.style.setProperty("--ag-fg", t.colors.fg);
   root.style.setProperty("--ag-fg-muted", t.colors.muted);
@@ -883,13 +901,16 @@ export async function saveSettings(patch: UserSettings) {
 // or commonly pre-installed on developer machines. The fallback
 // chain ensures a clean render even if the font hasn't loaded yet.
 export const FONT_FAMILY_PRESETS: { label: string; value: string }[] = [
-  { label: "Inter (default)", value: DEFAULT_UI_FONT },
+  { label: "IBM Plex Sans (default)", value: DEFAULT_UI_FONT },
+  {
+    label: "Inter",
+    value: 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+  },
   {
     label: "System",
     value: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
   },
   { label: "Geist", value: '"Geist", Inter, system-ui, sans-serif' },
-  { label: "IBM Plex Sans", value: '"IBM Plex Sans", Inter, system-ui, sans-serif' },
   { label: "Nunito Sans", value: '"Nunito Sans", Inter, system-ui, sans-serif' },
   { label: "Open Sans", value: '"Open Sans", Inter, system-ui, sans-serif' },
   { label: "Outfit", value: '"Outfit", Inter, system-ui, sans-serif' },
@@ -903,8 +924,11 @@ export const FONT_FAMILY_PRESETS: { label: string; value: string }[] = [
 
 // Popular free monospace / code fonts.
 export const MONO_FAMILY_PRESETS: { label: string; value: string }[] = [
-  { label: "JetBrains Mono (default)", value: DEFAULT_MONO_FONT },
-  { label: "Cascadia Code", value: '"Cascadia Code", ui-monospace, Menlo, monospace' },
+  { label: "Cascadia Code (default)", value: DEFAULT_MONO_FONT },
+  {
+    label: "JetBrains Mono",
+    value: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+  },
   { label: "Fira Code", value: '"Fira Code", ui-monospace, Menlo, monospace' },
   { label: "Geist Mono", value: '"Geist Mono", ui-monospace, Menlo, monospace' },
   { label: "IBM Plex Mono", value: '"IBM Plex Mono", ui-monospace, Menlo, monospace' },

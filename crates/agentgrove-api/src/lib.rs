@@ -22,6 +22,7 @@ pub mod router;
 pub mod scratchpad;
 pub mod settings;
 pub mod state;
+pub mod team_chat;
 pub mod terminal;
 pub mod themes;
 pub mod uploads;

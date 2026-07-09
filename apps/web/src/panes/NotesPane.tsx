@@ -150,7 +150,7 @@ export default function NotesPane() {
       ],
       editorProps: {
         attributes: {
-          class: "ag-prose pl-10 pr-6 py-5 focus:outline-none min-h-full",
+          class: "ag-prose ag-notes-prose pl-10 pr-6 py-5 focus:outline-none min-h-full",
           spellcheck: "true",
         },
       },

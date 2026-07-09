@@ -62,10 +62,12 @@ export default function App() {
     setLeftRailOpen(next);
     localStorage.setItem("ag-left-rail-open", next ? "1" : "0");
   }
+  // sidebarOpen unused var removed
 
   onMount(async () => {
     await bootstrap();
     await seedScopeChatTabs();
+    void checkReleaseVersion();
   });
 
   // Seed chat tabs for the active scope when it has 0 tabs but the BE
@@ -93,6 +95,38 @@ export default function App() {
     }
   }
 
+  // Notify the user when a newer AgentGrove release is available.
+  // The BE caches the GitHub check, so this is cheap to call on every
+  // cold boot. We remember the last dismissed version in localStorage
+  // so the toast doesn't nag repeatedly.
+  async function checkReleaseVersion() {
+    try {
+      const v = await api.version();
+      if (!v.update_available || !v.latest) return;
+      const key = `ag-release-dismissed-${v.latest}`;
+      if (localStorage.getItem(key) === "1") return;
+      pushToast({
+        title: `AgentGrove v${v.latest} is available`,
+        message: `You're running v${v.current}.`,
+        timeoutMs: 60_000,
+        level: "info",
+        ...(v.html_url
+          ? {
+              action: {
+                label: "Open release",
+                onClick: () => {
+                  window.open(v.html_url!, "_blank", "noopener,noreferrer");
+                },
+              },
+            }
+          : {}),
+      });
+      localStorage.setItem(key, "1");
+    } catch {
+      // network/GitHub hiccups shouldn't block startup
+    }
+  }
+
   // NOTE: seedScopeChatTabs is called once from onMount (above).
   // Subsequent scope switches are handled by ChatPane's own
   // refreshScopeChats once it mounts (the initial seed creates tabs
@@ -113,10 +147,12 @@ export default function App() {
     onCleanup(() => window.removeEventListener("scroll", onScroll));
   });
 
-  // Bidirectional sync between the URL and the active workspace
-  // state. Must be called during render (not onMount) because it uses
-  // useNavigate/useLocation which require the Router context.
-  installRouteSync();
+  // Bidirectional sync between the URL and the active workspace state.
+  // Installed once on mount so App re-renders don't create duplicate
+  // route-sync effects.
+  onMount(() => {
+    installRouteSync();
+  });
 
   // Cross-browser-instance sync: open one WS to `/ws?topic=sync`
   // and react to project / worktree / chat / scratchpad changes

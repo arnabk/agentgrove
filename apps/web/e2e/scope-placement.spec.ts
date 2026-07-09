@@ -31,6 +31,10 @@ test.describe("scope placement", () => {
   });
 
   test("a terminal created from a project row opens in that project's scope", async ({ page }) => {
+    // Open the project overflow menu so the create actions are in the DOM.
+    await page.locator('[data-testid^="project-menu-"]').first().click();
+    await page.waitForTimeout(200);
+
     // Read the project id from its new-terminal button testid.
     const termBtn = page.locator('[data-testid^="new-terminal-"]').first();
     await expect(termBtn).toBeVisible({ timeout: 10_000 });
@@ -44,13 +48,18 @@ test.describe("scope placement", () => {
     await expect.poll(() => new URL(page.url()).pathname, { timeout: 10_000 }).toContain(projectId);
 
     // A live terminal renders. The dev DB may already hold terminals from
-    // earlier runs, so there can be several .xterm nodes; at least one is
-    // visible (the active one for this scope).
-    await expect(page.locator(".xterm").first()).toBeVisible({ timeout: 15_000 });
+    // earlier runs, so scope by the visible xterm for the active tab.
+    await expect(page.locator(".xterm").filter({ visible: true }).first()).toBeVisible({
+      timeout: 15_000,
+    });
     expect(await page.locator('[data-testid^="tab-host-"]').count()).toBeGreaterThanOrEqual(1);
   });
 
   test("a chat created from a project row opens in that project's scope", async ({ page }) => {
+    // Open the project overflow menu so the create actions are in the DOM.
+    await page.locator('[data-testid^="project-menu-"]').first().click();
+    await page.waitForTimeout(200);
+
     const chatBtn = page.locator('[data-testid^="new-chat-"]').first();
     await expect(chatBtn).toBeVisible({ timeout: 10_000 });
     const testid = await chatBtn.getAttribute("data-testid");
@@ -64,6 +73,8 @@ test.describe("scope placement", () => {
     // right scope) and a composer is available (the chat actually opened).
     // The dev DB may hold prior chats, so scope by the visible composer.
     await expect.poll(() => new URL(page.url()).pathname, { timeout: 10_000 }).toContain(projectId);
-    await expect(page.getByTestId("chat-input").first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("chat-input").filter({ visible: true }).first()).toBeVisible({
+      timeout: 15_000,
+    });
   });
 });

@@ -40,8 +40,10 @@ test.describe.serial("chat composer draft persistence", () => {
     await typeIntoComposer(page, "scratch note in flight");
 
     // Switch away from the chat to verify the draft survives.
-    // Open a terminal via the + menu so we have a second tab to
-    // click to. Then switch back to the chat tab.
+    // Open the project overflow menu, then create a terminal so we have a
+    // second tab to switch to.
+    await page.locator('[data-testid^="project-menu-"]').first().click();
+    await page.waitForTimeout(200);
     await page.locator('[data-testid^="new-terminal-"]').first().click();
     await page.waitForTimeout(500);
     // Click back to the original chat tab (it's the first tab
@@ -100,7 +102,9 @@ test.describe.serial("chat composer draft persistence", () => {
     // Type something new, switch tabs, and confirm the OLD draft
     // didn't resurrect itself (would indicate a stale store entry).
     await typeIntoComposer(page, "after send");
-    // Open a terminal tab via + menu + switch back.
+    // Open a terminal tab via the project overflow menu + switch back.
+    await page.locator('[data-testid^="project-menu-"]').first().click();
+    await page.waitForTimeout(200);
     await page.locator('[data-testid^="new-terminal-"]').first().click();
     await page.waitForTimeout(500);
     const chatTab = page.locator('[data-testid^="tab-"]').first();

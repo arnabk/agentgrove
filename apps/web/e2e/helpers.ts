@@ -1,14 +1,19 @@
 // Shared helpers for AgentGrove Playwright specs. Centralises the
 // bootstrap + composer-typing + BE-query patterns so individual
-// specs stay focused on their behaviour. Keeps the same shape as
-// the inline helpers in `chat-routing.spec.ts` so existing tests
-// can adopt this file later without re-learning the API.
+// specs stay focused on their behaviour.
 
-import { expect, Page } from "@playwright/test";
+import { expect, Page, Locator } from "@playwright/test";
 
-export const BASE = process.env.BASE_URL ?? "http://localhost:5173";
+export const BASE = process.env.BASE_URL ?? "/";
 export const BE_URL = process.env.AGENTGROVE_BE_URL ?? "http://127.0.0.1:4317";
 export const REPO_ROOT = process.env.REPO_ROOT ?? process.cwd();
+
+/** The visible chat composer on the active tab. The dev DB can leave
+ *  hidden chat panes mounted, so :visible scopes us to the one pane
+ *  that is actually display:block. */
+function visibleComposer(page: Page): Locator {
+  return page.locator('.ag-shell [data-testid="chat-input"]').filter({ visible: true }).first();
+}
 
 /** Tell the FE which BE to talk to before any module imports run.
  *  The localStorage key is read by the api/client module on first
@@ -20,6 +25,66 @@ export async function seedBackend(page: Page) {
   }, BE_URL);
 }
 
+async function listProjects(): Promise<{ id: string; name: string; root: string }[]> {
+  let attempts = 3;
+  while (attempts > 0) {
+    try {
+      const res = await fetch(`${BE_URL}/api/projects`);
+      if (res.ok) return await res.json();
+    } catch {
+      await new Promise((r) => setTimeout(r, 1000));
+      attempts--;
+    }
+  }
+  return [];
+}
+
+async function ensureProject(): Promise<string> {
+  const projects = await listProjects();
+  if (projects.length > 0) return projects[0]!.id;
+  let attempts = 3;
+  while (attempts > 0) {
+    try {
+      const res = await fetch(`${BE_URL}/api/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "self", root: REPO_ROOT }),
+      });
+      if (res.ok) {
+        const created = (await res.json()) as { id: string };
+        return created.id;
+      }
+    } catch {
+      await new Promise((r) => setTimeout(r, 1000));
+      attempts--;
+    }
+  }
+  throw new Error("failed to seed project after retries");
+}
+
+async function createChat(projectId: string): Promise<string> {
+  // Use the fake/test provider so the chat can be exercised without
+  // requiring a real Claude / opencode CLI on the test runner.
+  let attempts = 3;
+  while (attempts > 0) {
+    try {
+      const res = await fetch(`${BE_URL}/api/projects/${projectId}/chats`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "test chat " + Date.now(), provider: "fake", model: "fake" }),
+      });
+      if (res.ok) {
+        const created = (await res.json()) as { id: string };
+        return created.id;
+      }
+    } catch {
+      await new Promise((r) => setTimeout(r, 1000));
+      attempts--;
+    }
+  }
+  throw new Error("failed to create chat after retries");
+}
+
 /** Boot the app + ensure at least one project + an open chat exist.
  *  Returns the chat id for direct BE queries.
  *
@@ -29,24 +94,20 @@ export async function seedBackend(page: Page) {
  *  step always runs since chats are per-test ephemeral. */
 export async function bootstrapWithChat(page: Page): Promise<string> {
   await seedBackend(page);
-  await page.goto(BASE, { waitUntil: "networkidle" });
+  const projectId = await ensureProject();
+  const chatId = await createChat(projectId);
+
+  // Load the app with an explicit project path so routeSync selects the
+  // scope and seeds chat tabs. The ?chat parameter then activates the
+  // newly-created chat tab.
+  const url = `${BASE.replace(/\/$/, "")}/p/${projectId}?chat=${chatId}`;
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+
   await expect(page.getByTestId("app-root")).toBeVisible({ timeout: 15_000 });
 
-  const hasProject = await page.locator("[data-testid='left-rail']").count();
-  if (hasProject === 0) {
-    await fetch(`${BE_URL}/api/projects`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "self", root: REPO_ROOT }),
-    });
-  }
-  await expect(page.getByTestId("left-rail")).toBeVisible({ timeout: 15_000 });
-
-  // Create a fresh chat. We click the first "+chat" row icon to
-  // avoid coupling to a specific project id.
-  await page.locator('[data-testid^="new-chat-"]').first().click();
-  await page.locator('button:has-text("Create chat")').click();
-  await expect(page.locator('[data-testid="chat-input"]:visible')).toBeVisible();
+  // routeSync opens the requested chat tab. The active tab is the
+  // one whose pane is display:block, so just wait for its composer.
+  await expect(visibleComposer(page)).toBeVisible({ timeout: 20_000 });
   return await activeChatId(page);
 }
 
@@ -79,10 +140,7 @@ export async function activeChatId(page: Page): Promise<string> {
  *  lets `scheduleScopeLayoutWrite` debounce (~400 ms) flush the
  *  draft to the BE before the test does anything reload-shaped. */
 export async function typeIntoComposer(page: Page, text: string) {
-  // Only the active tab's pane is display:block, so :visible scopes us to
-  // the composer the user is actually looking at — the dev DB can leave
-  // several hidden chat panes (and their chat-input nodes) mounted.
-  const editable = page.locator('[data-testid="chat-input"]:visible');
+  const editable = visibleComposer(page);
   await editable.click();
   await page.keyboard.type(text);
   await page.waitForTimeout(600);
@@ -91,17 +149,32 @@ export async function typeIntoComposer(page: Page, text: string) {
 /** Clear the composer's contents. ProseMirror's preferred clearing
  *  gesture is Ctrl/Cmd+A then Backspace; this works on every
  *  supported OS and keeps the editor's history intact. */
-export async function clearComposer(page: Page) {
-  const editable = page.locator('[data-testid="chat-input"]:visible');
+export async function send(page: Page, text: string) {
+  const editable = visibleComposer(page);
   await editable.click();
   const isMac = process.platform === "darwin";
   await page.keyboard.press(isMac ? "Meta+a" : "Control+a");
   await page.keyboard.press("Backspace");
+  await page.keyboard.type(text);
+  await page.waitForTimeout(500);
+
+  await expect(visibleComposer(page)).toContainText(text, { timeout: 10_000 });
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(1000);
+}
+
+export async function clearComposer(page: Page) {
+  const editable = visibleComposer(page);
+  await editable.click();
+  const isMac = process.platform === "darwin";
+  await page.keyboard.press(isMac ? "Meta+a" : "Control+a");
+  await page.keyboard.press("Backspace");
+  await page.waitForTimeout(100);
 }
 
 /** Submit the composer via plain Enter (the routing the user sees). */
 export async function submitComposer(page: Page) {
-  const editable = page.locator('[data-testid="chat-input"]:visible');
+  const editable = visibleComposer(page);
   await editable.press("Enter");
 }
 

@@ -6,6 +6,7 @@ fn expected_routes() -> BTreeSet<&'static str> {
     [
         "GET /health",
         "GET /ws",
+        "GET /api/version",
         "GET /api/projects",
         "POST /api/projects",
         "GET /api/projects/{id}",

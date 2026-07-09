@@ -1,9 +1,11 @@
 //! Axum router.
 
 use crate::{
-    backups, branches, chats, diag, editor, files, fs as fsapi, git as gitapi, health::health,
-    layout, notes, projects, providers, queue, scratchpad, settings, state::AppState, terminal,
-    themes, uploads, worktrees, ws,
+    backups, branches, chats, diag, editor, files, fs as fsapi, git as gitapi,
+    health::{health, version},
+    layout, notes, projects, providers, queue, scratchpad, settings,
+    state::AppState,
+    team_chat, terminal, themes, uploads, worktrees, ws,
 };
 use axum::{
     http::Method,
@@ -16,7 +18,11 @@ use tower_http::cors::{Any, CorsLayer};
 pub fn build_router(state: AppState) -> Router {
     let api = Router::new()
         .route("/health", get(health))
+        .route("/api/version", get(version))
         .route("/ws", get(ws::handler))
+        // Team chat
+        .route("/api/team-chat/whoami", get(team_chat::whoami))
+        .route("/api/team-chat/messages", get(team_chat::list).post(team_chat::send))
         // Projects
         .route("/api/projects", get(projects::list).post(projects::create))
         .route(

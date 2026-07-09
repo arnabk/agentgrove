@@ -554,7 +554,7 @@ export default function LeftRail() {
                     </button>
 
                     {isWorktree ? <WorktreeIcon /> : <FolderIcon />}
-                    <span class="truncate text-[0.97em] min-w-0 flex-1">{p.name}</span>
+                    <span class="truncate min-w-0 flex-1">{p.name}</span>
 
                     {/* "Working" dot. While collapsed it summarises ANY
                         busy chat under the project (root or worktree);

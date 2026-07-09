@@ -34,7 +34,7 @@ export default function QueueTimeline(props: {
   return (
     <Show when={props.items.length > 0}>
       <section
-        class="border-t border-border bg-bg-1 px-4 py-3 space-y-2"
+        class="border-t border-border bg-bg-1 px-4 py-3 space-y-2 animate-[ag-queue-enter_200ms_ease-out]"
         data-testid="queue-timeline"
         aria-label="Queued messages"
       >
@@ -101,27 +101,29 @@ export default function QueueTimeline(props: {
           </Show>
         </div>
 
-        <div class="space-y-2" data-testid="queue-items">
+        <div class="space-y-2 max-h-80 overflow-y-auto pr-2" data-testid="queue-items">
           <For each={props.items}>
             {(item, i) => (
-              <QueueCard
-                item={item}
-                index={i()}
-                isNext={i() === 0}
-                busy={props.busy}
-                // Only the item actually being dispatched (status
-                // "running") is immutable. Pending items behind it stay
-                // editable / removable even while the head is in flight —
-                // the user explicitly wants to fix up queued messages
-                // without waiting for the current turn to finish.
-                locked={item.status === "running"}
-                expanded={props.expanded.has(item.id)}
-                onToggle={() => props.onToggleExpanded(item.id)}
-                onCancel={() => props.onCancel(item)}
-                onUpdate={(body) => props.onUpdate(item, body)}
-                onSendNow={() => props.onRunNext()}
-                onEditingChange={(editing) => props.onItemEditing(item.id, editing)}
-              />
+              <div class="animate-[ag-queue-enter_180ms_ease-out]">
+                <QueueCard
+                  item={item}
+                  index={i()}
+                  isNext={i() === 0}
+                  busy={props.busy}
+                  // Only the item actually being dispatched (status
+                  // "running") is immutable. Pending items behind it stay
+                  // editable / removable even while the head is in flight —
+                  // the user explicitly wants to fix up queued messages
+                  // without waiting for the current turn to finish.
+                  locked={item.status === "running"}
+                  expanded={props.expanded.has(item.id)}
+                  onToggle={() => props.onToggleExpanded(item.id)}
+                  onCancel={() => props.onCancel(item)}
+                  onUpdate={(body) => props.onUpdate(item, body)}
+                  onSendNow={() => props.onRunNext()}
+                  onEditingChange={(editing) => props.onItemEditing(item.id, editing)}
+                />
+              </div>
             )}
           </For>
         </div>

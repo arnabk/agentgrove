@@ -8,6 +8,7 @@ use agentgrove_store::{
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
 
 /// Application state injected into Axum handlers.
@@ -73,6 +74,8 @@ pub struct AppState {
     /// Lazily populated on first search; the FE can also call
     /// `POST /api/projects/:id/files/reindex` to force a re-scan.
     pub file_index: crate::file_index::FileIndex,
+    /// Cached latest-version check from GitHub, refreshed on a TTL.
+    pub version_cache: Arc<Mutex<Option<(crate::health::VersionInfo, Instant)>>>,
 }
 
 impl AppState {
@@ -112,6 +115,7 @@ impl AppState {
             dispatching: Arc::new(Mutex::new(HashSet::new())),
             cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
             file_index: crate::file_index::FileIndex::new(),
+            version_cache: Arc::new(Mutex::new(None)),
         }
     }
 }

@@ -3,7 +3,7 @@ import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { foldGutter, foldKeymap, codeFolding, indentOnInput } from "@codemirror/language";
-import { oneDark } from "@codemirror/theme-one-dark";
+import { editorTheme } from "../lib/codemirrorTheme";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
@@ -122,7 +122,7 @@ export default function EditorPane() {
             ...historyKeymap,
             ...foldKeymap,
           ]),
-          oneDark,
+          editorTheme,
           langComp.of([]),
           editableComp.of([EditorView.editable.of(false)]),
           EditorView.updateListener.of((u) => {
@@ -133,7 +133,9 @@ export default function EditorPane() {
             }
           }),
           EditorView.theme({
-            "&": { height: "100%", fontSize: "13px" },
+            "&": { height: "100%", fontSize: "var(--ag-font-size, 15px)" },
+            ".cm-scroller": { fontFamily: "var(--ag-font-mono)" },
+            ".cm-content": { fontFamily: "var(--ag-font-mono)" },
           }),
         ],
       }),

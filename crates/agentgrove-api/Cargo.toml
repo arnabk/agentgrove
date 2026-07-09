@@ -37,6 +37,8 @@ ignore = { workspace = true }
 nucleo-matcher = { workspace = true }
 notify = { workspace = true }
 notify-debouncer-full = { workspace = true }
+reqwest = { workspace = true }
+whoami = { workspace = true }
 
 [dev-dependencies]
 reqwest = { workspace = true }
@@ -46,6 +48,7 @@ tempfile = { workspace = true }
 serde_json = { workspace = true }
 urlencoding = "2"
 which = { workspace = true }
+whoami = { workspace = true }
 agentgrove-git = { path = "../agentgrove-git" }
 
 [[test]]

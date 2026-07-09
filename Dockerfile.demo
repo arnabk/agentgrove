@@ -1,0 +1,68 @@
+# AgentGrove demo image: backend + frontend + a lightweight opencode shim.
+# The shim talks directly to the host's 9router OpenAI-compatible endpoint
+# so the container can show real AI responses without the full Electron
+# desktop app.
+
+ARG BUILD_MODE=debug
+
+# ── Stage 1: Rust build ──────────────────────────────────────
+FROM rust:1.95-bookworm AS rust-builder
+
+ARG BUILD_MODE
+ENV SQLX_OFFLINE=true
+
+WORKDIR /src
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY .sqlx/ .sqlx/
+COPY crates/ crates/
+
+RUN if [ "$BUILD_MODE" = "release" ]; then \
+      cargo build --release -p agentgrove-server && strip target/release/agentgrove; \
+    else \
+      cargo build -p agentgrove-server; \
+    fi
+
+# ── Stage 2: FE build ────────────────────────────────────────
+FROM node:24-bookworm-slim AS fe-builder
+
+RUN corepack enable pnpm
+
+WORKDIR /src
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json apps/web/
+RUN pnpm install --frozen-lockfile
+
+COPY apps/web/ apps/web/
+RUN pnpm -C apps/web build
+
+# ── Stage 3: runtime with opencode shim ─────────────────────
+FROM node:24-bookworm-slim AS runtime
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       ca-certificates curl git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m agentgrove
+USER agentgrove
+WORKDIR /home/agentgrove
+
+ARG BUILD_MODE
+COPY --from=rust-builder --chown=agentgrove:agentgrove /src/target/${BUILD_MODE}/agentgrove ./agentgrove
+COPY --from=fe-builder --chown=agentgrove:agentgrove /src/apps/web/dist ./web-dist
+
+# Install the lightweight opencode shim as the opencode binary.
+COPY --chown=agentgrove:agentgrove demo-opencode-shim.js /home/agentgrove/.opencode-shim.js
+ENV PATH="/home/agentgrove:${PATH}"
+RUN ln -s /home/agentgrove/.opencode-shim.js /home/agentgrove/opencode \
+    && chmod +x /home/agentgrove/.opencode-shim.js
+
+ENV OPENCODE_BASE_URL=http://host.docker.internal:20128/v1
+ENV OPENCODE_API_KEY=sk_9router
+ENV AGENTGROVE_STATE_DIR=/home/agentgrove/.data
+RUN mkdir -p /home/agentgrove/.data
+
+EXPOSE 4317
+EXPOSE 5173
+
+CMD ["./agentgrove"]

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id as \"id!\", sender as \"sender!\", body as \"body!\", created_at as \"created_at!: chrono::DateTime<chrono::Utc>\"\n            FROM team_chat_messages\n            ORDER BY created_at ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "sender!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "body!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!: chrono::DateTime<chrono::Utc>",
+        "ordinal": 3,
+        "type_info": "Datetime"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d785f876a1780616cedc5e3008cbc85d7a82afd0a3363b1d4bcde9009d3a2fc0"
+}

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO team_chat_messages (id, sender, body)\n            VALUES (?, ?, ?)\n            RETURNING id as \"id!\", sender as \"sender!\", body as \"body!\", created_at as \"created_at!: chrono::DateTime<chrono::Utc>\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "sender!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "body!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!: chrono::DateTime<chrono::Utc>",
+        "ordinal": 3,
+        "type_info": "Datetime"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d0b08645adbf5ca29fddc4277fbca0c0ebdea9b72b408291f2382c78ca831ccf"
+}
