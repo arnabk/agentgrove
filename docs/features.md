@@ -2,42 +2,6 @@
 
 AgentGrove is a high-performance, low-footprint local developer workspace. Here is a complete tour of what it can do today.
 
-## Demo Videos
-
-A quick walkthrough of the AgentGrove workspace — project tree, new-chat dialog, and layout.
-
-<video src="./demos/overview.webm" controls muted loop width="100%"></video>
-
-### AI Chat
-
-Ask questions with a real provider; watch token-by-token streaming and tool activity in the timeline.
-
-<video src="./demos/ai-chat.webm" controls muted loop width="100%"></video>
-
-### Team Chat
-
-Chat with other developers on the same instance from the right-side panel. Unread messages show a dot when the panel is closed.
-
-<video src="./demos/team-chat.webm" controls muted loop width="100%"></video>
-
-### Prompt Queue
-
-Send follow-up messages while the agent is busy; they enqueue automatically and drain back-to-back.
-
-<video src="./demos/prompt-queue.webm" controls muted loop width="100%"></video>
-
-### Settings
-
-Tabbed settings for appearance, prompt templates, providers, agents, and database backups.
-
-<video src="./demos/settings.webm" controls muted loop width="100%"></video>
-
-### Layout Toggles
-
-Collapse and expand the left rail to make room for the main workspace.
-
-<video src="./demos/left-rail-toggle.webm" controls muted loop width="100%"></video>
-
 ## Project Management
 
 - **Folder-based projects** — add any folder; name auto-derived from the path
