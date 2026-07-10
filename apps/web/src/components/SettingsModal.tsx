@@ -608,8 +608,8 @@ function PromptsTab() {
                   </button>
                 </div>
                 <textarea
-                  class="ag-input resize-y min-h-[5em]"
-                  rows="3"
+                  class="ag-input resize-y min-h-[12em]"
+                  rows="6"
                   value={p.body}
                   placeholder="Prompt body"
                   onInput={(e) =>

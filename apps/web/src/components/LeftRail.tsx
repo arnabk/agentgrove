@@ -75,10 +75,6 @@ const RAIL_MIN_PX = 200;
 const RAIL_MAX_PX = 480;
 const RAIL_DEFAULT_PX = 260;
 const RAIL_LS_KEY = "ag-rail-w";
-/** Persisted toggle: show inline file/folder trees under project +
- *  worktree rows, or hide them (worktrees-only view). Default true
- *  so existing users see the same UI on first load. */
-const RAIL_SHOW_FILES_LS_KEY = "ag-rail-show-files";
 
 /**
  * Left navigation: projects only.
@@ -344,17 +340,6 @@ export default function LeftRail() {
       : RAIL_DEFAULT_PX;
   const [width, setWidth] = createSignal(initial);
   const [dragging, setDragging] = createSignal(false);
-  // Whether to render the inline file/folder trees under each
-  // project + worktree row. Some users only care about worktrees +
-  // chats and find the file lists noisy, so we let them collapse to
-  // a worktree-only view. Persisted to localStorage so the choice
-  // survives reloads.
-  const [showFiles, setShowFiles] = createSignal(
-    localStorage.getItem(RAIL_SHOW_FILES_LS_KEY) !== "0",
-  );
-  createEffect(() => {
-    localStorage.setItem(RAIL_SHOW_FILES_LS_KEY, showFiles() ? "1" : "0");
-  });
 
   function clamp(px: number) {
     return Math.min(RAIL_MAX_PX, Math.max(RAIL_MIN_PX, Math.round(px)));
@@ -460,34 +445,15 @@ export default function LeftRail() {
           <h3 class="text-[0.8em] font-semibold uppercase tracking-wider text-fg-subtle">
             Projects
           </h3>
-          <div class="flex items-center gap-1">
-            {/* Toggle: show vs hide inline file/folder trees. When
-                hidden, the rail collapses to projects + worktrees +
-                their action icons, which is what users running long
-                code reviews want — no noisy filename lists. The
-                icon swaps to indicate the current state. */}
-            <button
-              class="ag-btn ag-btn-ghost ag-btn-xs ag-btn-icon"
-              onClick={() => setShowFiles(!showFiles())}
-              data-testid="toggle-files"
-              aria-label={showFiles() ? "Hide files and folders" : "Show files and folders"}
-              aria-pressed={showFiles()}
-              title={showFiles() ? "Hide files and folders" : "Show files and folders"}
-            >
-              <Show when={showFiles()} fallback={<FilesOffIcon />}>
-                <FilesOnIcon />
-              </Show>
-            </button>
-            <button
-              class="ag-btn ag-btn-ghost ag-btn-xs ag-btn-icon"
-              onClick={() => setPicking(true)}
-              data-testid="add-project-btn"
-              aria-label="Add project"
-              title="Add project"
-            >
-              <PlusIcon />
-            </button>
-          </div>
+          <button
+            class="ag-btn ag-btn-ghost ag-btn-xs ag-btn-icon"
+            onClick={() => setPicking(true)}
+            data-testid="add-project-btn"
+            aria-label="Add project"
+            title="Add project"
+          >
+            <PlusIcon />
+          </button>
         </div>
 
         <Show when={err()}>
@@ -514,136 +480,167 @@ export default function LeftRail() {
               const active = () => state.selectedProjectId === p.id && currentWorktreeId() === null;
               const open = () => isExpanded(p.id);
               return (
-                <li class="space-y-0.5">
-                  <div
-                    class="ag-list-item group"
-                    classList={{ "is-active": active() }}
-                    onClick={() => {
-                      // Project row = project root scope.
-                      selectWorktree(p.id, null);
-                      expand(p.id);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
+                <>
+                  <li class="space-y-0.5">
+                    <div
+                      class="ag-list-item group"
+                      classList={{ "is-active": active() }}
+                      onClick={() => {
+                        // Project row = project root scope.
                         selectWorktree(p.id, null);
                         expand(p.id);
-                      }
-                    }}
-                    tabIndex={0}
-                    role="button"
-                    aria-pressed={active()}
-                    aria-expanded={open()}
-                    data-testid={`project-${p.id}`}
-                    data-kind={isWorktree ? "worktree" : p.is_git ? "git" : "folder"}
-                    data-has-remote={p.has_remote ? "true" : "false"}
-                    data-expanded={open() ? "true" : "false"}
-                    title={`${kindLabel} · ${p.root}`}
-                  >
-                    <button
-                      type="button"
-                      class="shrink-0 -ml-1 p-0.5 text-fg-subtle hover:text-fg"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleExpanded(p.id);
                       }}
-                      aria-label={open() ? "Collapse project" : "Expand project"}
-                      title={open() ? "Collapse" : "Expand"}
-                      data-testid={`toggle-project-${p.id}`}
-                    >
-                      <Chevron open={open()} />
-                    </button>
-
-                    {isWorktree ? <WorktreeIcon /> : <FolderIcon />}
-                    <span class="truncate min-w-0 flex-1">{p.name}</span>
-
-                    {/* "Working" dot. While collapsed it summarises ANY
-                        busy chat under the project (root or worktree);
-                        once expanded it narrows to the root scope so the
-                        busy worktree rows below carry their own dots and
-                        we don't show two indicators for the same turn. */}
-                    <Show when={open() ? isScopeWorking(p.id, null) : isProjectWorking(p.id)}>
-                      <WorkingDot
-                        title={
-                          open()
-                            ? "A chat in this project's root is working…"
-                            : "A chat in this project is working…"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          selectWorktree(p.id, null);
+                          expand(p.id);
                         }
-                      />
-                    </Show>
+                      }}
+                      tabIndex={0}
+                      role="button"
+                      aria-pressed={active()}
+                      aria-expanded={open()}
+                      data-testid={`project-${p.id}`}
+                      data-kind={isWorktree ? "worktree" : p.is_git ? "git" : "folder"}
+                      data-has-remote={p.has_remote ? "true" : "false"}
+                      data-expanded={open() ? "true" : "false"}
+                      title={`${kindLabel} · ${p.root}`}
+                    >
+                      <button
+                        type="button"
+                        class="shrink-0 -ml-1 p-0.5 text-fg-subtle hover:text-fg"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleExpanded(p.id);
+                        }}
+                        aria-label={open() ? "Collapse project" : "Expand project"}
+                        title={open() ? "Collapse" : "Expand"}
+                        data-testid={`toggle-project-${p.id}`}
+                      >
+                        <Chevron open={open()} />
+                      </button>
 
-                    {/* Right-edge cluster: branch chip + a single overflow
-                        (kebab) menu holding every row action. Keeping just
-                        the kebab inline means the cluster never outgrows the
-                        row — the project name truncates via min-w-0 instead
-                        of icons clipping — and every action has a text label. */}
-                    <div class="flex items-center gap-0.5 shrink-0 flex-nowrap">
-                      {/* Worktree branch */}
-                      <Show when={isWorktree && p.current_branch}>
-                        <span
-                          class="ag-chip ag-chip-accent font-mono !text-[0.77em] !py-[2px] whitespace-nowrap"
-                          title={`Branch ${p.current_branch}`}
-                        >
-                          ⎇ {p.current_branch}
-                        </span>
+                      {isWorktree ? <WorktreeIcon /> : <FolderIcon />}
+                      <span class="truncate min-w-0 flex-1">{p.name}</span>
+
+                      {/* "Working" dot. While collapsed it summarises ANY
+                          busy chat under the project (root or worktree). */}
+                      <Show when={open() ? isScopeWorking(p.id, null) : isProjectWorking(p.id)}>
+                        <WorkingDot
+                          title={
+                            open()
+                              ? "A chat in this project's root is working…"
+                              : "A chat in this project is working…"
+                          }
+                        />
                       </Show>
 
-                      {/* Overflow menu: every project action lives here now
-                          (new chat, new terminal, changes, worktree, history,
-                          settings, remove). Absolutely-positioned dropdown so
-                          it never clips, even on a narrow rail. */}
-                      <div class="relative shrink-0">
-                        <button
-                          type="button"
-                          class="shrink-0 p-1 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
-                          classList={{ "!text-fg !bg-bg-3": openMenuFor() === p.id }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenMenuFor(openMenuFor() === p.id ? null : p.id);
-                          }}
-                          aria-label={`More actions for ${p.name}`}
-                          aria-haspopup="menu"
-                          aria-expanded={openMenuFor() === p.id}
-                          title="More actions"
-                          data-testid={`project-menu-${p.id}`}
-                        >
-                          <KebabIcon />
-                        </button>
-                        <Show when={openMenuFor() === p.id}>
-                          <div
-                            role="menu"
-                            class="absolute right-0 top-full mt-1 z-30 min-w-[180px] py-1 rounded-lg border border-border bg-bg-1 shadow-xl text-[12.5px]"
-                            onClick={(e) => e.stopPropagation()}
-                            data-testid={`project-menu-list-${p.id}`}
+                      <div class="flex items-center gap-0.5 shrink-0 flex-nowrap">
+                        {/* Worktree branch */}
+                        <Show when={isWorktree && p.current_branch}>
+                          <span
+                            class="ag-chip ag-chip-accent font-mono !text-[0.77em] !py-[2px] whitespace-nowrap"
+                            title={`Branch ${p.current_branch}`}
                           >
-                            {/* ── Create ── */}
-                            <button
-                              type="button"
-                              role="menuitem"
-                              class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
-                              onClick={() => {
-                                setOpenMenuFor(null);
-                                openNewChatDialog(p.id, null, p.name);
-                              }}
-                              data-testid={`new-chat-${p.id}`}
-                            >
-                              <ChatPlusIcon /> New chat
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
-                              onClick={() => {
-                                setOpenMenuFor(null);
-                                void openTerminalAt(p.id, null, p.name);
-                              }}
-                              data-testid={`new-terminal-${p.id}`}
-                            >
-                              <TerminalPlusIcon /> New terminal
-                            </button>
+                            ⎇ {p.current_branch}
+                          </span>
+                        </Show>
 
-                            {/* ── Git ── */}
-                            <Show when={p.is_git}>
+                        <div class="relative shrink-0">
+                          <button
+                            type="button"
+                            class="shrink-0 p-1 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
+                            classList={{ "!text-fg !bg-bg-3": openMenuFor() === p.id }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenMenuFor(openMenuFor() === p.id ? null : p.id);
+                            }}
+                            aria-label={`More actions for ${p.name}`}
+                            aria-haspopup="menu"
+                            aria-expanded={openMenuFor() === p.id}
+                            title="More actions"
+                            data-testid={`project-menu-${p.id}`}
+                          >
+                            <KebabIcon />
+                          </button>
+                          <Show when={openMenuFor() === p.id}>
+                            <div
+                              role="menu"
+                              class="absolute right-0 top-full mt-1 z-30 min-w-[180px] py-1 rounded-lg border border-border bg-bg-1 shadow-xl text-[12.5px]"
+                              onClick={(e) => e.stopPropagation()}
+                              data-testid={`project-menu-list-${p.id}`}
+                            >
+                              {/* ── Create ── */}
+                              <button
+                                type="button"
+                                role="menuitem"
+                                class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                onClick={() => {
+                                  setOpenMenuFor(null);
+                                  openNewChatDialog(p.id, null, p.name);
+                                }}
+                                data-testid={`new-chat-${p.id}`}
+                              >
+                                <ChatPlusIcon /> New chat
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                onClick={() => {
+                                  setOpenMenuFor(null);
+                                  void openTerminalAt(p.id, null, p.name);
+                                }}
+                                data-testid={`new-terminal-${p.id}`}
+                              >
+                                <TerminalPlusIcon /> New terminal
+                              </button>
+
+                              {/* ── Git ── */}
+                              <Show when={p.is_git}>
+                                <div class="my-1 border-t border-border" />
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                  onClick={() => {
+                                    setOpenMenuFor(null);
+                                    setChangesScope({ path: p.root, label: p.name });
+                                  }}
+                                  data-testid={`changes-${p.id}`}
+                                >
+                                  <DiffIcon /> View changes
+                                </button>
+                              </Show>
+                              <Show when={p.has_remote}>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                  onClick={() => {
+                                    setOpenMenuFor(null);
+                                    setWtFor(p.id);
+                                  }}
+                                  data-testid={`new-worktree-${p.id}`}
+                                >
+                                  <BranchPlusIcon /> New worktree
+                                </button>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                  onClick={() => {
+                                    setOpenMenuFor(null);
+                                    setHistoryFor(p.id);
+                                  }}
+                                  data-testid={`worktree-history-${p.id}`}
+                                >
+                                  <HistoryIcon /> Worktree history
+                                </button>
+                              </Show>
+
+                              {/* ── Manage ── */}
                               <div class="my-1 border-t border-border" />
                               <button
                                 type="button"
@@ -651,25 +648,11 @@ export default function LeftRail() {
                                 class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
                                 onClick={() => {
                                   setOpenMenuFor(null);
-                                  setChangesScope({ path: p.root, label: p.name });
+                                  setChatHistoryFor({ projectId: p.id });
                                 }}
-                                data-testid={`changes-${p.id}`}
+                                data-testid={`chat-history-${p.id}`}
                               >
-                                <DiffIcon /> View changes
-                              </button>
-                            </Show>
-                            <Show when={p.has_remote}>
-                              <button
-                                type="button"
-                                role="menuitem"
-                                class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
-                                onClick={() => {
-                                  setOpenMenuFor(null);
-                                  setWtFor(p.id);
-                                }}
-                                data-testid={`new-worktree-${p.id}`}
-                              >
-                                <BranchPlusIcon /> New worktree
+                                <ChatHistoryIcon /> Chat history
                               </button>
                               <button
                                 type="button"
@@ -677,546 +660,455 @@ export default function LeftRail() {
                                 class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
                                 onClick={() => {
                                   setOpenMenuFor(null);
-                                  setHistoryFor(p.id);
+                                  refreshTree(p.root);
                                 }}
-                                data-testid={`worktree-history-${p.id}`}
+                                data-testid={`refresh-tree-${p.id}`}
                               >
-                                <HistoryIcon /> Worktree history
+                                <RefreshIcon /> Refresh files
                               </button>
-                            </Show>
+                              <Show when={p.is_git}>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                  onClick={() => {
+                                    setOpenMenuFor(null);
+                                    setSettingsFor(p);
+                                  }}
+                                  data-testid={`project-settings-${p.id}`}
+                                >
+                                  <GearIcon /> Project settings
+                                </button>
+                              </Show>
 
-                            {/* ── Manage ── */}
-                            <div class="my-1 border-t border-border" />
-                            <button
-                              type="button"
-                              role="menuitem"
-                              class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
-                              onClick={() => {
-                                setOpenMenuFor(null);
-                                setChatHistoryFor({ projectId: p.id });
-                              }}
-                              data-testid={`chat-history-${p.id}`}
-                            >
-                              <ChatHistoryIcon /> Chat history
-                            </button>
-                            <button
-                              type="button"
-                              role="menuitem"
-                              class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
-                              onClick={() => {
-                                setOpenMenuFor(null);
-                                refreshTree(p.root);
-                              }}
-                              data-testid={`refresh-tree-${p.id}`}
-                            >
-                              <RefreshIcon /> Refresh files
-                            </button>
-                            <Show when={p.is_git}>
+                              {/* ── Danger ── */}
+                              <div class="my-1 border-t border-border" />
                               <button
                                 type="button"
                                 role="menuitem"
-                                class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
-                                onClick={() => {
+                                class="w-full text-left px-3 py-1.5 flex items-center gap-2 text-danger hover:bg-bg-2"
+                                onClick={(e) => {
                                   setOpenMenuFor(null);
-                                  setSettingsFor(p);
+                                  deleteProject(p.id, e);
                                 }}
-                                data-testid={`project-settings-${p.id}`}
+                                data-testid={`remove-project-${p.id}`}
                               >
-                                <GearIcon /> Project settings
+                                <XIcon /> Remove project
                               </button>
-                            </Show>
-
-                            {/* ── Danger ── */}
-                            <div class="my-1 border-t border-border" />
-                            <button
-                              type="button"
-                              role="menuitem"
-                              class="w-full text-left px-3 py-1.5 flex items-center gap-2 text-danger hover:bg-bg-2"
-                              onClick={(e) => {
-                                setOpenMenuFor(null);
-                                deleteProject(p.id, e);
-                              }}
-                              data-testid={`remove-project-${p.id}`}
-                            >
-                              <XIcon /> Remove project
-                            </button>
-                          </div>
-                        </Show>
+                            </div>
+                          </Show>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  {/* Worktree list — rendered directly under the project row
-                      (no sub-header). Only when expanded + the project has a
-                      remote (worktrees require git+remote). */}
-                  <Show when={open() && p.has_remote}>
-                    <div class="mt-1 pl-4">
-                      <ul class="space-y-0.5">
-                        <For each={state.worktrees[p.id] ?? []}>
-                          {(w) => {
-                            const wtActive = () =>
-                              state.selectedProjectId === p.id && currentWorktreeId() === w.id;
-                            const wtOpen = () => isExpanded(w.id);
-                            return (
-                              <li class="space-y-0.5">
+                    {/* Helper hint when project is a git repo without a remote. */}
+                    <Show when={open() && p.is_git && !p.has_remote && !isWorktree}>
+                      <p class="pl-7 pr-2 mt-1 text-[0.73em] text-fg-subtle italic">
+                        Add a git remote to <span class="font-medium">{p.name}</span> to enable
+                        worktrees.
+                      </p>
+                    </Show>
+
+                    {/* Inline file tree for the project (always visible when expanded). */}
+                    <Show when={open()}>
+                      <DirNode
+                        path={p.root}
+                        depth={1}
+                        initiallyOpen
+                        refreshKey={treeRefreshKey(p.root)}
+                      />
+                    </Show>
+
+                    {/* Visited celestial bodies for this project's worktrees. */}
+                    <Show when={open()}>
+                      <div class="mt-2 pl-4">
+                        <GalaxyLog branches={(state.worktrees[p.id] ?? []).map((w) => w.branch)} />
+                      </div>
+                    </Show>
+                  </li>
+
+                  <For each={state.worktrees[p.id] ?? []}>
+                    {(w) => {
+                      const wtActive = () =>
+                        state.selectedProjectId === p.id && currentWorktreeId() === w.id;
+                      const wtOpen = () => isExpanded(w.id);
+                      return (
+                        <li class="space-y-0.5">
+                          <div
+                            class="group flex items-center gap-1.5 px-2 py-[3px] rounded cursor-pointer"
+                            classList={{
+                              "bg-accent-soft": wtActive(),
+                              "hover:bg-bg-2": !wtActive(),
+                            }}
+                            onClick={() => {
+                              selectWorktree(p.id, w.id);
+                              expand(w.id);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                selectWorktree(p.id, w.id);
+                                expand(w.id);
+                              }
+                            }}
+                            tabIndex={0}
+                            role="button"
+                            aria-pressed={wtActive()}
+                            aria-expanded={wtOpen()}
+                            data-testid={`worktree-${w.id}`}
+                            data-expanded={wtOpen() ? "true" : "false"}
+                            title={w.path}
+                          >
+                            <button
+                              type="button"
+                              class="shrink-0 -ml-1 p-0.5 text-fg-subtle hover:text-fg"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleExpanded(w.id);
+                              }}
+                              aria-label={wtOpen() ? "Collapse worktree" : "Expand worktree"}
+                              title={wtOpen() ? "Collapse" : "Expand"}
+                              data-testid={`toggle-worktree-${w.id}`}
+                            >
+                              <Chevron open={wtOpen()} />
+                            </button>
+                            <WorktreeIcon />
+                            <span class="truncate text-[0.83em] font-mono min-w-0 flex-1">
+                              {w.branch}
+                            </span>
+                            <Show when={isScopeWorking(p.id, w.id)}>
+                              <WorkingDot title="A chat in this worktree is working…" />
+                            </Show>
+                            <Show
+                              when={
+                                remoteStatus[w.id]?.diverged ||
+                                (remoteStatus[w.id]?.behind ?? 0) > 0
+                              }
+                            >
+                              <button
+                                type="button"
+                                class="ag-chip ag-chip-warn !text-[0.65em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80"
+                                title={
+                                  (remoteStatus[w.id]?.behind ?? 0) > 0
+                                    ? `${remoteStatus[w.id]!.behind} behind ${remoteStatus[w.id]!.tracking ?? "remote"} — click to sync`
+                                    : `Branch drifted from ${remoteStatus[w.id]?.tracking ?? "remote"} — click to sync`
+                                }
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  fetchDrift(w.id);
+                                  selectWorktree(p.id, w.id);
+                                  const tracking =
+                                    remoteStatus[w.id]?.tracking ?? "origin/" + w.branch;
+                                  const text = `Pull latest from ${tracking} into this worktree's branch, merge, and resolve any conflicts.`;
+                                  const chatId = selectedChatId();
+                                  if (chatId) {
+                                    setPendingChatInjection({ chatId, text });
+                                  } else {
+                                    setPendingChatInjection({ chatId: "", text });
+                                    openNewChatDialog(p.id, w.id, w.branch);
+                                  }
+                                }}
+                                data-testid={`drift-${w.id}`}
+                              >
+                                {(remoteStatus[w.id]?.behind ?? 0) > 0
+                                  ? `↓${remoteStatus[w.id]!.behind}`
+                                  : "↓"}
+                              </button>
+                            </Show>
+                            <Show when={remoteStatus[w.id]?.ahead && remoteStatus[w.id]!.ahead > 0}>
+                              <span
+                                class="ag-chip !text-[0.65em] !py-[1px] shrink-0"
+                                title={`${remoteStatus[w.id]!.ahead} commits ahead of ${remoteStatus[w.id]!.tracking ?? "remote"}`}
+                              >
+                                ↑{remoteStatus[w.id]!.ahead}
+                              </span>
+                            </Show>
+                            <Show when={remoteStatus[w.id]?.pr}>
+                              {(() => {
+                                const pr = remoteStatus[w.id]!.pr!;
+                                const label = pr.source === "glab" ? "MR" : "PR";
+                                const checksOk = pr.checks_status === "success";
+                                const canMerge =
+                                  pr.state === "open" &&
+                                  checksOk &&
+                                  (pr.review_decision === "approved" || !pr.review_decision);
+                                const isMerging = () => mergingWt() === w.id;
+                                return (
+                                  <>
+                                    <a
+                                      href={pr.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      class="ag-chip ag-chip-accent !text-[0.65em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80"
+                                      title={`${label} #${pr.number}: ${pr.title} (${pr.state})`}
+                                      onClick={(ev) => ev.stopPropagation()}
+                                      data-testid={`pr-${w.id}`}
+                                    >
+                                      {label} #{pr.number}
+                                    </a>
+                                    <Show when={canMerge}>
+                                      <button
+                                        type="button"
+                                        disabled={isMerging()}
+                                        class="ag-chip ag-chip-success !text-[0.6em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80 font-semibold disabled:opacity-50"
+                                        title={
+                                          isMerging() ? "Merging…" : `Merge ${label} #${pr.number}`
+                                        }
+                                        onClick={async (ev) => {
+                                          ev.stopPropagation();
+                                          if (isMerging()) return;
+                                          setMergingWt(w.id);
+                                          try {
+                                            await api.mergePr(w.id, pr.number, pr.source);
+                                            pushToast({
+                                              title: "Merge queued",
+                                              message: `${label} #${pr.number} — merging once checks pass.`,
+                                            });
+                                            fetchDrift(w.id);
+                                          } catch (e) {
+                                            const msg = e instanceof Error ? e.message : String(e);
+                                            logClient({
+                                              level: "error",
+                                              title: "Merge failed",
+                                              message: msg,
+                                              context: {
+                                                worktreeId: w.id,
+                                                branch: w.branch,
+                                                prNumber: pr.number,
+                                                source: pr.source,
+                                              },
+                                            });
+                                            pushToast({
+                                              level: "error",
+                                              title: "Merge failed",
+                                              message:
+                                                msg.length > 120 ? msg.slice(0, 120) + "…" : msg,
+                                            });
+                                            fetchDrift(w.id);
+                                          } finally {
+                                            setMergingWt(null);
+                                          }
+                                        }}
+                                        data-testid={`merge-pr-${w.id}`}
+                                      >
+                                        {isMerging() ? "▸ …" : "▸ Merge"}
+                                      </button>
+                                    </Show>
+                                    <Show when={!canMerge && pr.checks_status === "pending"}>
+                                      <span
+                                        class="ag-chip ag-chip-warn !text-[0.6em] !py-[1px] shrink-0"
+                                        title="CI checks in progress"
+                                      >
+                                        ⏳ checks
+                                      </span>
+                                    </Show>
+                                    <Show when={!canMerge && pr.checks_status === "failure"}>
+                                      <span
+                                        class="ag-chip ag-chip-danger !text-[0.6em] !py-[1px] shrink-0"
+                                        title="CI checks failing"
+                                      >
+                                        ✗ checks
+                                      </span>
+                                    </Show>
+                                    <Show
+                                      when={
+                                        !canMerge &&
+                                        pr.review_decision &&
+                                        pr.checks_status === "success"
+                                      }
+                                    >
+                                      <span
+                                        class="ag-chip ag-chip-warn !text-[0.6em] !py-[1px] shrink-0"
+                                        title={`Review: ${pr.review_decision}`}
+                                      >
+                                        {pr.review_decision === "review_required"
+                                          ? "👁 review"
+                                          : "✗ changes"}
+                                      </span>
+                                    </Show>
+                                  </>
+                                );
+                              })()}
+                            </Show>
+                            <Show
+                              when={
+                                remoteStatus[w.id]?.forge &&
+                                !remoteStatus[w.id]!.forge!.cli_installed &&
+                                remoteStatus[w.id]!.forge!.install_hint
+                              }
+                            >
+                              <span
+                                class="ag-chip !text-[0.6em] !py-[1px] shrink-0 text-fg-subtle cursor-help"
+                                title={remoteStatus[w.id]!.forge!.install_hint!}
+                              >
+                                💡 install {remoteStatus[w.id]!.forge!.cli}
+                              </span>
+                            </Show>
+                            <Show when={w.status !== "ready" && w.status !== "removing"}>
+                              <span
+                                class="ml-auto ag-chip !text-[0.67em] !py-[1px] whitespace-nowrap"
+                                classList={{
+                                  "ag-chip-warn":
+                                    w.status === "creating" || w.status === "pre_script",
+                                  "!text-danger": w.status === "failed",
+                                }}
+                                title={`Status: ${w.status}`}
+                              >
+                                {w.status}
+                              </span>
+                            </Show>
+                            <div
+                              class="relative shrink-0 ml-auto"
+                              classList={{
+                                "!ml-1": w.status !== "ready" && w.status !== "removing",
+                              }}
+                            >
+                              <button
+                                type="button"
+                                class="shrink-0 p-0.5 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
+                                classList={{
+                                  "!text-fg !bg-bg-3": openMenuFor() === `wt:${w.id}`,
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenMenuFor(
+                                    openMenuFor() === `wt:${w.id}` ? null : `wt:${w.id}`,
+                                  );
+                                }}
+                                aria-label={`More actions for worktree ${w.branch}`}
+                                aria-haspopup="menu"
+                                aria-expanded={openMenuFor() === `wt:${w.id}`}
+                                title="More actions"
+                                data-testid={`project-menu-wt-${w.id}`}
+                              >
+                                <KebabIcon />
+                              </button>
+                              <Show when={openMenuFor() === `wt:${w.id}`}>
                                 <div
-                                  class="group flex items-center gap-1.5 px-2 py-[3px] rounded cursor-pointer"
-                                  classList={{
-                                    "bg-accent-soft": wtActive(),
-                                    "hover:bg-bg-2": !wtActive(),
-                                  }}
-                                  onClick={() => {
-                                    selectWorktree(p.id, w.id);
-                                    expand(w.id);
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter" || e.key === " ") {
-                                      e.preventDefault();
-                                      selectWorktree(p.id, w.id);
-                                      expand(w.id);
-                                    }
-                                  }}
-                                  tabIndex={0}
-                                  role="button"
-                                  aria-pressed={wtActive()}
-                                  aria-expanded={wtOpen()}
-                                  data-testid={`worktree-${w.id}`}
-                                  data-expanded={wtOpen() ? "true" : "false"}
-                                  title={w.path}
+                                  role="menu"
+                                  class="absolute right-0 top-full mt-1 z-30 min-w-[180px] py-1 rounded-lg border border-border bg-bg-1 shadow-xl text-[12.5px]"
+                                  onClick={(e) => e.stopPropagation()}
+                                  data-testid={`project-menu-list-wt-${w.id}`}
                                 >
+                                  {/* ── Create ── */}
                                   <button
                                     type="button"
-                                    class="shrink-0 -ml-1 p-0.5 text-fg-subtle hover:text-fg"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      toggleExpanded(w.id);
+                                    role="menuitem"
+                                    class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                    onClick={() => {
+                                      setOpenMenuFor(null);
+                                      openNewChatDialog(p.id, w.id, w.branch);
                                     }}
-                                    aria-label={wtOpen() ? "Collapse worktree" : "Expand worktree"}
-                                    title={wtOpen() ? "Collapse" : "Expand"}
-                                    data-testid={`toggle-worktree-${w.id}`}
+                                    data-testid={`new-chat-wt-${w.id}`}
                                   >
-                                    <Chevron open={wtOpen()} />
+                                    <ChatPlusIcon /> New chat
                                   </button>
-                                  <WorktreeIcon />
-                                  <span class="truncate text-[0.83em] font-mono min-w-0 flex-1">
-                                    {w.branch}
-                                  </span>
-                                  <Show when={isScopeWorking(p.id, w.id)}>
-                                    <WorkingDot title="A chat in this worktree is working…" />
-                                  </Show>
-                                  <Show
-                                    when={
-                                      remoteStatus[w.id]?.diverged ||
-                                      (remoteStatus[w.id]?.behind ?? 0) > 0
-                                    }
-                                  >
-                                    <button
-                                      type="button"
-                                      class="ag-chip ag-chip-warn !text-[0.65em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80"
-                                      title={
-                                        (remoteStatus[w.id]?.behind ?? 0) > 0
-                                          ? `${remoteStatus[w.id]!.behind} behind ${remoteStatus[w.id]!.tracking ?? "remote"} — click to sync`
-                                          : `Branch drifted from ${remoteStatus[w.id]?.tracking ?? "remote"} — click to sync`
-                                      }
-                                      onClick={(ev) => {
-                                        ev.stopPropagation();
-                                        fetchDrift(w.id);
-                                        // Switch to this worktree's scope
-                                        selectWorktree(p.id, w.id);
-                                        const tracking =
-                                          remoteStatus[w.id]?.tracking ?? "origin/" + w.branch;
-                                        const text = `Pull latest from ${tracking} into this worktree's branch, merge, and resolve any conflicts.`;
-                                        // If a chat is already open for this scope, hand the
-                                        // sync prompt to ChatPane via the injection signal —
-                                        // it runs the SAME optimistic insert the composer
-                                        // uses, so the user bubble appears instantly instead
-                                        // of waiting for the BE round-trip. Otherwise open a
-                                        // new chat; the signal is consumed once that chat is
-                                        // active.
-                                        const chatId = selectedChatId();
-                                        if (chatId) {
-                                          setPendingChatInjection({ chatId, text });
-                                        } else {
-                                          setPendingChatInjection({ chatId: "", text });
-                                          openNewChatDialog(p.id, w.id, w.branch);
-                                        }
-                                      }}
-                                      data-testid={`drift-${w.id}`}
-                                    >
-                                      {(remoteStatus[w.id]?.behind ?? 0) > 0
-                                        ? `↓${remoteStatus[w.id]!.behind}`
-                                        : "↓"}
-                                    </button>
-                                  </Show>
-                                  <Show
-                                    when={
-                                      remoteStatus[w.id]?.ahead && remoteStatus[w.id]!.ahead > 0
-                                    }
-                                  >
-                                    <span
-                                      class="ag-chip !text-[0.65em] !py-[1px] shrink-0"
-                                      title={`${remoteStatus[w.id]!.ahead} commits ahead of ${remoteStatus[w.id]!.tracking ?? "remote"}`}
-                                    >
-                                      ↑{remoteStatus[w.id]!.ahead}
-                                    </span>
-                                  </Show>
-                                  <Show when={remoteStatus[w.id]?.pr}>
-                                    {(() => {
-                                      const pr = remoteStatus[w.id]!.pr!;
-                                      const label = pr.source === "glab" ? "MR" : "PR";
-                                      const checksOk = pr.checks_status === "success";
-                                      const canMerge =
-                                        pr.state === "open" &&
-                                        checksOk &&
-                                        (pr.review_decision === "approved" || !pr.review_decision);
-                                      const isMerging = () => mergingWt() === w.id;
-                                      return (
-                                        <>
-                                          <a
-                                            href={pr.url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            class="ag-chip ag-chip-accent !text-[0.65em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80"
-                                            title={`${label} #${pr.number}: ${pr.title} (${pr.state})`}
-                                            onClick={(ev) => ev.stopPropagation()}
-                                            data-testid={`pr-${w.id}`}
-                                          >
-                                            {label} #{pr.number}
-                                          </a>
-                                          <Show when={canMerge}>
-                                            <button
-                                              type="button"
-                                              disabled={isMerging()}
-                                              class="ag-chip ag-chip-success !text-[0.6em] !py-[1px] shrink-0 cursor-pointer hover:opacity-80 font-semibold disabled:opacity-50"
-                                              title={
-                                                isMerging()
-                                                  ? "Merging…"
-                                                  : `Merge ${label} #${pr.number}`
-                                              }
-                                              onClick={async (ev) => {
-                                                ev.stopPropagation();
-                                                if (isMerging()) return;
-                                                setMergingWt(w.id);
-                                                try {
-                                                  await api.mergePr(w.id, pr.number, pr.source);
-                                                  pushToast({
-                                                    title: "Merge queued",
-                                                    message: `${label} #${pr.number} — merging once checks pass.`,
-                                                  });
-                                                  fetchDrift(w.id);
-                                                } catch (e) {
-                                                  const msg =
-                                                    e instanceof Error ? e.message : String(e);
-                                                  // Persist the FULL error (untruncated) to the
-                                                  // client log for debugging; show a trimmed
-                                                  // version in the toast so it stays readable.
-                                                  logClient({
-                                                    level: "error",
-                                                    title: "Merge failed",
-                                                    message: msg,
-                                                    context: {
-                                                      worktreeId: w.id,
-                                                      branch: w.branch,
-                                                      prNumber: pr.number,
-                                                      source: pr.source,
-                                                    },
-                                                  });
-                                                  pushToast({
-                                                    level: "error",
-                                                    title: "Merge failed",
-                                                    message:
-                                                      msg.length > 120
-                                                        ? msg.slice(0, 120) + "…"
-                                                        : msg,
-                                                  });
-                                                  fetchDrift(w.id);
-                                                } finally {
-                                                  setMergingWt(null);
-                                                }
-                                              }}
-                                              data-testid={`merge-pr-${w.id}`}
-                                            >
-                                              {isMerging() ? "▸ …" : "▸ Merge"}
-                                            </button>
-                                          </Show>
-                                          <Show when={!canMerge && pr.checks_status === "pending"}>
-                                            <span
-                                              class="ag-chip ag-chip-warn !text-[0.6em] !py-[1px] shrink-0"
-                                              title="CI checks in progress"
-                                            >
-                                              ⏳ checks
-                                            </span>
-                                          </Show>
-                                          <Show when={!canMerge && pr.checks_status === "failure"}>
-                                            <span
-                                              class="ag-chip ag-chip-danger !text-[0.6em] !py-[1px] shrink-0"
-                                              title="CI checks failing"
-                                            >
-                                              ✗ checks
-                                            </span>
-                                          </Show>
-                                          <Show
-                                            when={
-                                              !canMerge &&
-                                              pr.review_decision &&
-                                              pr.checks_status === "success"
-                                            }
-                                          >
-                                            <span
-                                              class="ag-chip ag-chip-warn !text-[0.6em] !py-[1px] shrink-0"
-                                              title={`Review: ${pr.review_decision}`}
-                                            >
-                                              {pr.review_decision === "review_required"
-                                                ? "👁 review"
-                                                : "✗ changes"}
-                                            </span>
-                                          </Show>
-                                        </>
-                                      );
-                                    })()}
-                                  </Show>
-                                  {/* Suggest installing the forge CLI if the
-                                      repo is on a known forge but the CLI
-                                      isn't installed — so the user knows
-                                      they could have PR/MR badges. */}
-                                  <Show
-                                    when={
-                                      remoteStatus[w.id]?.forge &&
-                                      !remoteStatus[w.id]!.forge!.cli_installed &&
-                                      remoteStatus[w.id]!.forge!.install_hint
-                                    }
-                                  >
-                                    <span
-                                      class="ag-chip !text-[0.6em] !py-[1px] shrink-0 text-fg-subtle cursor-help"
-                                      title={remoteStatus[w.id]!.forge!.install_hint!}
-                                    >
-                                      💡 install {remoteStatus[w.id]!.forge!.cli}
-                                    </span>
-                                  </Show>
-                                  {/* Status chip only for states a user can
-                                      act on. We deliberately suppress:
-                                        - "ready"    — the steady state; the
-                                                       row already reads as
-                                                       fine without a label.
-                                        - "removing" — an internal lifecycle
-                                                       state used by the BE
-                                                       to gate concurrent
-                                                       deletes. If a row is
-                                                       still visible in this
-                                                       list while marked
-                                                       `removing`, the
-                                                       previous delete call
-                                                       was interrupted (BE
-                                                       crash, abandoned tab,
-                                                       …). Showing it as a
-                                                       sticky pill confused
-                                                       users; they can just
-                                                       re-click the X to
-                                                       retry the delete. */}
-                                  <Show when={w.status !== "ready" && w.status !== "removing"}>
-                                    <span
-                                      class="ml-auto ag-chip !text-[0.67em] !py-[1px] whitespace-nowrap"
-                                      classList={{
-                                        "ag-chip-warn":
-                                          w.status === "creating" || w.status === "pre_script",
-                                        "!text-danger": w.status === "failed",
-                                      }}
-                                      title={`Status: ${w.status}`}
-                                    >
-                                      {w.status}
-                                    </span>
-                                  </Show>
-                                  {/* Overflow menu: every worktree action
-                                      lives here now (new chat, new terminal,
-                                      changes, rename, remove). Keyed `wt:<id>`
-                                      so it doesn't collide with a project
-                                      row's menu key. `ml-auto` keeps the
-                                      cluster right-aligned now that the inline
-                                      quick-actions are gone. */}
-                                  <div
-                                    class="relative shrink-0 ml-auto"
-                                    classList={{
-                                      // Tighten the gap only when a status chip
-                                      // is ACTUALLY rendered (noisy transient
-                                      // state). Steady "ready"/"removing"
-                                      // states should NOT trigger the inset.
-                                      "!ml-1": w.status !== "ready" && w.status !== "removing",
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                    onClick={() => {
+                                      setOpenMenuFor(null);
+                                      void openTerminalAt(p.id, w.id, w.branch);
                                     }}
+                                    data-testid={`new-terminal-wt-${w.id}`}
                                   >
-                                    <button
-                                      type="button"
-                                      class="shrink-0 p-0.5 rounded text-fg-subtle hover:text-accent hover:bg-bg-2"
-                                      classList={{
-                                        "!text-fg !bg-bg-3": openMenuFor() === `wt:${w.id}`,
-                                      }}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setOpenMenuFor(
-                                          openMenuFor() === `wt:${w.id}` ? null : `wt:${w.id}`,
-                                        );
-                                      }}
-                                      aria-label={`More actions for worktree ${w.branch}`}
-                                      aria-haspopup="menu"
-                                      aria-expanded={openMenuFor() === `wt:${w.id}`}
-                                      title="More actions"
-                                      data-testid={`project-menu-wt-${w.id}`}
-                                    >
-                                      <KebabIcon />
-                                    </button>
-                                    <Show when={openMenuFor() === `wt:${w.id}`}>
-                                      <div
-                                        role="menu"
-                                        class="absolute right-0 top-full mt-1 z-30 min-w-[180px] py-1 rounded-lg border border-border bg-bg-1 shadow-xl text-[12.5px]"
-                                        onClick={(e) => e.stopPropagation()}
-                                        data-testid={`project-menu-list-wt-${w.id}`}
-                                      >
-                                        {/* ── Create ── */}
-                                        <button
-                                          type="button"
-                                          role="menuitem"
-                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
-                                          onClick={() => {
-                                            setOpenMenuFor(null);
-                                            openNewChatDialog(p.id, w.id, w.branch);
-                                          }}
-                                          data-testid={`new-chat-wt-${w.id}`}
-                                        >
-                                          <ChatPlusIcon /> New chat
-                                        </button>
-                                        <button
-                                          type="button"
-                                          role="menuitem"
-                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
-                                          onClick={() => {
-                                            setOpenMenuFor(null);
-                                            void openTerminalAt(p.id, w.id, w.branch);
-                                          }}
-                                          data-testid={`new-terminal-wt-${w.id}`}
-                                        >
-                                          <TerminalPlusIcon /> New terminal
-                                        </button>
+                                    <TerminalPlusIcon /> New terminal
+                                  </button>
 
-                                        {/* ── Git ── */}
-                                        <div class="my-1 border-t border-border" />
-                                        <button
-                                          type="button"
-                                          role="menuitem"
-                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
-                                          onClick={() => {
-                                            setOpenMenuFor(null);
-                                            setChangesScope({ path: w.path, label: w.branch });
-                                          }}
-                                          data-testid={`changes-wt-${w.id}`}
-                                        >
-                                          <DiffIcon /> View changes
-                                        </button>
-                                        <button
-                                          type="button"
-                                          role="menuitem"
-                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
-                                          onClick={() => {
-                                            setOpenMenuFor(null);
-                                            setRenameFor({
-                                              projectId: p.id,
-                                              worktreeId: w.id,
-                                              currentBranch: w.branch,
-                                            });
-                                          }}
-                                          data-testid={`rename-wt-${w.id}`}
-                                        >
-                                          <PencilIcon /> Rename branch
-                                        </button>
+                                  {/* ── Git ── */}
+                                  <div class="my-1 border-t border-border" />
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                    onClick={() => {
+                                      setOpenMenuFor(null);
+                                      setChangesScope({ path: w.path, label: w.branch });
+                                    }}
+                                    data-testid={`changes-wt-${w.id}`}
+                                  >
+                                    <DiffIcon /> View changes
+                                  </button>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                    onClick={() => {
+                                      setOpenMenuFor(null);
+                                      setRenameFor({
+                                        projectId: p.id,
+                                        worktreeId: w.id,
+                                        currentBranch: w.branch,
+                                      });
+                                    }}
+                                    data-testid={`rename-wt-${w.id}`}
+                                  >
+                                    <PencilIcon /> Rename branch
+                                  </button>
 
-                                        {/* ── Manage ── */}
-                                        <div class="my-1 border-t border-border" />
-                                        <button
-                                          type="button"
-                                          role="menuitem"
-                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
-                                          onClick={() => {
-                                            setOpenMenuFor(null);
-                                            setChatHistoryFor({
-                                              projectId: p.id,
-                                              worktreeId: w.id,
-                                            });
-                                          }}
-                                          data-testid={`chat-history-wt-${w.id}`}
-                                        >
-                                          <ChatHistoryIcon /> Chat history
-                                        </button>
-                                        <button
-                                          type="button"
-                                          role="menuitem"
-                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
-                                          onClick={() => {
-                                            setOpenMenuFor(null);
-                                            refreshTree(w.path);
-                                          }}
-                                          data-testid={`refresh-tree-wt-${w.id}`}
-                                        >
-                                          <RefreshIcon /> Refresh files
-                                        </button>
+                                  {/* ── Manage ── */}
+                                  <div class="my-1 border-t border-border" />
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                    onClick={() => {
+                                      setOpenMenuFor(null);
+                                      setChatHistoryFor({
+                                        projectId: p.id,
+                                        worktreeId: w.id,
+                                      });
+                                    }}
+                                    data-testid={`chat-history-wt-${w.id}`}
+                                  >
+                                    <ChatHistoryIcon /> Chat history
+                                  </button>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                    onClick={() => {
+                                      setOpenMenuFor(null);
+                                      refreshTree(w.path);
+                                    }}
+                                    data-testid={`refresh-tree-wt-${w.id}`}
+                                  >
+                                    <RefreshIcon /> Refresh files
+                                  </button>
 
-                                        {/* ── Danger ── */}
-                                        <div class="my-1 border-t border-border" />
-                                        <button
-                                          type="button"
-                                          role="menuitem"
-                                          class="w-full text-left px-3 py-1.5 flex items-center gap-2 text-danger hover:bg-bg-2"
-                                          onClick={(e) => {
-                                            setOpenMenuFor(null);
-                                            deleteWorktree(p.id, w.id, e);
-                                          }}
-                                          data-testid={`remove-wt-${w.id}`}
-                                        >
-                                          <XIcon /> Remove worktree
-                                        </button>
-                                      </div>
-                                    </Show>
-                                  </div>
+                                  {/* ── Danger ── */}
+                                  <div class="my-1 border-t border-border" />
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    class="w-full text-left px-3 py-1.5 flex items-center gap-2 text-danger hover:bg-bg-2"
+                                    onClick={(e) => {
+                                      setOpenMenuFor(null);
+                                      deleteWorktree(p.id, w.id, e);
+                                    }}
+                                    data-testid={`remove-wt-${w.id}`}
+                                  >
+                                    <XIcon /> Remove worktree
+                                  </button>
                                 </div>
+                              </Show>
+                            </div>
+                          </div>
 
-                                {/* Inline file tree rooted at the
-                                    worktree's path. Hidden when the
-                                    rail's Files toggle is off. */}
-                                <Show when={wtOpen() && showFiles()}>
-                                  <DirNode
-                                    path={w.path}
-                                    depth={2}
-                                    initiallyOpen
-                                    refreshKey={treeRefreshKey(w.path)}
-                                  />
-                                </Show>
-                              </li>
-                            );
-                          }}
-                        </For>
-                      </ul>
-                      <GalaxyLog branches={(state.worktrees[p.id] ?? []).map((w) => w.branch)} />
-                    </div>
-                  </Show>
-
-                  {/* Helper hint when project is a git repo without a remote.
-                      Indented to align under the project name so it reads as a
-                      message for THIS project row, not the whole rail. */}
-                  <Show when={open() && p.is_git && !p.has_remote && !isWorktree}>
-                    <p class="pl-7 pr-2 mt-1 text-[0.73em] text-fg-subtle italic">
-                      Add a git remote to <span class="font-medium">{p.name}</span> to enable
-                      worktrees.
-                    </p>
-                  </Show>
-
-                  {/* Inline file tree for the project (when expanded).
-                      Hidden when the rail's Files toggle is off. */}
-                  <Show when={open() && showFiles()}>
-                    <DirNode
-                      path={p.root}
-                      depth={1}
-                      initiallyOpen
-                      refreshKey={treeRefreshKey(p.root)}
-                    />
-                  </Show>
-                </li>
+                          <Show when={wtOpen()}>
+                            <DirNode
+                              path={w.path}
+                              depth={1}
+                              initiallyOpen
+                              refreshKey={treeRefreshKey(w.path)}
+                            />
+                          </Show>
+                        </li>
+                      );
+                    }}
+                  </For>
+                </>
               );
             }}
           </For>
@@ -1374,61 +1266,6 @@ function PlusIcon() {
   return (
     <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-    </svg>
-  );
-}
-
-/** Lucide-style folder-tree glyph, used when inline file/folder
- *  rendering is ON. Em-sized so it scales with --ag-font-size. */
-function FilesOnIcon() {
-  return (
-    <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M3 7a1 1 0 0 1 1-1h4l2 2h5a1 1 0 0 1 1 1v3"
-        stroke="currentColor"
-        stroke-width="1.7"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M14 14a1 1 0 0 1 1-1h2l1 1h2a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-5a1 1 0 0 1-1-1v-4Z"
-        stroke="currentColor"
-        stroke-width="1.7"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M3 11v8a1 1 0 0 0 1 1h6"
-        stroke="currentColor"
-        stroke-width="1.7"
-        stroke-linecap="round"
-      />
-    </svg>
-  );
-}
-
-/** Folder-tree glyph with a diagonal strike, used when inline
- *  file/folder rendering is OFF (worktrees-only view). */
-function FilesOffIcon() {
-  return (
-    <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M3 7a1 1 0 0 1 1-1h4l2 2h5a1 1 0 0 1 1 1v3"
-        stroke="currentColor"
-        stroke-width="1.7"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M14 14a1 1 0 0 1 1-1h2l1 1h2a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-5a1 1 0 0 1-1-1v-4Z"
-        stroke="currentColor"
-        stroke-width="1.7"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M3 11v8a1 1 0 0 0 1 1h6"
-        stroke="currentColor"
-        stroke-width="1.7"
-        stroke-linecap="round"
-      />
-      <path d="M4 20 20 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
     </svg>
   );
 }
