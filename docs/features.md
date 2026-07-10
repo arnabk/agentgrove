@@ -18,7 +18,7 @@ AgentGrove is a high-performance, low-footprint local developer workspace. Here 
 - **Pre/post scripts** — run setup commands (e.g. `pnpm install`) with live console output
 - **Worktree history** — soft-deleted worktrees can be searched and restored
 - **Branch switching** — switch branches from the UI with a branch picker
-- **Random branch names** — unique two-word suggestions with hex-suffix fallback for collisions
+- **Celestial branch names** — worktrees are named after stars, planets, and galaxies; a Galaxy Log in the left rail tracks the ones you've visited
 - **VSCode-style git diff** — staged/unstaged file groups with inline CodeMirror merge view
 - **Per-file discard** — restore tracked files or delete untracked, with confirmation
 

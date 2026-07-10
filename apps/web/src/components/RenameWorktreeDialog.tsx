@@ -1,6 +1,7 @@
 import { Show, createSignal, onMount } from "solid-js";
 import { api } from "../api/client";
 import { state } from "../stores/app";
+import { suggestBranchName } from "../lib/celestial";
 
 interface Props {
   projectId: string;
@@ -8,121 +9,6 @@ interface Props {
   currentBranch: string;
   onCancel: () => void;
   onRenamed: () => void;
-}
-
-const ADJECTIVES = [
-  "swift",
-  "bold",
-  "calm",
-  "brave",
-  "clever",
-  "lucky",
-  "merry",
-  "quiet",
-  "sharp",
-  "shiny",
-  "spry",
-  "vivid",
-  "zesty",
-  "amber",
-  "azure",
-  "coral",
-  "ember",
-  "frost",
-  "ivory",
-  "jade",
-  "olive",
-  "pearl",
-  "rusty",
-  "snowy",
-  "sunny",
-  "balmy",
-  "breezy",
-  "dapper",
-  "dusty",
-  "feisty",
-  "glossy",
-  "humble",
-  "jolly",
-  "noble",
-  "plucky",
-  "rosy",
-  "silky",
-  "tidy",
-  "wily",
-  "zippy",
-];
-
-const NOUNS = [
-  "otter",
-  "lynx",
-  "panda",
-  "robin",
-  "heron",
-  "finch",
-  "raven",
-  "marten",
-  "puffin",
-  "newt",
-  "axolotl",
-  "owl",
-  "fox",
-  "moth",
-  "salmon",
-  "krill",
-  "tigerlily",
-  "fern",
-  "cedar",
-  "willow",
-  "alder",
-  "moss",
-  "comet",
-  "nebula",
-  "ember",
-  "harbor",
-  "meadow",
-  "ridge",
-  "summit",
-  "delta",
-  "cove",
-  "anchor",
-  "lantern",
-  "compass",
-  "atlas",
-  "loom",
-  "quill",
-  "ledger",
-  "satchel",
-  "anvil",
-];
-
-function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)]!;
-}
-
-/** Same tiered strategy as WorktreeDialog. Kept in sync deliberately:
- *  the BE applies an identical collision check across live + history
- *  worktrees, so both create + rename surfaces should suggest names
- *  that pass the same filter. */
-function suggestBranchName(taken: Set<string>): string {
-  for (let attempt = 0; attempt < 25; attempt++) {
-    const name = `feature/${pick(ADJECTIVES)}-${pick(NOUNS)}`;
-    if (!taken.has(name)) return name;
-  }
-  for (const a of ADJECTIVES) {
-    for (const n of NOUNS) {
-      const name = `feature/${a}-${n}`;
-      if (!taken.has(name)) return name;
-    }
-  }
-  for (let attempt = 0; attempt < 200; attempt++) {
-    const suffix = Math.floor(Math.random() * 0x10000)
-      .toString(16)
-      .padStart(4, "0");
-    const name = `feature/${pick(ADJECTIVES)}-${pick(NOUNS)}-${suffix}`;
-    if (!taken.has(name)) return name;
-  }
-  return `feature/branch-${Date.now().toString(36)}`;
 }
 
 /** Rename-worktree dialog. Renames the branch (`git branch -m`) and

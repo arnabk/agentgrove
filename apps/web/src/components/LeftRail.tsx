@@ -43,6 +43,7 @@ import WorktreeHistoryDialog from "./WorktreeHistoryDialog";
 import ChatHistoryDialog from "./ChatHistoryDialog";
 import RenameWorktreeDialog from "./RenameWorktreeDialog";
 import ProjectSettingsDialog from "./ProjectSettingsDialog";
+import GalaxyLog from "./GalaxyLog";
 
 /** Persisted set of expanded project ids — so multiple folders can stay
  *  open in the left rail at once. */
@@ -1191,6 +1192,7 @@ export default function LeftRail() {
                           }}
                         </For>
                       </ul>
+                      <GalaxyLog branches={(state.worktrees[p.id] ?? []).map((w) => w.branch)} />
                     </div>
                   </Show>
 
