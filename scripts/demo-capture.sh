@@ -37,7 +37,9 @@ echo "[demo-capture] copying video from container..."
 rm -f "$VIDEO_FILE" "$THUMB_FILE"
 docker compose -f docker/docker-compose.demo.yml cp "agentgrove-demo:${CONTAINER_DEMO}" "$VIDEO_FILE"
 
-echo "[demo-capture] generating thumbnail..."
-ffmpeg -y -i "$VIDEO_FILE" -ss 00:00:02 -vframes 1 -update 1 "$THUMB_FILE"
+echo "[demo-capture] generating thumbnail at midpoint..."
+DURATION=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$VIDEO_FILE")
+THUMB_TIME=$(echo "$DURATION / 2" | bc -l | xargs -I {} printf "%.2f" {})
+ffmpeg -y -i "$VIDEO_FILE" -ss "$THUMB_TIME" -vframes 1 -q:v 2 -update 1 "$THUMB_FILE"
 
 echo "[demo-capture] done: $VIDEO_FILE"
