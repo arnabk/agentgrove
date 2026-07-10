@@ -468,11 +468,13 @@ export default function ChatPane() {
    *    - Each BE prompt is identified by its id.
    *    - If a prompt with the same id already exists locally, we
    *      replace it with the BE copy (which may have more events).
-   *    - Any local prompt whose id is NOT in the BE view is left
-   *      in place (covers optimistic placeholders that haven't
-   *      been swapped yet).
-   *    - Order = BE order, then locally-only ids appended at the
-   *      tail.
+   *    - Local prompts whose id is NOT in the BE view are kept only
+   *      if they extend the known window: older prompts (seq lower
+   *      than the first BE prompt) are prepended, and newer prompts
+   *      or optimistic placeholders (seq higher than the last BE
+   *      prompt, or seq -1) are appended.
+   *    - Order = older local-only prompts, then BE order, then newer
+   *      local-only prompts / placeholders.
    */
   async function reconcileChat() {
     const id = activeId();
@@ -494,7 +496,11 @@ export default function ChatPane() {
           const localOnly = s.prompts.filter(
             (p) => !beIds.has(p.id) && !(p.id.startsWith("pending-") && beContents.has(p.content)),
           );
-          s.prompts = [...view.prompts, ...localOnly];
+          const beFirstSeq = view.prompts[0]?.seq ?? Infinity;
+          const beLastSeq = view.prompts[view.prompts.length - 1]?.seq ?? -Infinity;
+          const before = localOnly.filter((p) => p.seq >= 0 && p.seq < beFirstSeq);
+          const after = localOnly.filter((p) => p.seq < 0 || p.seq > beLastSeq);
+          s.prompts = [...before, ...view.prompts, ...after];
           // Drop any liveTokens / liveThinking entries whose prompt
           // has reached a terminal event in the BE copy — they're
           // canonical now.
