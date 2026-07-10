@@ -1671,14 +1671,16 @@ function VirtualizedTimeline(props: {
     getItemKey: (i) => props.prompts[i]?.id ?? i,
   });
 
+  const virtualItems = createMemo(() => [...virtualizer.getVirtualItems()]);
+
   /** Height of the un-rendered prefix in pixels. The first virtual
    *  item's `start` happens to be exactly that height since
    *  measurements are cumulative from index 0. */
-  const topSpacer = () => virtualizer.getVirtualItems()[0]?.start ?? 0;
+  const topSpacer = () => virtualItems()[0]?.start ?? 0;
   /** Height of the un-rendered suffix in pixels: total - (last
    *  rendered item's end). */
   const bottomSpacer = () => {
-    const items = virtualizer.getVirtualItems();
+    const items = virtualItems();
     const total = virtualizer.getTotalSize();
     const last = items[items.length - 1];
     if (!last) return 0;
@@ -1884,7 +1886,7 @@ function VirtualizedTimeline(props: {
        * proportional. */}
       <div style={{ width: "100%" }}>
         <div style={{ height: `${topSpacer()}px` }} aria-hidden="true" />
-        <For each={virtualizer.getVirtualItems()}>
+        <For each={virtualItems()}>
           {(vi) => {
             const prompt = () => props.prompts[vi.index];
             return (
