@@ -13,7 +13,7 @@ See [docs/features.md](docs/features.md) for the full feature list.
 
 ## Demo Videos
 
-Click any thumbnail to watch the screen recording. All videos are real captures of the live app on the demo stack.
+Click any thumbnail to watch the screen recording. All videos are real captures of the live app, recorded inside the Docker container on the isolated demo stack so the host dev server is untouched.
 
 | Feature | Recording |
 | --- | --- |

@@ -2,6 +2,10 @@
 # The shim talks directly to the host's 9router OpenAI-compatible endpoint
 # so the container can show real AI responses without the full Electron
 # desktop app.
+#
+# The runtime stage uses the official Playwright Docker image so Chromium,
+# ffmpeg, Xvfb and all browser dependencies are pre-installed. Demo videos are
+# recorded entirely inside the container without touching the host display.
 
 ARG BUILD_MODE=debug
 
@@ -35,17 +39,25 @@ RUN pnpm install --frozen-lockfile
 COPY apps/web/ apps/web/
 RUN pnpm -C apps/web build
 
-# ── Stage 3: runtime with opencode shim ─────────────────────
-FROM node:24-bookworm-slim AS runtime
+# ── Stage 3: runtime based on official Playwright image ──────
+FROM mcr.microsoft.com/playwright:v1.59.1-noble AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates curl git \
+       ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m agentgrove
-USER agentgrove
+RUN corepack enable pnpm
+RUN useradd -u 1002 -m agentgrove
+
+# Copy the web source and tests so Playwright can run inside the container.
+COPY --chown=agentgrove:agentgrove package.json pnpm-lock.yaml pnpm-workspace.yaml /home/agentgrove/
+COPY --chown=agentgrove:agentgrove apps/web /home/agentgrove/apps/web
 WORKDIR /home/agentgrove
+RUN pnpm install --frozen-lockfile
+
+WORKDIR /home/agentgrove
+USER agentgrove
 
 ARG BUILD_MODE
 COPY --from=rust-builder --chown=agentgrove:agentgrove /src/target/${BUILD_MODE}/agentgrove ./agentgrove
@@ -61,6 +73,9 @@ ENV OPENCODE_BASE_URL=http://host.docker.internal:20128/v1
 ENV OPENCODE_API_KEY=sk_9router
 ENV AGENTGROVE_STATE_DIR=/home/agentgrove/.data
 RUN mkdir -p /home/agentgrove/.data
+
+# Helper used to record demo videos inside the container.
+COPY --chown=agentgrove:agentgrove docker/demo-capture.sh /home/agentgrove/demo-capture.sh
 
 EXPOSE 4317
 EXPOSE 5173
