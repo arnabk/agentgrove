@@ -152,7 +152,7 @@ export default function RightSidebar() {
           <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
             {/* TeamChatPane is always mounted so its WebSocket stays open and
                 can light up the unread indicator while the pane is closed. */}
-            <div classList={{ "hidden": !teamChatOpen() }}>
+            <div classList={{ hidden: !teamChatOpen() }}>
               <TeamChatPane />
             </div>
             <Show when={!teamChatOpen()}>
