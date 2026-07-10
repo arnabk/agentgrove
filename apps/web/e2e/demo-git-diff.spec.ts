@@ -53,7 +53,7 @@ test("git diff view", async ({ page }) => {
   await page.waitForTimeout(3_000);
 
   // Scene 5: Click a changed file to open the diff view.
-  const changedFile = panel.locator('[data-testid^="changes-file-"]').first();
+  const changedFile = panel.locator('[data-testid="changes-row-README.md"]');
   await changedFile.waitFor({ state: "visible", timeout: 10_000 });
   await changedFile.click();
   await page.waitForTimeout(5_000);

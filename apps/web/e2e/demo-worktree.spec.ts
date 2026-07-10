@@ -40,6 +40,8 @@ test("worktree sessions", async ({ page }) => {
   await page.waitForTimeout(6_000);
 
   // Scene 3: Start a chat in the worktree scope.
+  await menu.click();
+  await page.waitForTimeout(1_500);
   const newChat = page.locator('[data-testid^="new-chat-"]').first();
   await newChat.click();
   await page.waitForTimeout(2_000);
@@ -61,9 +63,7 @@ test("worktree sessions", async ({ page }) => {
   await page.waitForTimeout(10_000);
 
   // Scene 4: Switch back to the project root workspace.
-  const root = page.locator('[data-testid^="project-root-"]').first();
-  await root.waitFor({ state: "visible", timeout: 10_000 });
-  await root.click();
+  await project.click();
   await page.waitForTimeout(3_000);
 
   // Scene 5: Start a separate chat in the root workspace.
