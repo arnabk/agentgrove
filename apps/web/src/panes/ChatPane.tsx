@@ -1671,7 +1671,19 @@ function VirtualizedTimeline(props: {
     getItemKey: (i) => props.prompts[i]?.id ?? i,
   });
 
-  const virtualItems = createMemo(() => [...virtualizer.getVirtualItems()]);
+  const virtualItems = createMemo(() => {
+    // Track both the source count and the virtualizer total size so
+    // this memo re-runs whenever the virtual window is recomputed.
+    void props.prompts.length;
+    void virtualizer.getTotalSize();
+    return virtualizer.getVirtualItems().map((vi) => ({
+      index: vi.index,
+      key: vi.key,
+      start: vi.start,
+      end: vi.end,
+      size: vi.size,
+    }));
+  });
 
   /** Height of the un-rendered prefix in pixels. The first virtual
    *  item's `start` happens to be exactly that height since
