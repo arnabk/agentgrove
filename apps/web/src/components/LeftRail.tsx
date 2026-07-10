@@ -774,6 +774,8 @@ export default function LeftRail() {
                             </button>
                             <WorktreeIcon />
                             <span class="truncate text-[0.83em] font-mono min-w-0 flex-1">
+                              <span class="text-fg-subtle">{p.name}</span>
+                              <span class="text-fg-subtle mx-0.5">/</span>
                               {w.branch}
                             </span>
                             <Show when={isScopeWorking(p.id, w.id)}>
