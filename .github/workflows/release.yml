@@ -82,81 +82,9 @@ jobs:
           git tag "v$NEXT"
           git push origin main --tags
 
-  # ── 2. Build release binaries ───────────────────────────────
-  build:
-    needs: tag
-    if: needs.tag.outputs.skipped != 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: agentgrove-linux-x64
-            ext: ""
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact: agentgrove-macos-arm64
-            ext: ""
-          # Cross-compile the Intel mac binary on an Apple Silicon
-          # runner. Dedicated macos-13 (x86) runners are scarce and
-          # frequently leave the release run queued indefinitely; the
-          # arm64 runner can target x86_64-apple-darwin just fine.
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact: agentgrove-macos-x64
-            ext: ""
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: agentgrove-windows-x64
-            ext: ".exe"
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.tag.outputs.tag }}
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      # Belt-and-suspenders: ensure the std library for the target is
-      # present. Cross-compiling the Intel mac binary on an arm64 runner
-      # otherwise fails with E0463 "can't find crate for core".
-      - name: Ensure target std is installed
-        run: rustup target add ${{ matrix.target }}
-
-      - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }} -p agentgrove-server
-
-      - name: Package binary
-        shell: bash
-        run: |
-          mkdir -p dist
-          BIN="target/${{ matrix.target }}/release/agentgrove${{ matrix.ext }}"
-          cp "$BIN" "dist/${{ matrix.artifact }}${{ matrix.ext }}"
-
-      - name: Install Node + build FE
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - run: corepack enable pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm -C apps/web build
-      - name: Package FE dist
-        shell: bash
-        run: |
-          tar -czf "dist/${{ matrix.artifact }}-web.tar.gz" -C apps/web/dist .
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: dist/
-
-  # ── 3. Create GitHub Release ────────────────────────────────
+  # ── 2. Create GitHub Release (source-only) ──────────────────
   release:
-    needs: [tag, build]
+    needs: tag
     if: needs.tag.outputs.skipped != 'true'
     runs-on: ubuntu-latest
     steps:
@@ -164,10 +92,6 @@ jobs:
         with:
           ref: ${{ needs.tag.outputs.tag }}
           fetch-depth: 0
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts/
 
       - name: Generate changelog
         id: changelog
@@ -195,7 +119,8 @@ jobs:
           body: ${{ steps.changelog.outputs.body }}
           draft: false
           prerelease: false
-          files: |
-            artifacts/**/*
+          # No artifacts are generated — users check out the source
+          # and run the project locally. GitHub still provides the
+          # automatic source-code archives on the release page.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
