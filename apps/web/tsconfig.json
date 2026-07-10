@@ -22,5 +22,15 @@
     "baseUrl": ".",
     "noEmit": true
   },
-  "include": ["src", "tests", "e2e", "vite.config.ts", "vitest.config.ts", "playwright.config.ts", "playwright-demo.config.ts", "playwright-demo-docker.config.ts", "playwright-demo-capture.config.ts"]
+  "include": [
+    "src",
+    "tests",
+    "e2e",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "playwright-demo.config.ts",
+    "playwright-demo-docker.config.ts",
+    "playwright-demo-capture.config.ts"
+  ]
 }

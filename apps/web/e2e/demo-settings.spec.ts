@@ -1,5 +1,10 @@
 import { test, expect } from "@playwright/test";
-import { ensureProject, waitForHydrated, waitForToast } from "./demo-helpers";
+import {
+  ensureProject,
+  waitForHydrated,
+  waitForToast,
+  waitForRecordingStart,
+} from "./demo-helpers";
 
 test("settings", async ({ page }) => {
   test.setTimeout(30_000);
@@ -8,6 +13,7 @@ test("settings", async ({ page }) => {
   await page.goto("/");
   await waitForHydrated(page);
   await waitForToast(page);
+  await waitForRecordingStart();
 
   const settings = page.locator('[data-testid="open-settings"]');
   await settings.click();
@@ -18,7 +24,7 @@ test("settings", async ({ page }) => {
 
   // Switch to Appearance tab to show theme/font options.
   const appearanceTab = page.locator('[data-testid="settings-tab-appearance"]');
-  if (await appearanceTab.count() > 0) {
+  if ((await appearanceTab.count()) > 0) {
     await appearanceTab.click();
     await page.waitForTimeout(1500);
   }

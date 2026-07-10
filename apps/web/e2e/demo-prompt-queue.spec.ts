@@ -4,6 +4,7 @@ import {
   createChat,
   waitForHydrated,
   waitForToast,
+  waitForRecordingStart,
   openChat,
   typeIntoComposer,
   send,
@@ -17,6 +18,7 @@ test("prompt queue", async ({ page }) => {
   await page.goto("/");
   await waitForHydrated(page);
   await waitForToast(page);
+  await waitForRecordingStart();
 
   await openChat(page, chatId, projectId);
   const composer = await page

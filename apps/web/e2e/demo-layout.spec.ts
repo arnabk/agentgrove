@@ -1,5 +1,10 @@
 import { test } from "@playwright/test";
-import { ensureProject, waitForHydrated, waitForToast } from "./demo-helpers";
+import {
+  ensureProject,
+  waitForHydrated,
+  waitForToast,
+  waitForRecordingStart,
+} from "./demo-helpers";
 
 test("layout", async ({ page }) => {
   test.setTimeout(30_000);
@@ -8,6 +13,7 @@ test("layout", async ({ page }) => {
   await page.goto("/");
   await waitForHydrated(page);
   await waitForToast(page);
+  await waitForRecordingStart();
 
   // Collapse left rail.
   const railToggle = page.locator('[data-testid="left-rail-toggle"]');
