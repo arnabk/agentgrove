@@ -36,10 +36,12 @@ import {
   currentWorktreeId,
   findChatTab,
   isSidebarOpen,
+  latestVersion,
   routeError,
   selectedChatId,
   setActiveChat,
   setActiveWork,
+  setLatestVersion,
   setRouteError,
   setScopeChats,
   setSettingsOpen,
@@ -102,6 +104,7 @@ export default function App() {
   async function checkReleaseVersion() {
     try {
       const v = await api.version();
+      setLatestVersion(v);
       if (!v.update_available || !v.latest) return;
       const key = `ag-release-dismissed-${v.latest}`;
       if (localStorage.getItem(key) === "1") return;
@@ -555,15 +558,19 @@ function TopBarIndicators() {
 
 /** Gear icon that opens the Settings modal. */
 function SettingsButton() {
+  const update = () => latestVersion()?.update_available;
   return (
     <button
-      class="ag-btn ag-btn-ghost ag-btn-icon"
+      class="ag-btn ag-btn-ghost ag-btn-icon relative"
       onClick={() => setSettingsOpen(true)}
       title="Settings  ⌘,"
       aria-label="Open settings"
       data-testid="open-settings"
     >
       <GearIcon />
+      <Show when={update()}>
+        <span class="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent" aria-hidden="true" />
+      </Show>
     </button>
   );
 }

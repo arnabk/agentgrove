@@ -26,6 +26,10 @@ Click any thumbnail to watch the screen recording. All videos are real captures 
 | **Team Chat** — shared channel with messages and reactions | [![Team chat demo](./docs/demos/team-chat-thumb.jpg)](./docs/demos/team-chat.mp4) |
 | **Settings** — appearance, themes, and preferences | [![Settings demo](./docs/demos/settings-thumb.jpg)](./docs/demos/settings.mp4) |
 | **Layout Toggles** — collapse and restore the left rail and sidebar | [![Layout demo](./docs/demos/layout-thumb.jpg)](./docs/demos/layout.mp4) |
+| **Worktree Sessions** — start isolated workspaces per Git branch | [![Worktree demo](./docs/demos/worktree-thumb.jpg)](./docs/demos/worktree.mp4) |
+| **Revert with AI** — ask the agent to undo the last commit | [![Revert demo](./docs/demos/revert-thumb.jpg)](./docs/demos/revert.mp4) |
+| **Queue Thoughts** — queue multiple prompts and wait for each to finish | [![Queue thoughts demo](./docs/demos/queue-thoughts-thumb.jpg)](./docs/demos/queue-thoughts.mp4) |
+| **Git Diff View** — inspect staged and unstaged changes | [![Git diff demo](./docs/demos/git-diff-thumb.jpg)](./docs/demos/git-diff.mp4) |
 
 ## Quick Start
 

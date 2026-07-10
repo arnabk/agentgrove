@@ -7,6 +7,7 @@ import {
   FONT_FAMILY_PRESETS,
   FONT_SIZES,
   MONO_FAMILY_PRESETS,
+  latestVersion,
   saveSettings,
   setSettingsOpen,
   settingsOpen,
@@ -104,7 +105,22 @@ export default function SettingsModal() {
             </Show>
           </div>
 
-          <footer class="flex items-center justify-end px-5 py-3 border-t border-border">
+          <footer class="flex items-center justify-between px-5 py-3 border-t border-border">
+            <div class="text-[11px] text-fg-subtle">
+              <span>AgentGrove v{latestVersion()?.current ?? "—"}</span>
+              <Show when={latestVersion()?.update_available}>
+                <span class="ml-2 text-accent">
+                  <a
+                    href={latestVersion()?.html_url ?? undefined}
+                    target="_blank"
+                    rel="noreferrer"
+                    class="hover:underline"
+                  >
+                    v{latestVersion()?.latest} available →
+                  </a>
+                </span>
+              </Show>
+            </div>
             <button
               class="ag-btn ag-btn-primary"
               onClick={() => setSettingsOpen(false)}

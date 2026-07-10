@@ -21,6 +21,7 @@ import {
   type UserSettings,
   type Worktree,
   type ProviderDescriptor,
+  type VersionInfo,
 } from "../api/client";
 
 /** Per-scope cap for chats (max 5 per project/worktree scope). */
@@ -147,6 +148,10 @@ export const [state, setState] = createStore<AppState>({
 export const [settingsOpen, setSettingsOpen] = createSignal(false);
 export const [teamChatOpen, setTeamChatOpen] = createSignal(false);
 export const [unreadTeamChat, setUnreadTeamChat] = createSignal(false);
+
+/** Latest release info returned by /api/version. Used to show the
+ *  "new release available" badge in Settings and elsewhere. */
+export const [latestVersion, setLatestVersion] = createSignal<VersionInfo | null>(null);
 
 /** Chat ids that currently have an in-flight agent turn. ChatPane
  *  maintains this from its per-chat store; the TabStrip reads it to

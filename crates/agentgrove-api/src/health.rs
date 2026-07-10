@@ -93,7 +93,7 @@ async fn fetch_latest_release() -> Option<GitHubRelease> {
         .ok()?;
 
     let resp = client
-        .get("https://api.github.com/repos/agentgrove/agentgrove/releases/latest")
+        .get("https://api.github.com/repos/arnabk/agentgrove/releases/latest")
         .send()
         .await
         .ok()?;

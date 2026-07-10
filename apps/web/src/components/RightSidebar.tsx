@@ -149,9 +149,13 @@ export default function RightSidebar() {
             </button>
           </header>
 
-          <Show
-            when={teamChatOpen()}
-            fallback={
+          <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
+            {/* TeamChatPane is always mounted so its WebSocket stays open and
+                can light up the unread indicator while the pane is closed. */}
+            <div classList={{ "hidden": !teamChatOpen() }}>
+              <TeamChatPane />
+            </div>
+            <Show when={!teamChatOpen()}>
               <>
                 <div class="h-9 px-3 flex items-center gap-1 border-b border-border bg-bg-2 shrink-0">
                   {/* save state — small + unobtrusive, no persistent "saved" pill */}
@@ -232,10 +236,8 @@ export default function RightSidebar() {
                   <NotesPane />
                 </div>
               </>
-            }
-          >
-            <TeamChatPane />
-          </Show>
+            </Show>
+          </div>
         </div>
       </aside>
     </Show>

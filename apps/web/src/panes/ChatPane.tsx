@@ -1009,6 +1009,10 @@ export default function ChatPane() {
     try {
       const result = await api.forkChat(id, p.seq);
       addChatTab({ id: result.id, title: result.title });
+      // Force an immediate load of the forked chat so the timeline
+      // switches from the source chat to the new chat before the user
+      // starts typing again.
+      await loadChat();
     } catch {
       setErr("Failed to fork chat");
     }
@@ -1701,8 +1705,12 @@ function VirtualizedTimeline(props: {
   /** Settle a deferred "scroll to bottom" intent. If the scroll
    *  element has no height yet (pane is `display:none` because the
    *  user is on a different tab), bail; the ResizeObserver below
-   *  will re-fire this once the pane is revealed. */
-  function tryScrollToBottom() {
+   *  will re-fire this once the pane is revealed.
+   *
+   *  When `force` is false we only scroll if the user is already
+   *  close to the bottom, so reviewing older messages isn't
+   *  interrupted by new tail activity. */
+  function tryScrollToBottom(force = false) {
     const len = props.prompts.length;
     if (len === 0) {
       pendingScrollToBottom = false;
@@ -1711,6 +1719,14 @@ function VirtualizedTimeline(props: {
     if (!scrollRef || scrollRef.clientHeight === 0) {
       pendingScrollToBottom = true;
       return;
+    }
+    if (!force) {
+      const distanceFromBottom =
+        scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight;
+      if (distanceFromBottom > 80) {
+        pendingScrollToBottom = false;
+        return;
+      }
     }
     virtualizer.scrollToIndex(len - 1, { align: "end" });
     pendingScrollToBottom = false;
@@ -1723,15 +1739,16 @@ function VirtualizedTimeline(props: {
 
     // First non-empty load → scroll to bottom unconditionally.
     if (prevLength === 0 && len > 0) {
-      queueMicrotask(tryScrollToBottom);
+      queueMicrotask(() => tryScrollToBottom(true));
     } else if (len > prevLength && firstId === prevFirstId) {
-      // Tail growth in an already-mounted chat.
-      tryScrollToBottom();
+      // Tail growth in an already-mounted chat: only snap if the user
+      // is already near the bottom, otherwise preserve reading position.
+      tryScrollToBottom(false);
     } else if (firstId !== prevFirstId && len > 0 && prevLength > 0) {
       // Chat switch (firstId changed while we already had prompts).
       // Reset prevLength so the "first load" branch above doesn't
       // also fire next tick.
-      queueMicrotask(tryScrollToBottom);
+      queueMicrotask(() => tryScrollToBottom(true));
     }
     prevLength = len;
     prevFirstId = firstId;
@@ -1976,14 +1993,26 @@ function PromptRow(props: {
   // flight so the user can watch the agent work, then auto-collapse
   // once the final response arrives. `autoClosedInternals` tracks the
   // one-time auto-close so user re-opens aren't repeatedly closed.
+  //
+  // The state is also reset when the prompt instance changes so that
+  // virtualizer recycling doesn't leak the open/closed state from one
+  // row to another.
   let autoClosedInternals = false;
-  const [internalsOpen, setInternalsOpen] = createSignal(true);
+  const [internalsOpen, setInternalsOpen] = createSignal(isPending());
 
   createEffect(() => {
     if (!isPending() && !autoClosedInternals) {
       setInternalsOpen(false);
       autoClosedInternals = true;
     }
+  });
+
+  // Reset internals state when the virtualizer recycles this row for a
+  // different prompt; otherwise the previous row's toggle state leaks.
+  createEffect(() => {
+    void props.prompt.id;
+    setInternalsOpen(isPending());
+    autoClosedInternals = false;
   });
 
   function onToggleInternals(e: Event & { currentTarget: { open: boolean } }) {
@@ -2016,6 +2045,17 @@ function PromptRow(props: {
   const NONSTREAM_AFTER = 3;
   const looksNonStreaming = () => waiting() && elapsed() >= NONSTREAM_AFTER;
 
+  // Format prompt creation time as a compact date+time string.
+  const formatTime = (dateString: string) => {
+    const d = new Date(dateString);
+    return d.toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
   return (
     <article class="space-y-3 group py-4" data-testid={`prompt-${props.prompt.id}`}>
       {/*
@@ -2039,6 +2079,9 @@ function PromptRow(props: {
             data-testid={`user-bubble-${props.prompt.id}`}
           >
             {props.prompt.content}
+          </div>
+          <div class="text-right mt-1 text-[10px] text-fg-subtle">
+            {formatTime(props.prompt.created_at)}
           </div>
           <Show when={userIsLong()}>
             <button
@@ -2168,6 +2211,9 @@ function PromptRow(props: {
                   </span>
                 </Show>
               </Show>
+            </div>
+            <div class="text-left mt-1 text-[10px] text-fg-subtle">
+              {formatTime(props.prompt.created_at)}
             </div>
             {/* Only offer Copy when there's actual text to copy — a
                 bubble that still shows just the "working…" pulse
