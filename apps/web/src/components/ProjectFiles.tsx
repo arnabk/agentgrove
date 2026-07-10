@@ -50,7 +50,8 @@ function DirNode(props: DirNodeProps) {
   const [entries] = createResource(open, async (isOpen) => {
     if (!isOpen) return [] as TreeEntry[];
     try {
-      return await api.listTree(props.path, true);
+      const all = await api.listTree(props.path, true);
+      return all.filter((entry) => entry.name !== ".git");
     } catch {
       return [] as TreeEntry[];
     }

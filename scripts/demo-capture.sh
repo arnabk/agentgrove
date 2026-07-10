@@ -24,6 +24,9 @@ fi
 
 mkdir -p "$DEMO_DIR"
 
+echo "[demo-capture] resetting demo state..."
+docker compose -f docker/docker-compose.demo.yml down -v >/dev/null 2>&1 || true
+
 echo "[demo-capture] building / starting demo container..."
 docker compose -f docker/docker-compose.demo.yml up --build -d
 

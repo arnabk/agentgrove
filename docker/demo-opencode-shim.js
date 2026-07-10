@@ -23,6 +23,10 @@ function models() {
 function normalizeModel(model) {
   // 9router/Development -> Development (the OpenAI-compatible model id)
   if (model.startsWith("9router/")) return model.slice("9router/".length);
+  // AgentGrove seeds new opencode chats with "opencode/big-pickle".
+  // The demo container only talks to 9router, so route those to the
+  // default 9router endpoint.
+  if (model.startsWith("opencode/")) return "Development";
   return model;
 }
 
