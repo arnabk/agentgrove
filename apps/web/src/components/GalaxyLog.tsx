@@ -18,11 +18,19 @@ export default function GalaxyLog(props: Props) {
   const total = () => visits().star.length + visits().planet.length + visits().galaxy.length;
 
   return (
-    <Show when={total() > 0}>
-      <div class="mt-2 px-2 py-1.5 rounded-md bg-bg-2/50 border border-border/60">
-        <div class="text-[10px] uppercase tracking-wider text-fg-subtle font-semibold mb-1">
-          Visited
-        </div>
+    <div class="mt-2 px-2 py-1.5 rounded-md bg-bg-2/50 border border-border/60">
+      <div class="text-[10px] uppercase tracking-wider text-fg-subtle font-semibold mb-1">
+        Visited
+      </div>
+      <Show
+        when={total() > 0}
+        fallback={
+          <p class="text-[11px] text-fg-subtle italic">
+            No celestial visits yet. Worktree branches named like{" "}
+            <code class="font-mono">feature/&lt;star|planet|galaxy&gt;</code> will appear here.
+          </p>
+        }
+      >
         <div class="space-y-1">
           <For each={KINDS}>
             {(kind) => {
@@ -48,7 +56,7 @@ export default function GalaxyLog(props: Props) {
             }}
           </For>
         </div>
-      </div>
-    </Show>
+      </Show>
+    </div>
   );
 }
