@@ -3,6 +3,7 @@ import {
   Show,
   Suspense,
   createEffect,
+  createMemo,
   createSignal,
   lazy,
   onCleanup,
@@ -10,6 +11,7 @@ import {
 } from "solid-js";
 import CommandPalette from "./components/CommandPalette";
 import { DialogHost } from "./components/dialog";
+import GalaxyMapDialog from "./components/GalaxyMapDialog";
 import LeftRail from "./components/LeftRail";
 import MemoryIndicator from "./components/MemoryIndicator";
 import RightSidebar from "./components/RightSidebar";
@@ -35,6 +37,7 @@ import {
   currentScope,
   currentWorktreeId,
   findChatTab,
+  galaxyMapOpen,
   isSidebarOpen,
   latestVersion,
   routeError,
@@ -45,6 +48,7 @@ import {
   setRouteError,
   setScopeChats,
   setSettingsOpen,
+  setGalaxyMapOpen,
   setTheme,
   state,
   toggleSidebar,
@@ -64,6 +68,14 @@ export default function App() {
     setLeftRailOpen(next);
     localStorage.setItem("ag-left-rail-open", next ? "1" : "0");
   }
+
+  // All worktree branches across every project, used for the global Galaxy Map.
+  const allBranches = createMemo(() =>
+    Object.values(state.worktrees)
+      .flat()
+      .map((w) => w.branch),
+  );
+
   // sidebarOpen unused var removed
 
   onMount(async () => {
@@ -411,6 +423,16 @@ export default function App() {
                     <button
                       type="button"
                       class="ag-btn ag-btn-ghost ag-btn-icon"
+                      onClick={() => setGalaxyMapOpen(true)}
+                      title="Galaxy Map"
+                      aria-label="Open galaxy map"
+                      data-testid="open-galaxy-map"
+                    >
+                      <GalaxyIcon />
+                    </button>
+                    <button
+                      type="button"
+                      class="ag-btn ag-btn-ghost ag-btn-icon"
                       onClick={toggleSidebar}
                       title={isSidebarOpen() ? "Hide sidebar" : "Show sidebar"}
                       data-testid="sidebar-toggle"
@@ -486,6 +508,9 @@ export default function App() {
         </div>
       </Show>
       <SettingsModal />
+      <Show when={galaxyMapOpen()}>
+        <GalaxyMapDialog branches={allBranches()} onClose={() => setGalaxyMapOpen(false)} />
+      </Show>
       <Show when={changesScope()}>
         <Suspense>
           <ChangesPanel />
@@ -572,6 +597,33 @@ function SettingsButton() {
         <span class="absolute top-1 right-1 w-2 h-2 rounded-full bg-accent" aria-hidden="true" />
       </Show>
     </button>
+  );
+}
+
+/** Sparkly galaxy glyph for the Galaxy Map button. */
+function GalaxyIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 2a10 10 0 0 1 10 10 10 10 0 0 1-10 10A10 10 0 0 1 2 12 10 10 0 0 1 12 2Z"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M12 6c4.97 0 9-1.79 9-4s-4.03-4-9-4-9 1.79-9 4 4.03 4 9 4Z"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M12 18c4.97 0 9 1.79 9 4s-4.03 4-9 4-9-1.79-9-4 4.03-4 9-4Z"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linejoin="round"
+      />
+      <circle cx="12" cy="12" r="2" fill="currentColor" />
+    </svg>
   );
 }
 

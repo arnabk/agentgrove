@@ -146,6 +146,8 @@ export const [state, setState] = createStore<AppState>({
 
 /** Visibility of the global Settings modal. */
 export const [settingsOpen, setSettingsOpen] = createSignal(false);
+/** Visibility of the Galaxy Map dialog. */
+export const [galaxyMapOpen, setGalaxyMapOpen] = createSignal(false);
 export const [teamChatOpen, setTeamChatOpen] = createSignal(false);
 export const [unreadTeamChat, setUnreadTeamChat] = createSignal(false);
 
