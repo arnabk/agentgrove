@@ -2,6 +2,7 @@ import {
   For,
   Show,
   createEffect,
+  createMemo,
   createResource,
   createSignal,
   onCleanup,
@@ -130,6 +131,14 @@ export default function LeftRail() {
   const treeRefreshKey = (root: string) => treeRefreshKeys()[root] ?? 0;
   const refreshTree = (root: string) =>
     setTreeRefreshKeys((prev) => ({ ...prev, [root]: (prev[root] ?? 0) + 1 }));
+
+  // All worktree branches across every project, used for the global Galaxy Log.
+  const allBranches = createMemo(() =>
+    Object.values(state.worktrees)
+      .flat()
+      .map((w) => w.branch),
+  );
+
   onMount(() => {
     // Close the menu on a click that lands OUTSIDE the kebab button + its
     // dropdown, or on Escape. We test the event target rather than relying
@@ -718,13 +727,6 @@ export default function LeftRail() {
                         refreshKey={treeRefreshKey(p.root)}
                       />
                     </Show>
-
-                    {/* Visited celestial bodies for this project's worktrees. */}
-                    <Show when={open()}>
-                      <div class="mt-2 pl-4">
-                        <GalaxyLog branches={(state.worktrees[p.id] ?? []).map((w) => w.branch)} />
-                      </div>
-                    </Show>
                   </li>
 
                   <For each={state.worktrees[p.id] ?? []}>
@@ -1115,6 +1117,11 @@ export default function LeftRail() {
             }}
           </For>
         </ul>
+
+        {/* Global Galaxy Log: visited celestial bodies across every project's worktrees. */}
+        <div class="mt-4 px-2">
+          <GalaxyLog branches={allBranches()} />
+        </div>
       </div>
 
       {/* Resize handle: thin vertical strip on the right edge. Pointer
