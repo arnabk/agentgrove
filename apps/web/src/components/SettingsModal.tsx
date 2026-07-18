@@ -233,9 +233,9 @@ function AppearanceTab() {
           <For each={customThemes()}>
             {(t) => (
               <div
-              class="flex items-center gap-3 px-2 py-1.5 rounded border border-border bg-bg-2"
-              data-testid="custom-theme-row"
-            >
+                class="flex items-center gap-3 px-2 py-1.5 rounded border border-border bg-bg-2"
+                data-testid="custom-theme-row"
+              >
                 <span
                   class="w-5 h-5 rounded border border-border"
                   style={{
@@ -360,7 +360,11 @@ function CustomThemeForm(props: {
   }
 
   return (
-    <form onSubmit={submit} class="p-3 rounded border border-border bg-bg-2 space-y-3" data-testid="custom-theme-form">
+    <form
+      onSubmit={submit}
+      class="p-3 rounded border border-border bg-bg-2 space-y-3"
+      data-testid="custom-theme-form"
+    >
       <div class="flex items-center gap-3">
         <label class="flex-1 text-[13px]">
           <span class="text-fg-muted block mb-1">Name</span>
@@ -391,10 +395,19 @@ function CustomThemeForm(props: {
         <ColorInput label="Background" value={bg()} onChange={setBg} testId="custom-theme-bg" />
         <ColorInput label="Foreground" value={fg()} onChange={setFg} testId="custom-theme-fg" />
         <ColorInput label="Muted" value={muted()} onChange={setMuted} testId="custom-theme-muted" />
-        <ColorInput label="Accent" value={accent()} onChange={setAccent} testId="custom-theme-accent" />
+        <ColorInput
+          label="Accent"
+          value={accent()}
+          onChange={setAccent}
+          testId="custom-theme-accent"
+        />
       </div>
       <div class="flex items-center gap-2 pt-1">
-        <button type="submit" class="ag-btn ag-btn-primary ag-btn-sm" data-testid="custom-theme-save">
+        <button
+          type="submit"
+          class="ag-btn ag-btn-primary ag-btn-sm"
+          data-testid="custom-theme-save"
+        >
           {props.initial ? "Update theme" : "Save theme"}
         </button>
         <button type="button" class="ag-btn ag-btn-ghost ag-btn-sm" onClick={props.onCancel}>
@@ -405,7 +418,12 @@ function CustomThemeForm(props: {
   );
 }
 
-function ColorInput(props: { label: string; value: string; onChange: (v: string) => void; testId?: string }) {
+function ColorInput(props: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  testId?: string;
+}) {
   return (
     <label class="flex items-center gap-2 text-[13px]">
       <input

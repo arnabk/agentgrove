@@ -146,11 +146,7 @@ export default function DbSidebar() {
       <div class="p-2 space-y-0.5 shrink-0 max-h-56 overflow-auto">
         <Show
           when={dbConnections().length > 0}
-          fallback={
-            <div class="text-fg-subtle text-[11px] px-2 py-1">
-              No connections yet.
-            </div>
-          }
+          fallback={<div class="text-fg-subtle text-[11px] px-2 py-1">No connections yet.</div>}
         >
           <For each={dbConnections()}>
             {(c) => (
@@ -169,9 +165,7 @@ export default function DbSidebar() {
                 />
                 <div class="min-w-0 flex-1">
                   <div class="truncate text-fg text-[12.5px]">{c.name}</div>
-                  <div class="truncate text-[10.5px] text-fg-subtle">
-                    {dbConnSubtitle(c.url)}
-                  </div>
+                  <div class="truncate text-[10.5px] text-fg-subtle">{dbConnSubtitle(c.url)}</div>
                 </div>
                 <button
                   type="button"
@@ -255,9 +249,7 @@ export default function DbSidebar() {
             <h3 class="text-[14px] font-semibold mb-4">
               {formEditId() ? "Edit connection" : "New connection"}
             </h3>
-            <label class="block text-[12px] font-medium text-fg-muted mb-1">
-              Name
-            </label>
+            <label class="block text-[12px] font-medium text-fg-muted mb-1">Name</label>
             <input
               class="ag-input w-full mb-3"
               placeholder="Local Postgres"
@@ -265,9 +257,7 @@ export default function DbSidebar() {
               onInput={(e) => setFormName(e.currentTarget.value)}
               data-testid="db-conn-name"
             />
-            <label class="block text-[12px] font-medium text-fg-muted mb-1">
-              Connection URL
-            </label>
+            <label class="block text-[12px] font-medium text-fg-muted mb-1">Connection URL</label>
             <input
               class="ag-input w-full mb-2 font-mono"
               placeholder="postgres://user:pass@host:5432/db"

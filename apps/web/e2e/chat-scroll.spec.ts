@@ -12,7 +12,9 @@ async function sendViaApi(chatId: string, content: string) {
 
 async function getTimelineScroll(page: Page) {
   return await page.evaluate(() => {
-    const elements = Array.from(document.querySelectorAll('[data-testid="chat-timeline"]')) as HTMLElement[];
+    const elements = Array.from(
+      document.querySelectorAll('[data-testid="chat-timeline"]'),
+    ) as HTMLElement[];
     const el = elements.find((e) => e.clientHeight > 0) ?? elements[0] ?? null;
     if (!el) return null;
     return {
@@ -31,7 +33,9 @@ async function isAtBottom(page: Page, threshold = 10) {
 
 async function getVisibleTimelineCenter(page: Page) {
   return page.evaluate(() => {
-    const elements = Array.from(document.querySelectorAll('[data-testid="chat-timeline"]')) as HTMLElement[];
+    const elements = Array.from(
+      document.querySelectorAll('[data-testid="chat-timeline"]'),
+    ) as HTMLElement[];
     const el = elements.find((e) => e.clientHeight > 0) ?? elements[0] ?? null;
     if (!el) return null;
     const rect = el.getBoundingClientRect();
@@ -74,10 +78,13 @@ test.describe("chat scroll behavior", () => {
 
     // Wait for the virtualizer to settle and the timeline to become scrollable.
     await expect
-      .poll(async () => {
-        const scroll = await getTimelineScroll(page);
-        return scroll ? scroll.scrollHeight - scroll.clientHeight : 0;
-      }, { timeout: 15_000, intervals: [200] })
+      .poll(
+        async () => {
+          const scroll = await getTimelineScroll(page);
+          return scroll ? scroll.scrollHeight - scroll.clientHeight : 0;
+        },
+        { timeout: 15_000, intervals: [200] },
+      )
       .toBeGreaterThan(100);
 
     console.log("after load", await getTimelineScroll(page));
@@ -138,10 +145,13 @@ test.describe("chat scroll behavior", () => {
       .toBeGreaterThanOrEqual(30);
 
     await expect
-      .poll(async () => {
-        const scroll = await getTimelineScroll(page);
-        return scroll ? scroll.scrollHeight - scroll.clientHeight : 0;
-      }, { timeout: 15_000, intervals: [200] })
+      .poll(
+        async () => {
+          const scroll = await getTimelineScroll(page);
+          return scroll ? scroll.scrollHeight - scroll.clientHeight : 0;
+        },
+        { timeout: 15_000, intervals: [200] },
+      )
       .toBeGreaterThan(100);
 
     await expect.poll(async () => await isAtBottom(page)).toBe(true);

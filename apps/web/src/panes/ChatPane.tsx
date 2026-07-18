@@ -1899,7 +1899,8 @@ function VirtualizedTimeline(props: {
     }, 300);
     const maxScrollTop = scrollRef.scrollHeight - scrollRef.clientHeight;
     const nextScrollTop = Math.max(0, Math.min(maxScrollTop, scrollRef.scrollTop + deltaY));
-    userAtBottom = scrollRef.scrollHeight - nextScrollTop - scrollRef.clientHeight <= BOTTOM_THRESHOLD_PX;
+    userAtBottom =
+      scrollRef.scrollHeight - nextScrollTop - scrollRef.clientHeight <= BOTTOM_THRESHOLD_PX;
     userScrollTop = userAtBottom ? null : nextScrollTop;
   }
 
@@ -1939,7 +1940,9 @@ function VirtualizedTimeline(props: {
       // Update the tracked user position so the ResizeObserver doesn't
       // fight the restored anchor.
       userScrollTop = scrollRef.scrollTop;
-      userAtBottom = scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight <= BOTTOM_THRESHOLD_PX;
+      userAtBottom =
+        scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight <=
+        BOTTOM_THRESHOLD_PX;
     });
   });
 
@@ -2084,9 +2087,7 @@ function PromptRow(props: {
    *  cancellations, …). Shown prominently in the assistant bubble so the
    *  user isn't left staring at a blank turn or a collapsed internals panel. */
   function errorMessages(): string[] {
-    return props.prompt.events
-      .filter((e) => e.type === "error")
-      .map((e) => e.message);
+    return props.prompt.events.filter((e) => e.type === "error").map((e) => e.message);
   }
 
   /** True while the agent hasn't yet finished this prompt. Used to

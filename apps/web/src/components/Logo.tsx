@@ -1,11 +1,6 @@
 export default function Logo(props: { class?: string; title?: string }) {
   return (
-    <svg
-      class={props.class}
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-    >
+    <svg class={props.class} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
         d="M12 2 4 7v10l8 5 8-5V7l-8-5Z"
         stroke="var(--ag-accent)"

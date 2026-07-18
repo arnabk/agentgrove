@@ -1,10 +1,5 @@
 import { createSignal } from "solid-js";
-import {
-  api,
-  type DbColumn,
-  type DbConnection,
-  type DbQueryResponse,
-} from "../api/client";
+import { api, type DbColumn, type DbConnection, type DbQueryResponse } from "../api/client";
 import { pushToast } from "../components/Toast";
 
 /** Shared state for the Database feature. The left rail's Database view
@@ -15,26 +10,17 @@ export const DB_PAGE_LIMIT = 50;
 const ACTIVE_CONN_KEY = "agentgrove.db.active";
 
 // ---- connections ---------------------------------------------------------
-export const [dbConnections, setDbConnections] = createSignal<DbConnection[]>(
-  [],
-);
-export const [activeConnId, setActiveConnId] = createSignal<string | null>(
-  null,
-);
-export const activeConn = () =>
-  dbConnections().find((c) => c.id === activeConnId()) ?? null;
+export const [dbConnections, setDbConnections] = createSignal<DbConnection[]>([]);
+export const [activeConnId, setActiveConnId] = createSignal<string | null>(null);
+export const activeConn = () => dbConnections().find((c) => c.id === activeConnId()) ?? null;
 
 // ---- browser state (bound to the active connection) ----------------------
 export const [dbTables, setDbTables] = createSignal<string[]>([]);
 /** Table name → column names, prefetched in the background for SQL
  *  autocomplete. Emptied on disconnect / connection switch. */
-export const [dbColumnCache, setDbColumnCache] = createSignal<
-  Record<string, string[]>
->({});
+export const [dbColumnCache, setDbColumnCache] = createSignal<Record<string, string[]>>({});
 export const [dbTableFilter, setDbTableFilter] = createSignal("");
-export const [dbSelectedTable, setDbSelectedTable] = createSignal<
-  string | null
->(null);
+export const [dbSelectedTable, setDbSelectedTable] = createSignal<string | null>(null);
 export const [dbColumns, setDbColumns] = createSignal<DbColumn[]>([]);
 export const [dbRows, setDbRows] = createSignal<DbQueryResponse | null>(null);
 export const [dbSql, setDbSql] = createSignal("");

@@ -1,5 +1,10 @@
 import { test } from "@playwright/test";
-import { ensureProject, waitForHydrated, waitForToast, waitForRecordingStart } from "./demo-helpers";
+import {
+  ensureProject,
+  waitForHydrated,
+  waitForToast,
+  waitForRecordingStart,
+} from "./demo-helpers";
 
 test("db-editor", async ({ page }) => {
   test.setTimeout(60_000);

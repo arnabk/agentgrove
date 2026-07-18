@@ -205,7 +205,8 @@ export default function GalaxyMapDialog(props: Props) {
 
     // Ring labels
     ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
-    ctx.font = '10px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.font =
+      '10px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
     ctx.textAlign = "left";
     for (const ring of rings) {
       if (ring.label) {
@@ -434,7 +435,8 @@ export default function GalaxyMapDialog(props: Props) {
                 fallback={
                   <p class="text-[11px] text-fg-subtle italic px-1">
                     No celestial visits yet. Create worktrees with branch names like{" "}
-                    <code class="font-mono">feature/&lt;star|planet|galaxy&gt;</code> to populate the map.
+                    <code class="font-mono">feature/&lt;star|planet|galaxy&gt;</code> to populate
+                    the map.
                   </p>
                 }
               >

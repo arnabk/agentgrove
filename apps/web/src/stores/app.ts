@@ -409,16 +409,16 @@ export function isSidebarOpen(): boolean {
 export function activePane(): PaneId {
   const tab = activeTab();
   if (!tab) return "chat";
-    switch (tab.kind) {
-      case "chat":
-        return "chat";
-      case "terminal":
-        return "terminal";
-      case "editor":
-        return "editor";
-      case "db":
-        return "db";
-    }
+  switch (tab.kind) {
+    case "chat":
+      return "chat";
+    case "terminal":
+      return "terminal";
+    case "editor":
+      return "editor";
+    case "db":
+      return "db";
+  }
 }
 
 /** @deprecated Use addTab + setActiveTab. */

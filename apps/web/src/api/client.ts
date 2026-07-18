@@ -642,8 +642,7 @@ export const api = {
   fsBrowse: (path: string) => req<FsBrowse>(`/api/fs/browse?path=${encodeURIComponent(path)}`),
   // Themes
   listThemes: () => req<Theme[]>("/api/themes"),
-  saveTheme: (t: Theme) =>
-    req<Theme>("/api/themes", { method: "POST", body: JSON.stringify(t) }),
+  saveTheme: (t: Theme) => req<Theme>("/api/themes", { method: "POST", body: JSON.stringify(t) }),
   deleteTheme: (id: string) =>
     req<undefined>(`/api/themes/${encodeURIComponent(id)}`, { method: "DELETE" }),
   // Backups (Settings → Backups panel). The actual restore happens

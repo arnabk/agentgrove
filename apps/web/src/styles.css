@@ -329,7 +329,9 @@ textarea::placeholder {
   background: var(--ag-accent);
   border: 2px solid var(--ag-bg-1);
   box-shadow: 0 0 0 1px var(--ag-border-strong);
-  transition: transform 80ms ease, background-color 120ms ease;
+  transition:
+    transform 80ms ease,
+    background-color 120ms ease;
 }
 .ag-slider::-webkit-slider-thumb:hover {
   background: var(--ag-accent-hover);
@@ -342,17 +344,23 @@ textarea::placeholder {
   background: var(--ag-accent);
   border: 2px solid var(--ag-bg-1);
   box-shadow: 0 0 0 1px var(--ag-border-strong);
-  transition: transform 80ms ease, background-color 120ms ease;
+  transition:
+    transform 80ms ease,
+    background-color 120ms ease;
 }
 .ag-slider::-moz-range-thumb:hover {
   background: var(--ag-accent-hover);
   transform: scale(1.08);
 }
 .ag-slider:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px var(--ag-accent-soft), 0 0 0 1px var(--ag-border-strong);
+  box-shadow:
+    0 0 0 3px var(--ag-accent-soft),
+    0 0 0 1px var(--ag-border-strong);
 }
 .ag-slider:focus-visible::-moz-range-thumb {
-  box-shadow: 0 0 0 3px var(--ag-accent-soft), 0 0 0 1px var(--ag-border-strong);
+  box-shadow:
+    0 0 0 3px var(--ag-accent-soft),
+    0 0 0 1px var(--ag-border-strong);
 }
 
 .ag-btn {

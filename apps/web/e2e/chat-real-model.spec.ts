@@ -1,10 +1,5 @@
 import { test, expect } from "@playwright/test";
-import {
-  bootstrapWithProvider,
-  getChat,
-  typeIntoComposer,
-  submitComposer,
-} from "./helpers";
+import { bootstrapWithProvider, getChat, typeIntoComposer, submitComposer } from "./helpers";
 
 const REAL_MODEL = process.env.AGENTGROVE_REAL_MODEL ?? "opencode/hy3-free";
 

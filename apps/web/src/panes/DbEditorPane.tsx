@@ -144,11 +144,7 @@ export default function DbEditorPane() {
                   {dbConnSubtitle(conn().url)}
                 </span>
                 <div class="flex-1" />
-                <button
-                  type="button"
-                  class="ag-btn ag-btn-ghost ag-btn-sm"
-                  onClick={disconnectDb}
-                >
+                <button type="button" class="ag-btn ag-btn-ghost ag-btn-sm" onClick={disconnectDb}>
                   Disconnect
                 </button>
               </div>
@@ -180,9 +176,7 @@ export default function DbEditorPane() {
                     onChange={(e) => setDbFilterCol(e.currentTarget.value)}
                   >
                     <option value="">column</option>
-                    <For each={dbColumns()}>
-                      {(c) => <option value={c.name}>{c.name}</option>}
-                    </For>
+                    <For each={dbColumns()}>{(c) => <option value={c.name}>{c.name}</option>}</For>
                   </select>
                   <select
                     class="bg-bg-2 border border-border rounded px-1 py-0.5"
@@ -229,9 +223,7 @@ export default function DbEditorPane() {
                   >
                     Prev
                   </button>
-                  <span class="text-fg-subtle text-[11px]">
-                    offset {dbOffset()}
-                  </span>
+                  <span class="text-fg-subtle text-[11px]">offset {dbOffset()}</span>
                   <button
                     type="button"
                     class="ag-btn ag-btn-ghost text-[11px]"
@@ -249,19 +241,14 @@ export default function DbEditorPane() {
                   keyed
                   fallback={
                     <div class="text-fg-subtle">
-                      Run a query or pick a table in the Database view to
-                      see results.
+                      Run a query or pick a table in the Database view to see results.
                     </div>
                   }
                 >
                   {(r) => {
                     const data = r;
                     if (typeof data.affected_rows === "number") {
-                      return (
-                        <div class="text-fg-subtle">
-                          {data.affected_rows} rows affected
-                        </div>
-                      );
+                      return <div class="text-fg-subtle">{data.affected_rows} rows affected</div>;
                     }
                     return (
                       <div class="overflow-auto border border-border rounded">
