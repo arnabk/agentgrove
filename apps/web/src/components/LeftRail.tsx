@@ -2,7 +2,6 @@ import {
   For,
   Show,
   createEffect,
-  createMemo,
   createResource,
   createSignal,
   onCleanup,
@@ -13,6 +12,7 @@ import {
   api,
   logClient,
   type Project,
+  type ProviderDescriptor,
   type TreeEntry,
   type WorktreeRemoteStatus,
 } from "../api/client";
@@ -44,7 +44,17 @@ import WorktreeHistoryDialog from "./WorktreeHistoryDialog";
 import ChatHistoryDialog from "./ChatHistoryDialog";
 import RenameWorktreeDialog from "./RenameWorktreeDialog";
 import ProjectSettingsDialog from "./ProjectSettingsDialog";
-import GalaxyLog from "./GalaxyLog";
+import DbSidebar from "./DbSidebar";
+import Logo from "./Logo";
+
+/** Which view the left rail shows: the projects tree or the Database
+ *  connection/table browser (VSCode activity-bar style). */
+type RailView = "projects" | "db";
+const VIEW_LS_KEY = "ag-left-rail-view";
+
+function loadView(): RailView {
+  return localStorage.getItem(VIEW_LS_KEY) === "db" ? "db" : "projects";
+}
 
 /** Persisted set of expanded project ids — so multiple folders can stay
  *  open in the left rail at once. */
@@ -131,13 +141,6 @@ export default function LeftRail() {
   const treeRefreshKey = (root: string) => treeRefreshKeys()[root] ?? 0;
   const refreshTree = (root: string) =>
     setTreeRefreshKeys((prev) => ({ ...prev, [root]: (prev[root] ?? 0) + 1 }));
-
-  // All worktree branches across every project, used for the global Galaxy Log.
-  const allBranches = createMemo(() =>
-    Object.values(state.worktrees)
-      .flat()
-      .map((w) => w.branch),
-  );
 
   onMount(() => {
     // Close the menu on a click that lands OUTSIDE the kebab button + its
@@ -341,6 +344,65 @@ export default function LeftRail() {
     }
   }
 
+  async function openTerminalWithCli(
+    projectId: string,
+    worktreeId: string | null,
+    label: string,
+    provider: ProviderDescriptor,
+  ) {
+    setErr(null);
+    selectWorktree(projectId, worktreeId);
+    try {
+      const t = await api.createTerminal({
+        cols: 80,
+        rows: 24,
+        project_id: projectId,
+        ...(worktreeId ? { worktree_id: worktreeId } : {}),
+      });
+      const scope = state.byScope[currentScopeKey() ?? ""];
+      const tab: TerminalTab = {
+        id: t.id,
+        cwd: t.cwd,
+        label: `${provider.label} ${(scope?.tabs.filter((t) => t.kind === "terminal").length ?? 0) + 1}`,
+      };
+      const res = addTerminalTab(tab);
+      if (!res.ok) {
+        setErr(res.reason ?? `could not open terminal in ${label}`);
+        return;
+      }
+      // Give the shell a moment to settle, then launch the CLI.
+      setTimeout(() => {
+        void api.writeTerminal(t.id, `${provider.path}\n`);
+      }, 300);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  function currentOs(): string | null {
+    const platform = typeof navigator !== "undefined" ? navigator.platform : "";
+    if (/^Mac/i.test(platform)) return "macos";
+    if (/^Win/i.test(platform)) return "windows";
+    if (/Linux/i.test(platform)) return "linux";
+    return null;
+  }
+
+  const CLI_PROVIDER_OS: Record<string, string[]> = {
+    claude: ["macos", "linux"],
+    opencode: ["macos", "linux"],
+    kimi: ["macos", "linux"],
+  };
+
+  function availableCliProviders() {
+    const os = currentOs();
+    return state.providers.filter((p) => {
+      if (!p.available || !p.path) return false;
+      if (p.supports_current_os !== undefined) return p.supports_current_os;
+      const supported = CLI_PROVIDER_OS[p.id];
+      return supported ? supported.includes(os ?? "") : false;
+    });
+  }
+
   // Resize state.
   const persisted = Number(localStorage.getItem(RAIL_LS_KEY));
   const initial =
@@ -349,6 +411,13 @@ export default function LeftRail() {
       : RAIL_DEFAULT_PX;
   const [width, setWidth] = createSignal(initial);
   const [dragging, setDragging] = createSignal(false);
+
+  // Rail view switcher (projects tree vs Database browser).
+  const [view, setViewSignal] = createSignal<RailView>(loadView());
+  function setView(v: RailView) {
+    setViewSignal(v);
+    localStorage.setItem(VIEW_LS_KEY, v);
+  }
 
   function clamp(px: number) {
     return Math.min(RAIL_MAX_PX, Math.max(RAIL_MIN_PX, Math.round(px)));
@@ -445,10 +514,32 @@ export default function LeftRail() {
       data-testid="left-rail"
     >
       <div class="px-5 h-12 flex items-center gap-2.5 border-b border-border">
-        <Logo />
+        <Logo class="w-[1.2em] h-[1.2em]" />
         <span class="text-[0.9em] font-semibold tracking-tight">AgentGrove</span>
       </div>
 
+      <div class="flex items-center gap-1 px-3 py-2 border-b border-border">
+        <button
+          type="button"
+          class="ag-btn ag-btn-ghost ag-btn-sm"
+          classList={{ "!bg-accent-soft !text-accent": view() === "projects" }}
+          onClick={() => setView("projects")}
+          data-testid="rail-view-projects"
+        >
+          Projects
+        </button>
+        <button
+          type="button"
+          class="ag-btn ag-btn-ghost ag-btn-sm"
+          classList={{ "!bg-accent-soft !text-accent": view() === "db" }}
+          onClick={() => setView("db")}
+          data-testid="rail-view-db"
+        >
+          Database
+        </button>
+      </div>
+
+      <Show when={view() === "projects"}>
       <div class="flex-1 overflow-y-auto px-3 py-4">
         <div class="flex items-center justify-between px-2 mb-2">
           <h3 class="text-[0.8em] font-semibold uppercase tracking-wider text-fg-subtle">
@@ -495,21 +586,17 @@ export default function LeftRail() {
                       class="ag-list-item group"
                       classList={{ "is-active": active() }}
                       onClick={() => {
-                        // Project row = project root scope.
                         selectWorktree(p.id, null);
-                        expand(p.id);
                       }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
                           selectWorktree(p.id, null);
-                          expand(p.id);
                         }
                       }}
                       tabIndex={0}
                       role="button"
                       aria-pressed={active()}
-                      aria-expanded={open()}
                       data-testid={`project-${p.id}`}
                       data-kind={isWorktree ? "worktree" : p.is_git ? "git" : "folder"}
                       data-has-remote={p.has_remote ? "true" : "false"}
@@ -524,6 +611,7 @@ export default function LeftRail() {
                           toggleExpanded(p.id);
                         }}
                         aria-label={open() ? "Collapse project" : "Expand project"}
+                        aria-expanded={open()}
                         title={open() ? "Collapse" : "Expand"}
                         data-testid={`toggle-project-${p.id}`}
                       >
@@ -576,7 +664,7 @@ export default function LeftRail() {
                           <Show when={openMenuFor() === p.id}>
                             <div
                               role="menu"
-                              class="absolute right-0 top-full mt-1 z-30 min-w-[180px] py-1 rounded-lg border border-border bg-bg-1 shadow-xl text-[12.5px]"
+                              class="absolute right-0 top-full mt-1 z-30 min-w-[220px] py-1 rounded-lg border border-border bg-bg-1 shadow-xl text-[12.5px] whitespace-nowrap"
                               onClick={(e) => e.stopPropagation()}
                               data-testid={`project-menu-list-${p.id}`}
                             >
@@ -605,6 +693,22 @@ export default function LeftRail() {
                               >
                                 <TerminalPlusIcon /> New terminal
                               </button>
+                              <For each={availableCliProviders()}>
+                                {(provider) => (
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                    onClick={() => {
+                                      setOpenMenuFor(null);
+                                      void openTerminalWithCli(p.id, null, p.name, provider);
+                                    }}
+                                    data-testid={`open-cli-${provider.id}-${p.id}`}
+                                  >
+                                    <BotIcon /> Open {provider.label} terminal
+                                  </button>
+                                )}
+                              </For>
 
                               {/* ── Git ── */}
                               <Show when={p.is_git}>
@@ -744,19 +848,16 @@ export default function LeftRail() {
                             }}
                             onClick={() => {
                               selectWorktree(p.id, w.id);
-                              expand(w.id);
                             }}
                             onKeyDown={(e) => {
                               if (e.key === "Enter" || e.key === " ") {
                                 e.preventDefault();
                                 selectWorktree(p.id, w.id);
-                                expand(w.id);
                               }
                             }}
                             tabIndex={0}
                             role="button"
                             aria-pressed={wtActive()}
-                            aria-expanded={wtOpen()}
                             data-testid={`worktree-${w.id}`}
                             data-expanded={wtOpen() ? "true" : "false"}
                             title={w.path}
@@ -769,6 +870,7 @@ export default function LeftRail() {
                                 toggleExpanded(w.id);
                               }}
                               aria-label={wtOpen() ? "Collapse worktree" : "Expand worktree"}
+                              aria-expanded={wtOpen()}
                               title={wtOpen() ? "Collapse" : "Expand"}
                               data-testid={`toggle-worktree-${w.id}`}
                             >
@@ -990,7 +1092,7 @@ export default function LeftRail() {
                               <Show when={openMenuFor() === `wt:${w.id}`}>
                                 <div
                                   role="menu"
-                                  class="absolute right-0 top-full mt-1 z-30 min-w-[180px] py-1 rounded-lg border border-border bg-bg-1 shadow-xl text-[12.5px]"
+                                  class="absolute right-0 top-full mt-1 z-30 min-w-[220px] py-1 rounded-lg border border-border bg-bg-1 shadow-xl text-[12.5px] whitespace-nowrap"
                                   onClick={(e) => e.stopPropagation()}
                                   data-testid={`project-menu-list-wt-${w.id}`}
                                 >
@@ -1019,6 +1121,22 @@ export default function LeftRail() {
                                   >
                                     <TerminalPlusIcon /> New terminal
                                   </button>
+                                  <For each={availableCliProviders()}>
+                                    {(provider) => (
+                                      <button
+                                        type="button"
+                                        role="menuitem"
+                                        class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                        onClick={() => {
+                                          setOpenMenuFor(null);
+                                          void openTerminalWithCli(p.id, w.id, w.branch, provider);
+                                        }}
+                                        data-testid={`open-cli-${provider.id}-wt-${w.id}`}
+                                      >
+                                        <BotIcon /> Open {provider.label} terminal
+                                      </button>
+                                    )}
+                                  </For>
 
                                   {/* ── Git ── */}
                                   <div class="my-1 border-t border-border" />
@@ -1117,12 +1235,12 @@ export default function LeftRail() {
             }}
           </For>
         </ul>
-
-        {/* Global Galaxy Log: visited celestial bodies across every project's worktrees. */}
-        <div class="mt-4 px-2">
-          <GalaxyLog branches={allBranches()} />
-        </div>
       </div>
+      </Show>
+
+      <Show when={view() === "db"}>
+        <DbSidebar />
+      </Show>
 
       {/* Resize handle: thin vertical strip on the right edge. Pointer
           events drive width(); ←/→ + Home/End nudge it from the keyboard. */}
@@ -1249,25 +1367,6 @@ function WorkingDot(props: { title: string }) {
       data-testid="rail-working-dot"
       aria-label="Working"
     />
-  );
-}
-
-function Logo() {
-  return (
-    <svg width="1.2em" height="1.2em" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M12 2 4 7v10l8 5 8-5V7l-8-5Z"
-        stroke="var(--ag-accent)"
-        stroke-width="1.6"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M12 12 4 7m8 5 8-5m-8 5v10"
-        stroke="var(--ag-accent)"
-        stroke-width="1.6"
-        stroke-linejoin="round"
-      />
-    </svg>
   );
 }
 
@@ -1556,6 +1655,25 @@ function TerminalPlusIcon() {
       <path d="M10.5 14h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
       {/* `+` glyph in the corner */}
       <path d="M19 13v6M16 16h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+    </svg>
+  );
+}
+
+function BotIcon() {
+  return (
+    <svg
+      width="1em"
+      height="1em"
+      viewBox="0 0 24 24"
+      fill="none"
+      class="shrink-0"
+      aria-hidden="true"
+    >
+      <rect x="4" y="6" width="16" height="13" rx="3" stroke="currentColor" stroke-width="1.6" />
+      <circle cx="9" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="15" cy="12" r="1.5" fill="currentColor" />
+      <path d="M8 16h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+      <path d="M12 6V4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
     </svg>
   );
 }

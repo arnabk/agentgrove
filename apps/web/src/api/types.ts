@@ -127,6 +127,7 @@ export interface ProviderDescriptor {
    *  can still type a free-form id in per-chat settings. */
   models: string[];
   supports_resume: boolean;
+  supports_current_os: boolean;
   install_hint: string;
 }
 
@@ -184,6 +185,7 @@ export interface Theme {
   id: string;
   name: string;
   kind: "light" | "dark";
+  custom?: boolean;
   colors: { bg: string; fg: string; muted: string; accent: string };
 }
 
@@ -219,6 +221,8 @@ export interface PromptTemplate {
 /** User preferences persisted at `<state_dir>/settings.json` on the BE. */
 export interface UserSettings {
   theme?: string;
+  /** User-defined custom color themes persisted on the BE. */
+  custom_themes?: Theme[];
   ui_font?: string;
   mono_font?: string;
   font_size?: number;

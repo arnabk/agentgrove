@@ -42,6 +42,8 @@ pub struct ProviderDto {
     pub models: Vec<String>,
     /// Whether the provider can resume a previous session.
     pub supports_resume: bool,
+    /// Whether the provider's CLI can run on the current operating system.
+    pub supports_current_os: bool,
     /// URL or text the FE can show next to "not installed".
     pub install_hint: &'static str,
 }
@@ -56,6 +58,7 @@ impl ProviderDto {
             agentgrove_agents::ProviderId::Opencode => {
                 "https://github.com/opencode-ai/opencode#install"
             }
+            agentgrove_agents::ProviderId::Kimi => "https://moonshotai.github.io/kimi-cli/",
         };
         Self {
             id: d.id.as_str().to_string(),
@@ -66,6 +69,7 @@ impl ProviderDto {
             default_model: d.default_model,
             models: d.models,
             supports_resume: d.supports_resume,
+            supports_current_os: d.supports_current_os,
             install_hint,
         }
     }
@@ -89,6 +93,7 @@ impl Default for ProviderRegistry {
         let providers: Vec<Arc<dyn AgentProvider>> = vec![
             Arc::new(agentgrove_agents::claude::ClaudeProvider::new()),
             Arc::new(agentgrove_agents::opencode::OpencodeProvider::new()),
+            Arc::new(agentgrove_agents::kimi::KimiProvider::new()),
             // FakeProvider stays in the registry so the BE L4 e2e
             // suite can pin `provider="fake"` for deterministic
             // dispatch. The FE's new-chat dropdown filters Fake

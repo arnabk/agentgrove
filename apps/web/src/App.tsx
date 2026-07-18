@@ -13,6 +13,7 @@ import CommandPalette from "./components/CommandPalette";
 import { DialogHost } from "./components/dialog";
 import GalaxyMapDialog from "./components/GalaxyMapDialog";
 import LeftRail from "./components/LeftRail";
+import Logo from "./components/Logo";
 import MemoryIndicator from "./components/MemoryIndicator";
 import RightSidebar from "./components/RightSidebar";
 import SettingsModal from "./components/SettingsModal";
@@ -21,6 +22,7 @@ import Welcome from "./components/Welcome";
 import { installRouteSync } from "./lib/routeSync";
 import { installCrossInstanceSync } from "./lib/crossInstanceSync";
 import { declareMemorySource, estimateJsonBytes, recordMemoryUsage } from "./lib/memory";
+import { extractVisits } from "./lib/celestial";
 
 declareMemorySource("rail.projects", "Project + worktree state");
 import ChatPane from "./panes/ChatPane";
@@ -29,6 +31,7 @@ import ChatPane from "./panes/ChatPane";
 // when the user actually opens a terminal, editor, or changes view.
 const EditorPane = lazy(() => import("./panes/EditorPane"));
 const TerminalPane = lazy(() => import("./panes/TerminalPane"));
+const DbEditorPane = lazy(() => import("./panes/DbEditorPane"));
 const ChangesPanel = lazy(() => import("./components/ChangesPanel"));
 import {
   activeTab,
@@ -37,18 +40,21 @@ import {
   currentScope,
   currentWorktreeId,
   findChatTab,
+  galaxyHistory,
   galaxyMapOpen,
   isSidebarOpen,
   latestVersion,
   routeError,
+  scheduleGlobalLayoutWrite,
   selectedChatId,
   setActiveChat,
   setActiveWork,
+  setGalaxyHistory,
+  setGalaxyMapOpen,
   setLatestVersion,
   setRouteError,
   setScopeChats,
   setSettingsOpen,
-  setGalaxyMapOpen,
   setTheme,
   state,
   toggleSidebar,
@@ -75,6 +81,27 @@ export default function App() {
       .flat()
       .map((w) => w.branch),
   );
+
+  // Persisted galaxy history + current branches = cumulative visited set.
+  // Worktree removal won't erase bodies we've already reached.
+  const galaxyVisited = createMemo(() => {
+    const visited = new Set(galaxyHistory());
+    for (const body of extractVisits(allBranches())) {
+      visited.add(body.display);
+    }
+    return visited;
+  });
+
+  createEffect(() => {
+    if (!state.ready) return;
+    const currentVisits = extractVisits(allBranches()).map((b) => b.display);
+    const next = new Set(galaxyHistory());
+    for (const v of currentVisits) next.add(v);
+    if (next.size > galaxyHistory().size) {
+      setGalaxyHistory(next);
+      scheduleGlobalLayoutWrite();
+    }
+  });
 
   // sidebarOpen unused var removed
 
@@ -354,43 +381,12 @@ export default function App() {
                 }
               >
                 {/* Top bar: unified tab strip + settings + indicators */}
-                <div class="flex items-center border-b border-border bg-bg-1 shrink-0">
+                <div class="flex items-center h-12 border-b border-border bg-bg-1 shrink-0">
                   {/* App icon + left rail toggle */}
                   <div class="flex items-center shrink-0 ml-1 gap-0.5">
                     <Show when={!leftRailOpen()}>
                       <span class="flex items-center justify-center w-7 h-7" title="AgentGrove">
-                        <svg
-                          width="20"
-                          height="20"
-                          viewBox="0 0 32 32"
-                          fill="none"
-                          aria-hidden="true"
-                        >
-                          <rect
-                            x="2"
-                            y="2"
-                            width="28"
-                            height="28"
-                            rx="6"
-                            fill="var(--ag-accent, #7c5cff)"
-                            opacity="0.15"
-                          />
-                          <path
-                            d="M10 22V12l6-4 6 4v10"
-                            stroke="var(--ag-accent, #7c5cff)"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                          />
-                          <path
-                            d="M14 22v-5h4v5"
-                            stroke="var(--ag-accent, #7c5cff)"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                          />
-                          <circle cx="16" cy="13" r="1.5" fill="var(--ag-accent, #7c5cff)" />
-                        </svg>
+                        <Logo class="w-5 h-5" />
                       </span>
                     </Show>
                     <button
@@ -479,16 +475,23 @@ export default function App() {
                           data-testid={`tab-host-${tab.id}`}
                         >
                           <Show when={tab.kind === "chat"}>
-                            <ChatPane />
+                            <Show when={tab.id === (activeTab()?.id ?? null)}>
+                              <ChatPane />
+                            </Show>
                           </Show>
                           <Show when={tab.kind === "terminal"}>
                             <Suspense>
-                              <TerminalPane />
+                              <TerminalPane terminalId={tab.id} />
                             </Suspense>
                           </Show>
                           <Show when={tab.kind === "editor"}>
                             <Suspense>
                               <EditorPane />
+                            </Suspense>
+                          </Show>
+                          <Show when={tab.kind === "db"}>
+                            <Suspense>
+                              <DbEditorPane />
                             </Suspense>
                           </Show>
                         </div>
@@ -509,7 +512,7 @@ export default function App() {
       </Show>
       <SettingsModal />
       <Show when={galaxyMapOpen()}>
-        <GalaxyMapDialog branches={allBranches()} onClose={() => setGalaxyMapOpen(false)} />
+        <GalaxyMapDialog visited={galaxyVisited} onClose={() => setGalaxyMapOpen(false)} />
       </Show>
       <Show when={changesScope()}>
         <Suspense>

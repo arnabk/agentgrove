@@ -30,6 +30,7 @@ Click any thumbnail to watch the screen recording. All videos are real captures 
 | **Revert with AI** — ask the agent to undo the last commit | [![Revert demo](./docs/demos/revert-thumb.jpg)](./docs/demos/revert.mp4) |
 | **Queue Thoughts** — queue multiple prompts and wait for each to finish | [![Queue thoughts demo](./docs/demos/queue-thoughts-thumb.jpg)](./docs/demos/queue-thoughts.mp4) |
 | **Git Diff View** — inspect staged and unstaged changes | [![Git diff demo](./docs/demos/git-diff-thumb.jpg)](./docs/demos/git-diff.mp4) |
+| **DB Editor** — saved connections, table browser, SQL editor with autocomplete | [![DB editor demo](./docs/demos/db-editor-thumb.jpg)](./docs/demos/db-editor.mp4) |
 
 ## Quick Start
 

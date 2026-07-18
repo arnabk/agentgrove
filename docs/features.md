@@ -41,7 +41,7 @@ AgentGrove is a high-performance, low-footprint local developer workspace. Here 
 
 ## AI Chat
 
-- **Multi-provider** — Claude and opencode supported via CLI subprocess passthrough (legal, user-authenticated)
+- **Multi-provider** — Claude, opencode, and Kimi supported via CLI subprocess passthrough (legal, user-authenticated)
 - **Live model discovery** — models fetched live from providers with cache + manual refresh
 - **Per-chat settings** — model, effort (thinking level), slash commands configurable per chat
 - **Streaming responses** — real-time token streaming via WebSocket with coalescing (64B/50ms)
@@ -57,7 +57,7 @@ AgentGrove is a high-performance, low-footprint local developer workspace. Here 
 - **Smart input** — Tiptap rich-text composer with bullet/number/blockquote/code-fence autoformat
 - **Slash commands** — `/` menu with provider commands + user-defined prompt templates
 - **PR detection** — auto-detects GitHub PR URLs in agent output; shows PR badge in chat header
-- **Session resume** — Claude uses `--resume`, opencode uses `--session` + `--dir` for continuity
+- **Session resume** — Claude uses `--resume`, opencode uses `--session` + `--dir`, Kimi uses `--session` (id captured from the CLI's resume hint) for continuity
 - **Auto-approve tools** — `--dangerously-skip-permissions` flag with per-chat override
 - **Stop button** — cancel in-flight agent turns; kills the CLI subprocess cleanly
 
@@ -76,8 +76,18 @@ AgentGrove is a high-performance, low-footprint local developer workspace. Here 
 - **Reorder** — drag queue items up/down to change execution order
 - **Right-side dock** — always-visible queue panel inside the chat pane, resizable
 
-## Notes / Scratchpad
+## Database
 
+![DB editor](./assets/db-editor-demo.png)
+
+- **Left-rail Database view** — connections + tables tree next to the Projects view (VSCode activity-bar style); the editor tab is the work surface
+- **Connection manager** — saved Postgres connections (name + URL) persisted in settings; add/edit/delete with confirm, inline **Test** button shows server version or the connection error before saving
+- **First-run seed** — a "Local Postgres" connection is created from the server default (`AG_DATABASE_URL` or the compiled-in dev default) and auto-connected
+- **Tables browser** — filterable table list; clicking a table opens a paginated data grid (50 rows/page) with column filters (`=`, `!=`, `<`, `>`, `<=`, `>=`, `LIKE`, `ILIKE`, NULL-safe)
+- **SQL editor** — CodeMirror 6 with SQL syntax highlighting and schema autocomplete (tables + columns prefetched in the background); Ctrl/Cmd+Enter runs the query
+- **Safe dynamic results** — SELECTs are wrapped server-side with `to_jsonb(...)` so any row shape renders as JSON; DML reports affected-row counts
+
+## Notes / Scratchpad
 - **Per-project rich-text scratchpad** — Tiptap editor with headings, bullets, numbers, checkboxes, code, quotes, links
 - **Drag-to-reorder** — grab handle in left gutter to move blocks up/down
 - **Rounded checkboxes** — transparent-bg custom checkbox styling
@@ -100,6 +110,7 @@ AgentGrove is a high-performance, low-footprint local developer workspace. Here 
 
 - **Tabbed modal** — Appearance, Prompts, Providers, Agents, Backups
 - **Themes** — 4 built-in themes (Dark, Light, Solarized, Tokyo Night) with CSS variable system
+- **Custom themes** — create and persist personal color themes (name, kind, background, foreground, muted, accent); themes are saved to settings and applied live across the app
 - **Fonts** — 10+ Google Fonts presets for UI and mono; live-loaded on selection
 - **Font size** — global size control (12–28px) via CSS zoom scaling
 - **Provider management** — CLI providers show detection status; HTTP providers have config forms

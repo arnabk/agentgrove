@@ -1,7 +1,7 @@
 //! Axum router.
 
 use crate::{
-    backups, branches, chats, diag, editor, files, fs as fsapi, git as gitapi,
+    backups, branches, chats, db, diag, editor, files, fs as fsapi, git as gitapi,
     health::{health, version},
     layout, notes, projects, providers, queue, scratchpad, settings,
     state::AppState,
@@ -19,6 +19,12 @@ pub fn build_router(state: AppState) -> Router {
     let api = Router::new()
         .route("/health", get(health))
         .route("/api/version", get(version))
+        .route("/api/db/info", get(db::info))
+        .route("/api/db/test", post(db::test))
+        .route("/api/db/tables", get(db::tables))
+        .route("/api/db/tables/:table/columns", get(db::columns))
+        .route("/api/db/tables/:table/rows", get(db::rows))
+        .route("/api/db/query", post(db::query))
         .route("/ws", get(ws::handler))
         // Team chat
         .route("/api/team-chat/whoami", get(team_chat::whoami))
@@ -92,6 +98,7 @@ pub fn build_router(state: AppState) -> Router {
         // subprocess, appends a synthetic `cancelled by user`
         // error event, frees the chat for the next message).
         .route("/api/chats/:id/stop", post(chats::stop_turn))
+        .route("/api/chats/:id/retry", post(chats::retry_chat))
         .route("/api/chats/:id/fork", post(chats::fork_chat))
         .route("/api/chats/:id/truncate", post(chats::truncate_chat))
         .route(
@@ -176,6 +183,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/editor/tree", get(editor::tree))
         // Themes
         .route("/api/themes", get(themes::list).post(themes::import_theme))
+        .route("/api/themes/:id", delete(themes::delete_theme))
         // Agent providers (Claude / future Codex / OpenCode / ...).
         // GET returns the detection status of every provider this
         // build knows about (installed? path? version?).

@@ -1,10 +1,25 @@
 //! User settings persisted as a single JSON file under the state dir.
 
 use crate::state::AppState;
+use crate::themes::Theme;
 use axum::{extract::State, http::StatusCode, Json};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tokio::fs;
+
+/// A saved database connection for the DB editor pane. Stored in
+/// settings.json alongside other user preferences; the pane's
+/// connection manager CRUDs these via GET/PUT /api/settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbConnection {
+    /// Stable id (uuid). Kept on update so the FE's "active
+    /// connection" pointer survives renames / url edits.
+    pub id: String,
+    /// Short human label shown in the connection list.
+    pub name: String,
+    /// Postgres connection string (postgres://user:pass@host:port/db).
+    pub url: String,
+}
 
 /// A reusable prompt template. Users define these once and pick from
 /// them in the chat input. Bodies can contain any text; the FE simply
@@ -27,6 +42,10 @@ pub struct Settings {
     /// Theme id (matches `Theme.id` from `/api/themes`).
     #[serde(default)]
     pub theme: Option<String>,
+    /// User-defined custom color themes. Merged with built-ins by
+    /// `GET /api/themes` and applied on the FE.
+    #[serde(default)]
+    pub custom_themes: Vec<Theme>,
     /// CSS font-family stack used for UI text.
     #[serde(default)]
     pub ui_font: Option<String>,
@@ -46,6 +65,9 @@ pub struct Settings {
     /// the FE picker shows them as the user arranged them.
     #[serde(default)]
     pub prompts: Vec<PromptTemplate>,
+    /// Saved database connections for the DB editor pane.
+    #[serde(default)]
+    pub db_connections: Vec<DbConnection>,
     /// Legacy sticky flag: was set the very first time we seeded any
     /// default prompts. Kept on the struct so older files still
     /// deserialise; superseded by `applied_prompt_seeds` (below)
@@ -319,7 +341,7 @@ async fn read_settings(state_dir: &std::path::Path) -> Settings {
     s
 }
 
-async fn write_settings(state_dir: &std::path::Path, s: &Settings) -> std::io::Result<()> {
+pub async fn write_settings(state_dir: &std::path::Path, s: &Settings) -> std::io::Result<()> {
     let p = settings_path(state_dir);
     if let Some(parent) = p.parent() {
         fs::create_dir_all(parent).await?;

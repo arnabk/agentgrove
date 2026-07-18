@@ -26,6 +26,7 @@ use tokio::sync::mpsc;
 
 pub mod claude;
 pub mod fake;
+pub mod kimi;
 pub mod models_cache;
 pub mod opencode;
 pub mod slash_files;
@@ -110,6 +111,8 @@ pub enum ProviderId {
     Fake,
     /// opencode CLI subprocess (paired with its own auth chain).
     Opencode,
+    /// Moonshot AI Kimi via the `kimi` CLI.
+    Kimi,
 }
 
 impl ProviderId {
@@ -119,8 +122,31 @@ impl ProviderId {
             ProviderId::Claude => "claude",
             ProviderId::Fake => "fake",
             ProviderId::Opencode => "opencode",
+            ProviderId::Kimi => "kimi",
         }
     }
+}
+
+/// Returns true when `std::env::consts::OS` is in `supported`.
+pub fn supports_current_os(supported: &[&str]) -> bool {
+    supported.contains(&std::env::consts::OS)
+}
+
+/// Per-provider list of supported operating systems. Values are
+/// `std::env::consts::OS` strings.
+pub const PROVIDER_OS_SUPPORT: &[(&str, &[&str])] = &[
+    ("claude", &["macos", "linux"]),
+    ("opencode", &["macos", "linux"]),
+    ("kimi", &["macos", "linux"]),
+    ("fake", &["macos", "linux", "windows"]),
+];
+
+fn provider_os_support(id: &str) -> &'static [&'static str] {
+    PROVIDER_OS_SUPPORT
+        .iter()
+        .find(|(pid, _)| *pid == id)
+        .map(|(_, os)| *os)
+        .unwrap_or(&[])
 }
 
 /// What the BE returns for each provider on `GET /api/providers`. The
@@ -155,6 +181,9 @@ pub struct ProviderDescriptor {
     /// Whether the provider supports session resume across turns
     /// (Claude: yes via `--resume`; FakeProvider: no).
     pub supports_resume: bool,
+    /// Whether the provider's CLI can run on the current operating
+    /// system (e.g. Claude Code and opencode are macOS/Linux only).
+    pub supports_current_os: bool,
 }
 
 /// A slash-command surfaced by a provider's CLI. The FE renders these
@@ -231,8 +260,8 @@ pub trait AgentProvider: Send + Sync {
     fn id(&self) -> ProviderId;
 
     /// Locate the CLI on the host system and return its descriptor.
-    /// Always returns a descriptor (with `available=false` if the CLI
-    /// is missing) so the FE can render the picker uniformly.
+    /// Always returns a descriptor (with `available=false` if the CLI is
+    /// missing) so the FE can render the picker uniformly.
     async fn detect(&self) -> ProviderDescriptor;
 
     /// Spawn a single turn. `prompt` is the user message, `opts` carries

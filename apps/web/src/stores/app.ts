@@ -30,7 +30,7 @@ export const MAX_PER_PROJECT = 5;
 /** Cap for the global terminal pool (5 terminals app-wide). */
 export const MAX_GLOBAL_TERMINALS = 5;
 
-export type PaneId = "chat" | "editor" | "terminal" | "notes";
+export type PaneId = "chat" | "editor" | "terminal" | "notes" | "db";
 
 /** Terminal tab — references an active PTY on the BE. */
 export interface TerminalTab {
@@ -56,7 +56,8 @@ export interface TerminalTab {
 export type UnifiedTab =
   | { kind: "chat"; id: string; title: string; draft?: string }
   | { kind: "terminal"; id: string; cwd: string; label: string }
-  | { kind: "editor"; id: string; path: string; label: string };
+  | { kind: "editor"; id: string; path: string; label: string }
+  | { kind: "db"; id: string; label: string };
 
 /** Legacy chat tab — kept for migration from the old layout blobs.
  *  New code should use `UnifiedTab` exclusively. */
@@ -148,6 +149,9 @@ export const [state, setState] = createStore<AppState>({
 export const [settingsOpen, setSettingsOpen] = createSignal(false);
 /** Visibility of the Galaxy Map dialog. */
 export const [galaxyMapOpen, setGalaxyMapOpen] = createSignal(false);
+/** Celestial bodies ever visited across all branches, persisted to the
+ *  global layout so worktree removal doesn't erase galaxy history. */
+export const [galaxyHistory, setGalaxyHistory] = createSignal<Set<string>>(new Set());
 export const [teamChatOpen, setTeamChatOpen] = createSignal(false);
 export const [unreadTeamChat, setUnreadTeamChat] = createSignal(false);
 
@@ -405,14 +409,16 @@ export function isSidebarOpen(): boolean {
 export function activePane(): PaneId {
   const tab = activeTab();
   if (!tab) return "chat";
-  switch (tab.kind) {
-    case "chat":
-      return "chat";
-    case "terminal":
-      return "terminal";
-    case "editor":
-      return "editor";
-  }
+    switch (tab.kind) {
+      case "chat":
+        return "chat";
+      case "terminal":
+        return "terminal";
+      case "editor":
+        return "editor";
+      case "db":
+        return "db";
+    }
 }
 
 /** @deprecated Use addTab + setActiveTab. */
@@ -427,6 +433,13 @@ export function setActivePane(pane: PaneId) {
 export function selectFile(path: string) {
   const label = path.split("/").pop() ?? path;
   addTab({ kind: "editor", id: `file:${path}`, path, label });
+}
+
+/** Open the (singleton) Database tab. Repeated calls just re-focus the
+ *  existing tab — connection management lives inside the pane, so one
+ *  editor instance is enough (DBeaver/VSCode-SQLTools style). */
+export function openDbEditor() {
+  addTab({ kind: "db", id: "db", label: "Database" });
 }
 
 export function selectedFilePath(): string | null {
@@ -644,19 +657,21 @@ export async function bootstrap() {
   } catch {
     // providers optional at bootstrap
   }
+  let initialSettings: UserSettings = {};
+  try {
+    const s = await api.getSettings();
+    initialSettings = s;
+    setState("settings", s);
+  } catch {
+    // settings optional
+  }
   try {
     const themes = await api.listThemes();
     setState("themes", themes);
   } catch {
     // themes optional
   }
-  try {
-    const s = await api.getSettings();
-    setState("settings", s);
-    applySettings(s);
-  } catch {
-    applySettings({});
-  }
+  applySettings(initialSettings);
   await refreshProjects();
   // Layout hydration runs AFTER projects load so we can map the
   // BE's per-scope blobs into our `byScope` cache without
@@ -745,7 +760,25 @@ async function hydrateLayoutFromBackend() {
           base.activeTab = migrated[0]?.id ?? null;
         }
       }
+      // ---- Migration: pre-singleton DB-editor tabs ----
+      // Old blobs may hold per-click db tabs (`db:<uuid>`) with a
+      // `connection` field. Drop them — the pane is a singleton now
+      // and owns connection state internally.
+      if (base.tabs?.some((t) => t.kind === "db" && t.id !== "db")) {
+        base.tabs = base.tabs.filter((t) => t.kind !== "db" || t.id === "db");
+        if (base.activeTab && !base.tabs.find((t) => t.id === base.activeTab)) {
+          base.activeTab = base.tabs[0]?.id ?? null;
+        }
+      }
       setState("byScope", key, base);
+    }
+    try {
+      const globalBlob = snap.global as { celestialHistory?: string[] };
+      if (Array.isArray(globalBlob.celestialHistory)) {
+        setGalaxyHistory(new Set(globalBlob.celestialHistory));
+      }
+    } catch {
+      // Global layout optional
     }
   } catch {
     // Layout is best-effort — running without it just means a
@@ -784,6 +817,24 @@ export function scheduleScopeLayoutWrite(key: string) {
   }, 400);
 }
 
+/** Persist the singleton global layout blob (galaxy history, etc.). */
+async function writeGlobalLayout() {
+  try {
+    await api.putGlobalLayout({ celestialHistory: Array.from(galaxyHistory()) });
+  } catch {
+    // Best-effort — a transient BE error doesn't break the UI.
+  }
+}
+
+let globalLayoutWriteTimer: ReturnType<typeof setTimeout> | undefined;
+export function scheduleGlobalLayoutWrite() {
+  if (globalLayoutWriteTimer) clearTimeout(globalLayoutWriteTimer);
+  globalLayoutWriteTimer = setTimeout(() => {
+    globalLayoutWriteTimer = undefined;
+    void writeGlobalLayout();
+  }, 400);
+}
+
 export function setTheme(themeId: string) {
   setState("themeId", themeId);
   const t = state.themes.find((x) => x.id === themeId);
@@ -796,6 +847,66 @@ export function setTheme(themeId: string) {
   root.style.setProperty("--ag-fg-muted", t.colors.muted);
   root.style.setProperty("--ag-accent", t.colors.accent);
   localStorage.setItem("ag-theme", themeId);
+  if (t.custom) {
+    applyCustomThemeDerivation();
+  } else {
+    clearCustomThemeDerivation();
+  }
+}
+
+const CUSTOM_DERIVED_VARS = [
+  "--ag-bg-1",
+  "--ag-bg-2",
+  "--ag-bg-3",
+  "--ag-bg-4",
+  "--ag-border",
+  "--ag-border-strong",
+  "--ag-fg-subtle",
+  "--ag-accent-hover",
+  "--ag-accent-fg",
+  "--ag-accent-soft",
+  "--ag-success",
+  "--ag-warning",
+  "--ag-danger",
+  "--ag-shadow-1",
+  "--ag-shadow-2",
+  "--ag-radius",
+  "--ag-radius-sm",
+];
+
+function mix(a: string, b: string, pct: number) {
+  return `color-mix(in srgb, ${a} ${100 - pct}%, ${b} ${pct}%)`;
+}
+
+function applyCustomThemeDerivation() {
+  const root = document.documentElement;
+  root.style.setProperty("--ag-bg-1", mix("var(--ag-bg)", "var(--ag-fg)", 10));
+  root.style.setProperty("--ag-bg-2", mix("var(--ag-bg)", "var(--ag-fg)", 20));
+  root.style.setProperty("--ag-bg-3", mix("var(--ag-bg)", "var(--ag-fg)", 30));
+  root.style.setProperty("--ag-bg-4", mix("var(--ag-bg)", "var(--ag-fg)", 40));
+  root.style.setProperty("--ag-border", mix("var(--ag-bg)", "var(--ag-fg)", 25));
+  root.style.setProperty("--ag-border-strong", mix("var(--ag-bg)", "var(--ag-fg)", 40));
+  root.style.setProperty("--ag-fg-subtle", mix("var(--ag-fg)", "var(--ag-bg)", 50));
+  root.style.setProperty("--ag-accent-hover", mix("var(--ag-accent)", "var(--ag-fg)", 20));
+  root.style.setProperty("--ag-accent-fg", "var(--ag-fg)");
+  root.style.setProperty(
+    "--ag-accent-soft",
+    "color-mix(in srgb, var(--ag-accent) 14%, transparent)",
+  );
+  root.style.setProperty("--ag-success", "#34d399");
+  root.style.setProperty("--ag-warning", "#fbbf24");
+  root.style.setProperty("--ag-danger", "#f87171");
+  root.style.setProperty("--ag-shadow-1", "0 1px 2px rgba(0, 0, 0, 0.45)");
+  root.style.setProperty("--ag-shadow-2", "0 8px 24px rgba(0, 0, 0, 0.45)");
+  root.style.setProperty("--ag-radius", "8px");
+  root.style.setProperty("--ag-radius-sm", "6px");
+}
+
+function clearCustomThemeDerivation() {
+  const root = document.documentElement;
+  for (const v of CUSTOM_DERIVED_VARS) {
+    root.style.removeProperty(v);
+  }
 }
 
 /** Dynamically inject a Google Fonts stylesheet so the user's

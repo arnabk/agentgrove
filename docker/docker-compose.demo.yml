@@ -6,6 +6,21 @@
 #   docker compose -f docker/docker-compose.demo.yml down -v
 
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=demo
+    volumes:
+      - ./demo-seed.sql:/docker-entrypoint-initdb.d/demo-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d demo"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: "no"
+
   agentgrove-demo:
     build:
       context: ..
@@ -15,12 +30,17 @@ services:
       - AGENTGROVE_BIND=0.0.0.0
       - AGENTGROVE_PORT=4317
       - AGENTGROVE_STATIC_DIR=/home/agentgrove/web-dist
+      # The DB editor's first-run seeded connection points here.
+      - AG_DATABASE_URL=postgres://postgres:postgres@postgres:5432/demo
     ports:
       - "4320:4317"
     volumes:
       - ag-demo-data:/home/agentgrove/.data
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: "no"
 
 volumes:

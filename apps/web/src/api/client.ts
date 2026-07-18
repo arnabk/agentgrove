@@ -154,6 +154,7 @@ export interface ProviderDescriptor {
    *  can still type a free-form id in per-chat settings. */
   models: string[];
   supports_resume: boolean;
+  supports_current_os: boolean;
   install_hint: string;
 }
 
@@ -219,6 +220,7 @@ export interface Theme {
   id: string;
   name: string;
   kind: "light" | "dark";
+  custom?: boolean;
   colors: { bg: string; fg: string; muted: string; accent: string };
 }
 
@@ -429,6 +431,12 @@ export const api = {
     req<void>(`/api/chats/${encodeURIComponent(chatId)}/stop`, {
       method: "POST",
     }),
+  /** Retry the last prompt of a chat. Clears the last response's events
+   *  and re-dispatches the same user message. */
+  retryChat: (chatId: string) =>
+    req<Prompt>(`/api/chats/${encodeURIComponent(chatId)}/retry`, {
+      method: "POST",
+    }),
   truncateChat: (chatId: string, fromSeq: number) =>
     req<{ deleted_count: number; deleted_prompt_ids: string[] }>(
       `/api/chats/${encodeURIComponent(chatId)}/truncate`,
@@ -634,6 +642,10 @@ export const api = {
   fsBrowse: (path: string) => req<FsBrowse>(`/api/fs/browse?path=${encodeURIComponent(path)}`),
   // Themes
   listThemes: () => req<Theme[]>("/api/themes"),
+  saveTheme: (t: Theme) =>
+    req<Theme>("/api/themes", { method: "POST", body: JSON.stringify(t) }),
+  deleteTheme: (id: string) =>
+    req<undefined>(`/api/themes/${encodeURIComponent(id)}`, { method: "DELETE" }),
   // Backups (Settings → Backups panel). The actual restore happens
   // via the `just restore-db <name>` shell command — we DON'T
   // overwrite live DB files from a running server because SQLite
@@ -681,6 +693,52 @@ export const api = {
     req<Scratchpad>("/api/notes", {
       method: "PUT",
       body: JSON.stringify({ body }),
+    }),
+  // DB editor / SQL browser
+  getDbInfo: () => req<{ default_connection: string }>("/api/db/info"),
+  testDbConnection: (connection: string) =>
+    req<{ ok: boolean; server_version?: string; error?: string }>("/api/db/test", {
+      method: "POST",
+      body: JSON.stringify({ connection }),
+    }),
+  listDbTables: (connection?: string) => {
+    const qs = new URLSearchParams();
+    if (connection) qs.set("connection", connection);
+    return req<{ tables: string[] }>(`/api/db/tables?${qs.toString()}`).then((r) => r.tables);
+  },
+  listDbColumns: (table: string, connection?: string) => {
+    const qs = new URLSearchParams();
+    if (connection) qs.set("connection", connection);
+    return req<{ columns: DbColumn[] }>(
+      `/api/db/tables/${encodeURIComponent(table)}/columns?${qs.toString()}`,
+    );
+  },
+  listDbRows: (
+    table: string,
+    params?: {
+      connection?: string | undefined;
+      limit?: number;
+      offset?: number;
+      filter_col?: string;
+      filter_op?: string;
+      filter_val?: string;
+    },
+  ) => {
+    const qs = new URLSearchParams();
+    if (params?.connection) qs.set("connection", params.connection);
+    if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+    if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+    if (params?.filter_col) qs.set("filter_col", params.filter_col);
+    if (params?.filter_op) qs.set("filter_op", params.filter_op);
+    if (params?.filter_val !== undefined) qs.set("filter_val", params.filter_val);
+    return req<DbQueryResponse>(
+      `/api/db/tables/${encodeURIComponent(table)}/rows?${qs.toString()}`,
+    );
+  },
+  runDbQuery: (sql: string, connection?: string) =>
+    req<DbQueryResponse>("/api/db/query", {
+      method: "POST",
+      body: JSON.stringify({ connection: connection ?? "", sql }),
     }),
   // Diagnostics
   getMemory: () => req<MemoryReport>("/api/diag/memory"),
@@ -747,9 +805,18 @@ export interface PromptTemplate {
   body: string;
 }
 
+/** A saved database connection for the DB editor pane. */
+export interface DbConnection {
+  id: string;
+  name: string;
+  url: string;
+}
+
 /** User preferences persisted at <state_dir>/settings.json on the BE. */
 export interface UserSettings {
   theme?: string;
+  /** User-defined custom color themes persisted on the BE. */
+  custom_themes?: Theme[];
   ui_font?: string;
   mono_font?: string;
   font_size?: number;
@@ -757,6 +824,8 @@ export interface UserSettings {
   default_model?: string;
   /** User-defined reusable prompt templates. */
   prompts?: PromptTemplate[];
+  /** Saved database connections for the DB editor pane. */
+  db_connections?: DbConnection[];
   /** Global default: auto-approve every agent tool invocation
    *  (Claude / opencode `--dangerously-skip-permissions`). `undefined`
    *  ⇒ BE's shipping default (`true`). */
@@ -838,6 +907,19 @@ export interface ClientLog {
   title: string;
   message?: string;
   context?: unknown;
+}
+
+/** Column metadata returned by `GET /api/db/tables/:table/columns`. */
+export interface DbColumn {
+  name: string;
+  data_type: string;
+}
+
+/** Query / table-data result from the DB editor endpoints. */
+export interface DbQueryResponse {
+  columns: string[];
+  rows: unknown[][];
+  affected_rows?: number;
 }
 
 /** Fire-and-forget: forward a client log/toast to the BE so it lands
