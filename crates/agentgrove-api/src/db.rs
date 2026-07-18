@@ -438,7 +438,7 @@ fn rows_to_response(rows: Vec<tokio_postgres::Row>) -> QueryResponse {
 fn is_read_query(sql: &str) -> bool {
     let head = sql
         .trim_start()
-        .splitn(2, |c: char| c.is_whitespace())
+        .split(|c: char| c.is_whitespace())
         .next()
         .unwrap_or("")
         .to_lowercase();

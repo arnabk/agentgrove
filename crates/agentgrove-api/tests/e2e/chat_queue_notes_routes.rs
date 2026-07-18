@@ -1186,7 +1186,7 @@ async fn rapid_fire_then_manual_then_run_next_drains_every_item() {
             .iter()
             .map(|p| p["content"].as_str().unwrap_or("").to_string())
             .collect();
-        if (0..5).all(|i| contents.iter().any(|c| *c == format!("rapid-{i}"))) {
+        if (0..5).all(|i| contents.contains(&format!("rapid-{i}"))) {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -1194,7 +1194,7 @@ async fn rapid_fire_then_manual_then_run_next_drains_every_item() {
     for i in 0..5 {
         let needle = format!("rapid-{i}");
         assert!(
-            contents.iter().any(|c| *c == needle),
+            contents.contains(&needle),
             "{needle} never landed in the timeline. Got: {contents:?}"
         );
     }
