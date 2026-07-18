@@ -1,19 +1,21 @@
 import { For, Show, createEffect, createSignal, createMemo, onCleanup, onMount } from "solid-js";
 import { produce } from "solid-js/store";
-import { api, type PromptTemplate, type ProviderDescriptor } from "../api/client";
+import { api, type PromptTemplate, type ProviderDescriptor, type Theme } from "../api/client";
 import {
   DEFAULT_MONO_FONT,
   DEFAULT_UI_FONT,
   FONT_FAMILY_PRESETS,
-  FONT_SIZES,
   MONO_FAMILY_PRESETS,
   latestVersion,
   saveSettings,
   setSettingsOpen,
+  setState,
+  setTheme as applyTheme,
   settingsOpen,
   state,
 } from "../stores/app";
 import Select from "./Select";
+import Slider from "./Slider";
 
 /**
  * Tabbed global settings modal.
@@ -142,6 +144,8 @@ function AppearanceTab() {
     state.settings.mono_font ?? MONO_FAMILY_PRESETS[0]!.value,
   );
   const [size, setSize] = createSignal(state.settings.font_size ?? 15);
+  const [showThemeForm, setShowThemeForm] = createSignal(false);
+  const [editingTheme, setEditingTheme] = createSignal<Theme | null>(null);
 
   createEffect(() => {
     if (settingsOpen()) {
@@ -149,6 +153,8 @@ function AppearanceTab() {
       setUiFont(state.settings.ui_font ?? FONT_FAMILY_PRESETS[0]!.value);
       setMonoFont(state.settings.mono_font ?? MONO_FAMILY_PRESETS[0]!.value);
       setSize(state.settings.font_size ?? 15);
+      setShowThemeForm(false);
+      setEditingTheme(null);
     }
   });
 
@@ -182,6 +188,34 @@ function AppearanceTab() {
     setSize(15);
   }
 
+  const customThemes = createMemo(() => state.themes.filter((t) => t.custom));
+
+  async function saveCustomTheme(t: Theme) {
+    const saved = await api.saveTheme(t);
+    const without = state.themes.filter((x) => x.id !== saved.id);
+    setState("themes", [...without, saved]);
+    const custom = state.settings.custom_themes?.filter((x) => x.id !== saved.id) ?? [];
+    setState("settings", "custom_themes", [...custom, saved]);
+    setShowThemeForm(false);
+    setEditingTheme(null);
+    if (state.themeId === saved.id) applyTheme(saved.id);
+    else await onTheme(saved.id);
+  }
+
+  async function deleteCustomTheme(id: string) {
+    await api.deleteTheme(id);
+    setState(
+      "themes",
+      state.themes.filter((x) => x.id !== id),
+    );
+    setState(
+      "settings",
+      "custom_themes",
+      (state.settings.custom_themes ?? []).filter((x) => x.id !== id),
+    );
+    if (state.themeId === id) await onTheme("dark-default");
+  }
+
   return (
     <div class="space-y-5">
       <Row label="Theme" hint="Color palette for the app shell.">
@@ -193,6 +227,72 @@ function AppearanceTab() {
           options={state.themes.map((t) => ({ value: t.id, label: t.name }))}
         />
       </Row>
+
+      <Show when={customThemes().length > 0}>
+        <div class="space-y-2">
+          <For each={customThemes()}>
+            {(t) => (
+              <div
+              class="flex items-center gap-3 px-2 py-1.5 rounded border border-border bg-bg-2"
+              data-testid="custom-theme-row"
+            >
+                <span
+                  class="w-5 h-5 rounded border border-border"
+                  style={{
+                    "background-color": t.colors.bg,
+                    "border-color": t.colors.accent,
+                  }}
+                />
+                <span class="flex-1 text-[13px]">{t.name}</span>
+                <span class="text-[11px] text-fg-subtle uppercase">{t.kind}</span>
+                <button
+                  type="button"
+                  class="ag-btn ag-btn-ghost ag-btn-xs"
+                  onClick={() => {
+                    setEditingTheme(t);
+                    setShowThemeForm(true);
+                  }}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  class="ag-btn ag-btn-ghost ag-btn-xs text-danger"
+                  onClick={() => void deleteCustomTheme(t.id)}
+                  data-testid={`delete-custom-theme-${t.id}`}
+                >
+                  Delete
+                </button>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+
+      <Show when={!showThemeForm()}>
+        <button
+          type="button"
+          class="ag-btn ag-btn-secondary ag-btn-sm"
+          onClick={() => {
+            setEditingTheme(null);
+            setShowThemeForm(true);
+          }}
+          data-testid="add-custom-theme"
+        >
+          Add custom theme
+        </button>
+      </Show>
+
+      <Show when={showThemeForm()}>
+        <CustomThemeForm
+          initial={editingTheme()}
+          onSave={(t) => void saveCustomTheme(t)}
+          onCancel={() => {
+            setShowThemeForm(false);
+            setEditingTheme(null);
+          }}
+        />
+      </Show>
 
       <Row label="UI font" hint="Used for menus, labels, dialogs.">
         <Select
@@ -215,12 +315,14 @@ function AppearanceTab() {
       </Row>
 
       <Row label="Font size" hint="Base size. Everything scales proportionally.">
-        <Select
-          value={size().toString()}
-          onChange={(v) => onSize(Number(v))}
+        <Slider
+          min={10}
+          max={24}
+          step={1}
+          value={size()}
+          onChange={(v) => onSize(v)}
           ariaLabel="Font size"
           testId="settings-font-size"
-          options={FONT_SIZES.map(String).map((v) => ({ value: v, label: v }))}
         />
       </Row>
 
@@ -231,6 +333,95 @@ function AppearanceTab() {
       </div>
     </div>
   );
+}
+
+function CustomThemeForm(props: {
+  initial: Theme | null;
+  onSave: (t: Theme) => void;
+  onCancel: () => void;
+}) {
+  const id = () => props.initial?.id ?? makeId();
+  const [name, setName] = createSignal(props.initial?.name ?? "My theme");
+  const [kind, setKind] = createSignal<"light" | "dark">(props.initial?.kind ?? "dark");
+  const [bg, setBg] = createSignal(props.initial?.colors.bg ?? "#0e1014");
+  const [fg, setFg] = createSignal(props.initial?.colors.fg ?? "#e8ecf2");
+  const [muted, setMuted] = createSignal(props.initial?.colors.muted ?? "#98a2b3");
+  const [accent, setAccent] = createSignal(props.initial?.colors.accent ?? "#7c5cff");
+
+  function submit(e: Event) {
+    e.preventDefault();
+    props.onSave({
+      id: id(),
+      name: name().trim() || "Custom theme",
+      kind: kind(),
+      custom: true,
+      colors: { bg: bg(), fg: fg(), muted: muted(), accent: accent() },
+    });
+  }
+
+  return (
+    <form onSubmit={submit} class="p-3 rounded border border-border bg-bg-2 space-y-3" data-testid="custom-theme-form">
+      <div class="flex items-center gap-3">
+        <label class="flex-1 text-[13px]">
+          <span class="text-fg-muted block mb-1">Name</span>
+          <input
+            type="text"
+            class="ag-input"
+            value={name()}
+            onInput={(e) => setName(e.currentTarget.value)}
+            data-testid="custom-theme-name"
+            required
+          />
+        </label>
+        <label class="text-[13px]">
+          <span class="text-fg-muted block mb-1">Kind</span>
+          <Select
+            value={kind()}
+            onChange={(v) => setKind(v as "light" | "dark")}
+            ariaLabel="Theme kind"
+            testId="custom-theme-kind"
+            options={[
+              { value: "dark", label: "Dark" },
+              { value: "light", label: "Light" },
+            ]}
+          />
+        </label>
+      </div>
+      <div class="flex flex-wrap items-center gap-4">
+        <ColorInput label="Background" value={bg()} onChange={setBg} testId="custom-theme-bg" />
+        <ColorInput label="Foreground" value={fg()} onChange={setFg} testId="custom-theme-fg" />
+        <ColorInput label="Muted" value={muted()} onChange={setMuted} testId="custom-theme-muted" />
+        <ColorInput label="Accent" value={accent()} onChange={setAccent} testId="custom-theme-accent" />
+      </div>
+      <div class="flex items-center gap-2 pt-1">
+        <button type="submit" class="ag-btn ag-btn-primary ag-btn-sm" data-testid="custom-theme-save">
+          {props.initial ? "Update theme" : "Save theme"}
+        </button>
+        <button type="button" class="ag-btn ag-btn-ghost ag-btn-sm" onClick={props.onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function ColorInput(props: { label: string; value: string; onChange: (v: string) => void; testId?: string }) {
+  return (
+    <label class="flex items-center gap-2 text-[13px]">
+      <input
+        type="color"
+        class="w-8 h-8 rounded border border-border bg-transparent cursor-pointer"
+        value={props.value}
+        onChange={(e) => props.onChange(e.currentTarget.value)}
+        data-testid={props.testId}
+      />
+      <span class="text-fg-muted">{props.label}</span>
+    </label>
+  );
+}
+
+function makeId() {
+  return "ct-" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 }
 
 /** Agent behaviour controls. Currently just the global auto-approve

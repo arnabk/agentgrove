@@ -291,9 +291,9 @@ export function ToolRail(props: { events: AgentEvent[]; promptId: string }) {
       </For>
       <For each={paired.errors}>
         {(ev) => (
-          <div class="text-[12px] text-danger flex items-center gap-2" data-testid="tool-error">
+          <div class="text-[12px] text-danger flex items-start gap-2" data-testid="tool-error">
             <span aria-hidden="true">⚠</span>
-            <span class="font-mono text-[11.5px] truncate">{ev.message}</span>
+            <span class="font-mono text-[11.5px] whitespace-pre-wrap">{ev.message}</span>
           </div>
         )}
       </For>

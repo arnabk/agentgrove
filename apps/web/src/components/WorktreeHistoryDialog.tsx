@@ -16,9 +16,9 @@ interface Props {
  * Modal dialog showing the history of soft-deleted worktrees with a
  * branch substring search and a per-row Restore button.
  *
- * Restore only re-activates the database row; the git worktree on disk
- * is not re-created. We surface that constraint inline so users aren't
- * surprised.
+ * Restore re-activates the database row and re-creates the git worktree
+ * on disk when it is missing (re-checking the branch or re-creating it
+ * from the stored base ref).
  */
 export default function WorktreeHistoryDialog(props: Props) {
   const [query, setQuery] = createSignal("");
@@ -57,7 +57,7 @@ export default function WorktreeHistoryDialog(props: Props) {
   async function doRestore(w: Worktree) {
     const ok = await confirm({
       title: `Restore "${w.branch}"?`,
-      body: "AgentGrove will restore the database record only. The git worktree directory on disk is not re-created; if you need a functioning worktree, create a new one from this branch.",
+      body: "AgentGrove will restore the database record and re-create the git worktree on disk. If the branch still exists it will be checked out; otherwise it will be recreated from the stored base ref.",
       confirmLabel: "Restore",
       testId: "confirm-restore-worktree",
     });
@@ -101,7 +101,7 @@ export default function WorktreeHistoryDialog(props: Props) {
         </div>
         <p class="text-[12.5px] text-fg-muted mb-4">
           Soft-deleted worktrees stay here so you can recover a branch name or restore the record.
-          Restoring does not re-create the worktree on disk.
+          Restoring re-creates the worktree on disk when needed.
         </p>
 
         <input

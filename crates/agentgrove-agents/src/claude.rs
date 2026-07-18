@@ -142,6 +142,7 @@ impl AgentProvider for ClaudeProvider {
             default_model: DEFAULT_MODEL.to_string(),
             models: MODELS.iter().map(|s| (*s).to_string()).collect(),
             supports_resume: true,
+            supports_current_os: crate::supports_current_os(crate::provider_os_support("claude")),
         }
     }
 

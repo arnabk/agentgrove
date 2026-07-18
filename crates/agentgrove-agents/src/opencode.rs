@@ -154,6 +154,7 @@ impl AgentProvider for OpencodeProvider {
             // worktree chats into the wrong tree. See `spawn()` for
             // the rationale + flag wiring.
             supports_resume: true,
+            supports_current_os: crate::supports_current_os(crate::provider_os_support("opencode")),
         }
     }
 

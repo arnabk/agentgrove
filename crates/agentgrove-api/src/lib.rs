@@ -5,6 +5,7 @@
 pub mod backups;
 pub mod branches;
 pub mod chats;
+pub mod db;
 pub mod diag;
 pub mod editor;
 pub mod file_index;

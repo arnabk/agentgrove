@@ -65,13 +65,21 @@ async function ensureProject(): Promise<string> {
 async function createChat(projectId: string): Promise<string> {
   // Use the fake/test provider so the chat can be exercised without
   // requiring a real Claude / opencode CLI on the test runner.
+  return createChatWithProvider(projectId, "fake", "fake");
+}
+
+export async function createChatWithProvider(
+  projectId: string,
+  provider: string,
+  model: string,
+): Promise<string> {
   let attempts = 3;
   while (attempts > 0) {
     try {
       const res = await fetch(`${BE_URL}/api/projects/${projectId}/chats`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "test chat " + Date.now(), provider: "fake", model: "fake" }),
+        body: JSON.stringify({ title: "test chat " + Date.now(), provider, model }),
       });
       if (res.ok) {
         const created = (await res.json()) as { id: string };
@@ -79,10 +87,25 @@ async function createChat(projectId: string): Promise<string> {
       }
     } catch {
       await new Promise((r) => setTimeout(r, 1000));
-      attempts--;
     }
+    attempts--;
   }
   throw new Error("failed to create chat after retries");
+}
+
+export async function bootstrapWithProvider(
+  page: Page,
+  provider: string,
+  model: string,
+): Promise<string> {
+  await seedBackend(page);
+  const projectId = await ensureProject();
+  const chatId = await createChatWithProvider(projectId, provider, model);
+  const url = `${BASE.replace(/\/$/, "")}/p/${projectId}?chat=${chatId}`;
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("app-root")).toBeVisible({ timeout: 15_000 });
+  await expect(visibleComposer(page)).toBeVisible({ timeout: 20_000 });
+  return await activeChatId(page);
 }
 
 /** Boot the app + ensure at least one project + an open chat exist.

@@ -30,7 +30,7 @@ async fn make_repo() -> tempfile::TempDir {
 /// Shorthand to invoke git in `cwd` from test code. Panics on
 /// non-zero exit since tests should know about setup failures
 /// up front.
-async fn run_git_in(cwd: &std::path::Path, args: &[&str]) {
+async fn run_git_in(cwd: &std::path::Path, args: &[&str]) -> String {
     let out = tokio::process::Command::new("git")
         .args(args)
         .current_dir(cwd)
@@ -43,6 +43,7 @@ async fn run_git_in(cwd: &std::path::Path, args: &[&str]) {
         "git {args:?} failed in {cwd:?}: {}",
         String::from_utf8_lossy(&out.stderr),
     );
+    String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
 /// Working-copy path inside a temp dir produced by `make_repo`.
@@ -277,7 +278,7 @@ async fn worktree_history_lists_and_filters_after_delete() {
 #[tokio::test]
 async fn worktree_restore_clears_removed_at() {
     let h = BeHarness::start().await;
-    let (_dir, project_id) = make_project(&h).await;
+    let (dir, project_id) = make_project(&h).await;
 
     // Create + delete one.
     let res = h
@@ -289,6 +290,7 @@ async fn worktree_restore_clears_removed_at() {
     assert_eq!(res.status(), 200);
     let wt: Value = res.json().await.unwrap();
     let id = wt["id"].as_str().unwrap().to_owned();
+    let path = wt["path"].as_str().unwrap().to_owned();
     // Wait for the background creation task to finish before
     // soft-deleting so the worktree's `git worktree remove` can run
     // cleanly.
@@ -297,12 +299,18 @@ async fn worktree_restore_clears_removed_at() {
         "ready"
     );
 
+    // Confirm the directory is present before deletion.
+    assert!(std::path::Path::new(&path).exists(), "worktree path should exist before delete");
+
     let del = h
         .delete_auth(&format!("/api/projects/{project_id}/worktrees/{id}"))
         .send()
         .await
         .unwrap();
     assert_eq!(del.status(), 204);
+
+    // The on-disk directory is gone after `git worktree remove`.
+    assert!(!std::path::Path::new(&path).exists(), "worktree path should be removed");
 
     // Live list no longer contains it.
     let live = h
@@ -323,6 +331,18 @@ async fn worktree_restore_clears_removed_at() {
     let restored: Value = rest.json().await.unwrap();
     assert_eq!(restored["id"], id);
     assert!(restored["removed_at"].is_null());
+    assert_eq!(restored["status"], "ready", "restored worktree should be ready");
+
+    // The directory was re-created and is registered as a git worktree.
+    assert!(std::path::Path::new(&path).exists(), "restored worktree path should exist");
+    let restored_path = std::fs::canonicalize(&path).expect("canonicalize restored path");
+    let list_out = run_git_in(&work(&dir), &["worktree", "list", "--porcelain"]).await;
+    let found = list_out
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .filter_map(|p| std::fs::canonicalize(p).ok())
+        .any(|p| p == restored_path);
+    assert!(found, "restored path should appear in `git worktree list`");
 
     // Restore again -> 409 (already live).
     let again = h
@@ -339,6 +359,63 @@ async fn worktree_restore_clears_removed_at() {
         .await
         .unwrap();
     assert_eq!(nf.status(), 404);
+}
+
+/// Restore a worktree whose branch was also deleted. The soft-deleted
+/// row still carries the branch name and base ref, so restore should
+/// re-create the branch from the remote and check it out at the stored
+/// path.
+#[tokio::test]
+async fn worktree_restore_recreates_deleted_branch() {
+    let h = BeHarness::start().await;
+    let (dir, project_id) = make_project(&h).await;
+
+    let res = h
+        .post_auth(&format!("/api/projects/{project_id}/worktrees"))
+        .json(&json!({"branch":"restore-me","base_ref":"main"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let wt: Value = res.json().await.unwrap();
+    let id = wt["id"].as_str().unwrap().to_owned();
+    let path = wt["path"].as_str().unwrap().to_owned();
+    assert_eq!(
+        wait_for_terminal_status(&h, &project_id, &id).await,
+        "ready"
+    );
+
+    let del = h
+        .delete_auth(&format!("/api/projects/{project_id}/worktrees/{id}?delete_branch=true"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(del.status(), 204);
+
+    // Branch is gone.
+    let branches = run_git_in(&work(&dir), &["branch", "--list", "restore-me"]).await;
+    assert!(branches.trim().is_empty(), "branch should have been deleted");
+
+    // Restore re-creates the branch and the worktree.
+    let rest = h
+        .post_auth(&format!("/api/worktrees/{id}/restore"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rest.status(), 200, "body={}", rest.text().await.unwrap());
+    let restored: Value = rest.json().await.unwrap();
+    assert!(restored["removed_at"].is_null());
+    assert_eq!(restored["status"], "ready");
+    assert!(std::path::Path::new(&path).exists(), "worktree path should be recreated");
+    let restored_path = std::fs::canonicalize(&path).expect("canonicalize restored path");
+
+    let list_out = run_git_in(&work(&dir), &["worktree", "list", "--porcelain"]).await;
+    let found = list_out
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .filter_map(|p| std::fs::canonicalize(p).ok())
+        .any(|p| p == restored_path);
+    assert!(found, "restored path should appear in `git worktree list`");
 }
 
 /// PATCH rename happy path. Creates a worktree, renames its branch,

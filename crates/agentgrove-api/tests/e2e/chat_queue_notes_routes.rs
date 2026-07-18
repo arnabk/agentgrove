@@ -148,6 +148,62 @@ async fn themes_list_contains_builtins() {
     assert!(names.contains(&"tokyo-night".into()));
 }
 
+#[tokio::test]
+async fn custom_theme_import_list_delete() {
+    let h = BeHarness::start().await;
+    let theme = serde_json::json!({
+        "id": "custom-test",
+        "name": "Custom Test",
+        "kind": "dark",
+        "custom": true,
+        "colors": {
+            "bg": "#1a1a2e",
+            "fg": "#e0e0e0",
+            "muted": "#888888",
+            "accent": "#ff6b6b"
+        }
+    });
+
+    let post = h
+        .post_auth("/api/themes")
+        .json(&theme)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(post.status(), 200);
+    let saved: Value = post.json().await.unwrap();
+    assert_eq!(saved["id"], "custom-test");
+    assert_eq!(saved["custom"], true);
+
+    let res = h.get_auth("/api/themes").send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    let arr: Value = res.json().await.unwrap();
+    let ids: Vec<_> = arr
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(ids.contains(&"custom-test".into()));
+
+    let del = h
+        .delete_auth("/api/themes/custom-test")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(del.status(), 204);
+
+    let res = h.get_auth("/api/themes").send().await.unwrap();
+    let arr: Value = res.json().await.unwrap();
+    let ids: Vec<_> = arr
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(!ids.contains(&"custom-test".into()));
+}
+
 // ---------------------------------------------------------------------
 // Performance / pagination behaviors (ADR-0006).
 // ---------------------------------------------------------------------
@@ -1422,6 +1478,77 @@ async fn stop_turn_unknown_chat_returns_204() {
         .await
         .unwrap();
     assert_eq!(res.status(), 204);
+}
+
+/// Retry clears the last prompt's events and re-dispatches it,
+/// regenerating the response without creating a new prompt.
+#[tokio::test]
+async fn retry_last_prompt_regenerates_response() {
+    let h = BeHarness::start().await;
+    let chat_id = make_chat(&h, "retry", "fake", "echo").await;
+
+    let p1 = h
+        .post_auth(&format!("/api/chats/{chat_id}/prompts"))
+        .json(&json!({"content":"hello"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(p1.status(), 200);
+    let prompt: Value = p1.json().await.unwrap();
+    let prompt_id = prompt["id"].as_str().unwrap().to_owned();
+
+    // Wait for the first response to complete.
+    let mut first_done = false;
+    for _ in 0..100 {
+        let view: Value = h
+            .get_auth(&format!("/api/chats/{chat_id}"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let prompts = view["prompts"].as_array().unwrap();
+        let p = prompts.iter().find(|p| p["id"] == prompt_id).unwrap();
+        if p["events"].as_array().map(|a| a.len()).unwrap_or(0) >= 3 {
+            first_done = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(first_done, "first response never completed");
+
+    let retry = h
+        .post_auth(&format!("/api/chats/{chat_id}/retry"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(retry.status(), 200);
+    let retried: Value = retry.json().await.unwrap();
+    assert_eq!(retried["id"], prompt_id);
+    assert_eq!(retried["content"], "hello");
+
+    // Poll until the retry produces a new response.
+    let mut retry_done = false;
+    for _ in 0..100 {
+        let view: Value = h
+            .get_auth(&format!("/api/chats/{chat_id}"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let prompts = view["prompts"].as_array().unwrap();
+        assert_eq!(prompts.len(), 1, "retry should not create a new prompt");
+        let p = &prompts[0];
+        if p["events"].as_array().map(|a| a.len()).unwrap_or(0) >= 3 {
+            retry_done = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(retry_done, "retry never produced a new response");
 }
 
 #[tokio::test]

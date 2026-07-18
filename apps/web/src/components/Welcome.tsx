@@ -2,6 +2,7 @@ import { Show, createSignal } from "solid-js";
 import { api } from "../api/client";
 import { refreshProjects, setSettingsOpen } from "../stores/app";
 import FolderPicker from "./FolderPicker";
+import Logo from "./Logo";
 
 /**
  * Welcome screen shown when no projects exist. Clicking "Open a folder"
@@ -32,7 +33,7 @@ export default function Welcome() {
       <div class="w-full max-w-2xl">
         {/* Hero */}
         <div class="flex items-center gap-3 mb-3">
-          <Logo />
+          <Logo class="w-8 h-8" />
           <h1 class="text-3xl font-semibold tracking-tight">AgentGrove</h1>
         </div>
         <p class="text-fg-muted mb-10 text-[15px]">
@@ -115,25 +116,6 @@ export default function Welcome() {
         </Show>
       </div>
     </div>
-  );
-}
-
-function Logo() {
-  return (
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M12 2 4 7v10l8 5 8-5V7l-8-5Z"
-        stroke="var(--ag-accent)"
-        stroke-width="1.6"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M12 12 4 7m8 5 8-5m-8 5v10"
-        stroke="var(--ag-accent)"
-        stroke-width="1.6"
-        stroke-linejoin="round"
-      />
-    </svg>
   );
 }
 

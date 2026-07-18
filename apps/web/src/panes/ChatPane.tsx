@@ -1029,6 +1029,18 @@ export default function ChatPane() {
     }
   }
 
+  async function retryPrompt(p: Prompt) {
+    const id = activeId();
+    if (!id) return;
+    void p; // callback receives the prompt; retry always targets the last turn
+    try {
+      await api.retryChat(id);
+      await loadChat();
+    } catch {
+      setErr("Failed to retry prompt");
+    }
+  }
+
   async function truncateFromPrompt(p: Prompt) {
     const id = activeId();
     if (!id) return;
@@ -1291,6 +1303,7 @@ export default function ChatPane() {
               onRevert={(p) => void revert(p)}
               onFork={(p) => void forkFromPrompt(p)}
               onResend={(p) => void resendPrompt(p)}
+              onRetry={(p) => void retryPrompt(p)}
               onTruncate={(p) => void truncateFromPrompt(p)}
             />
           </Show>
@@ -1646,17 +1659,21 @@ function VirtualizedTimeline(props: {
   onRevert: (p: Prompt) => void;
   onFork: (p: Prompt) => void;
   onResend: (p: Prompt) => void;
+  onRetry: (p: Prompt) => void;
   onTruncate: (p: Prompt) => void;
 }) {
   let scrollRef!: HTMLDivElement;
-  let prevLength = props.prompts.length;
-  let prevFirstId: string | undefined = props.prompts[0]?.id;
-  // Set to true whenever we WANT to land on the bottom but the
-  // scroll element may not be ready yet (the pane is mounted but
-  // `display:none` after the App.tsx mount-strategy change). Once
-  // the ResizeObserver below sees a non-zero clientHeight, we
-  // settle the actual scrollToIndex(end) and clear the flag.
-  let pendingScrollToBottom = false;
+  let contentRef!: HTMLDivElement;
+  let prevLength = 0;
+  let prevFirstId: string | undefined = undefined;
+  const BOTTOM_THRESHOLD_PX = 10;
+
+  // Last user-controlled scroll position. `null` means we haven't seen a
+  // user scroll yet (initial load / chat switch) so we should land on the
+  // bottom instead of restoring a stale position.
+  let userScrollTop: number | null = null;
+  let userAtBottom = true;
+  let lastContentHeight = 0;
 
   const virtualizer = createVirtualizer({
     get count() {
@@ -1675,6 +1692,7 @@ function VirtualizedTimeline(props: {
     // Track both the source count and the virtualizer total size so
     // this memo re-runs whenever the virtual window is recomputed.
     void props.prompts.length;
+    void props.prompts.map((p) => p.id).join(",");
     void virtualizer.getTotalSize();
     return virtualizer.getVirtualItems().map((vi) => ({
       index: vi.index,
@@ -1702,48 +1720,35 @@ function VirtualizedTimeline(props: {
   // Auto-scroll behaviour:
   //   - On the FIRST render with a non-empty prompt list (chat
   //     switch, page refresh, etc.) jump straight to the bottom so
-  //     the user lands on the most recent turn. The BE already caps
-  //     us at ~50 prompts, so this isn't a "scroll past 10k rows"
-  //     concern — we just need to land at the tail.
-  //   - On tail growth (user just hit send), follow the new prompt
-  //     into view.
-  //   - On backfill of OLDER prompts (firstId changes but len grows
-  //     and the previous firstId still exists somewhere in the
-  //     list) we deliberately do NOT scroll — that would yank the
-  //     viewport away from what the user was reading.
+  //     the user lands on the most recent turn.
+  //   - On tail growth (new user message or assistant reply), keep
+  //     the scroll at the bottom ONLY if the user was already at
+  //     the bottom. Otherwise we do not touch the scroll position.
+  //   - On backfill of OLDER prompts we restore the user's reading
+  //     position relative to the first visible row.
   //
-  // The "scroll" calls go through a microtask so layout has settled
-  // before the virtualizer recomputes offsets. `requestAnimationFrame`
-  // would be more conservative but introduces a visible flash where
-  // the user sees the top of the chat for one frame.
-  /** Settle a deferred "scroll to bottom" intent. If the scroll
-   *  element has no height yet (pane is `display:none` because the
-   *  user is on a different tab), bail; the ResizeObserver below
-   *  will re-fire this once the pane is revealed.
-   *
-   *  When `force` is false we only scroll if the user is already
-   *  close to the bottom, so reviewing older messages isn't
-   *  interrupted by new tail activity. */
-  function tryScrollToBottom(force = false) {
+  // Scroll intent is enforced by a ResizeObserver on the content
+  // wrapper: whenever the content height changes, we apply the
+  // simple rule above. This counteracts browser/scroll-anchoring
+  // behaviour that would otherwise move the viewport when content
+  // grows at the tail while the user is reviewing history.
+
+  function scrollToBottom() {
     const len = props.prompts.length;
-    if (len === 0) {
-      pendingScrollToBottom = false;
-      return;
-    }
-    if (!scrollRef || scrollRef.clientHeight === 0) {
-      pendingScrollToBottom = true;
-      return;
-    }
-    if (!force) {
-      const distanceFromBottom =
-        scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight;
-      if (distanceFromBottom > 80) {
-        pendingScrollToBottom = false;
-        return;
-      }
-    }
+    if (len === 0) return;
     virtualizer.scrollToIndex(len - 1, { align: "end" });
-    pendingScrollToBottom = false;
+  }
+
+  /** Apply the user's scroll rule: if we haven't established a user
+   *  position yet, or the user is already at the bottom, jump to the
+   *  bottom. Otherwise restore the last user scroll position. */
+  function enforceScrollRule() {
+    if (!scrollRef || scrollRef.clientHeight === 0) return;
+    if (userScrollTop === null || userAtBottom) {
+      scrollToBottom();
+    } else {
+      scrollRef.scrollTop = userScrollTop;
+    }
   }
 
   createEffect(() => {
@@ -1751,45 +1756,114 @@ function VirtualizedTimeline(props: {
     const len = ps.length;
     const firstId = ps[0]?.id;
 
-    // First non-empty load → scroll to bottom unconditionally.
+    // First non-empty load or chat switch: forget any user scroll position
+    // and land on the bottom. The ResizeObserver will also enforce this when
+    // the content height settles.
     if (prevLength === 0 && len > 0) {
-      queueMicrotask(() => tryScrollToBottom(true));
-    } else if (len > prevLength && firstId === prevFirstId) {
-      // Tail growth in an already-mounted chat: only snap if the user
-      // is already near the bottom, otherwise preserve reading position.
-      tryScrollToBottom(false);
+      userScrollTop = null;
+      userAtBottom = true;
+      // eslint-disable-next-line solid/reactivity
+      queueMicrotask(() => enforceScrollRule());
     } else if (firstId !== prevFirstId && len > 0 && prevLength > 0) {
-      // Chat switch (firstId changed while we already had prompts).
-      // Reset prevLength so the "first load" branch above doesn't
-      // also fire next tick.
-      queueMicrotask(() => tryScrollToBottom(true));
+      const isBackfill = prevFirstId !== undefined && ps.some((p) => p.id === prevFirstId);
+      if (!isBackfill) {
+        userScrollTop = null;
+        userAtBottom = true;
+        // eslint-disable-next-line solid/reactivity
+        queueMicrotask(() => enforceScrollRule());
+      }
+    } else if (len > prevLength && firstId === prevFirstId) {
+      // Tail growth in an already-mounted chat: open the enforcement window
+      // *before* the DOM mutates so the browser's layout-induced scroll is not
+      // recorded as a user gesture. The observers below will enforce the rule.
+      contentChangedUntil = Date.now() + 300;
     }
     prevLength = len;
     prevFirstId = firstId;
   });
 
-  // ResizeObserver-based settler: when the pane was hidden during
-  // mount (user landed on terminal/editor and refreshed there), the
-  // virtualizer's scrollToIndex calls above no-op'd because the
-  // element had clientHeight === 0. Once the user flips to the
-  // chat pane, the host's display changes back to `block` and the
-  // browser reports a non-zero height — that's our signal to re-
-  // execute the pending scroll.
+  // Used to ignore scroll events triggered by our own scroll restoration
+  // (or the browser's immediate follow-up scroll anchoring) so they don't
+  // overwrite the user-controlled scroll position. We re-apply the rule for
+  // a short window because the browser sometimes animates the scroll after a
+  // content height change. Large height changes (new prompt) need a longer
+  // window than small live-token growth.
+  const LARGE_CHANGE_THRESHOLD_PX = 100;
+  let contentChangedAt = 0;
+  let contentChangedUntil = 0;
+
+  function scheduleEnforceLoop(windowMs: number) {
+    contentChangedAt = Date.now();
+    contentChangedUntil = contentChangedAt + windowMs;
+    const end = contentChangedUntil;
+    const step = () => {
+      if (Date.now() > end) return;
+      enforceScrollRule();
+      requestAnimationFrame(step);
+    };
+    step();
+  }
+
+  // ResizeObserver on the content wrapper: whenever the rendered
+  // content changes height (new prompts, streaming tokens, row
+  // measurements) we enforce the scroll rule. This is what makes
+  // "don't touch the scroll when the user is scrolled up" actually
+  // stick, because the browser/scroll-anchoring sometimes moves the
+  // viewport when the content grows at the tail.
   onMount(() => {
-    if (!scrollRef) return;
-    const ro = new ResizeObserver(() => {
-      if (pendingScrollToBottom && scrollRef.clientHeight > 0) {
-        tryScrollToBottom();
+    if (!contentRef) return;
+
+    // MutationObserver fires synchronously after DOM mutations, before the
+    // browser has a chance to apply its own scroll-anchoring / auto-scroll.
+    // We snap the scroll position back to the user's reading position here.
+    // eslint-disable-next-line solid/reactivity
+    const mo = new window.MutationObserver(() => {
+      if (!scrollRef || scrollRef.clientHeight === 0) return;
+      if (preserveAnchor) return; // backfill effect handles this
+      // Block onScroll from treating the browser's layout-induced scroll as a
+      // user gesture. The ResizeObserver below will replace this with a shorter,
+      // size-based enforcement window.
+      contentChangedUntil = Date.now() + 300;
+      if (userScrollTop === null || userAtBottom) {
+        scrollToBottom();
+      } else {
+        scrollRef.scrollTop = userScrollTop;
       }
     });
-    ro.observe(scrollRef);
-    onCleanup(() => ro.disconnect());
+    mo.observe(contentRef, { childList: true, subtree: true });
+
+    const ro = new ResizeObserver(() => {
+      if (!scrollRef || scrollRef.clientHeight === 0) return;
+      if (preserveAnchor) return; // backfill effect handles this
+      const h = scrollRef.scrollHeight;
+      const delta = Math.abs(h - lastContentHeight);
+      if (h === lastContentHeight) return;
+      lastContentHeight = h;
+      wheelActive = false;
+      if (wheelTimeout) clearTimeout(wheelTimeout);
+      if (userScrollTop === null) {
+        scrollToBottom();
+        return;
+      }
+      // Large changes (new prompts) can trigger a delayed browser auto-scroll,
+      // so we enforce for longer. Small changes (live tokens) only need a
+      // brief window.
+      const windowMs = delta > LARGE_CHANGE_THRESHOLD_PX ? 200 : 100;
+      scheduleEnforceLoop(windowMs);
+    });
+    ro.observe(contentRef);
+    onCleanup(() => {
+      mo.disconnect();
+      ro.disconnect();
+    });
   });
 
   // Live token / thinking deltas grow the active prompt's bubble —
   // tell the virtualizer to re-measure so the row height stays in
   // sync. Also re-measure when any prompt's event content changes
   // (streamed tokens often arrive via reconcile, not live maps).
+  // The ResizeObserver on the content wrapper will enforce the scroll
+  // rule after the measurement updates.
   createEffect(() => {
     void Object.keys(props.liveTokens).length;
     void Object.values(props.liveTokens).reduce((n, s) => n + s.length, 0);
@@ -1812,9 +1886,32 @@ function VirtualizedTimeline(props: {
   const SCROLL_TRIGGER_PX = 200;
   let preserveAnchor: { scrollTop: number; scrollHeight: number } | null = null;
 
-  function onScroll() {
+  let wheelActive = false;
+  let wheelTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  function onWheel(event: Event) {
     if (!scrollRef) return;
-    if (props.atStart || props.loadingOlder) return;
+    const deltaY = (event as unknown as { deltaY: number }).deltaY;
+    wheelActive = true;
+    if (wheelTimeout) clearTimeout(wheelTimeout);
+    wheelTimeout = setTimeout(() => {
+      wheelActive = false;
+    }, 300);
+    const maxScrollTop = scrollRef.scrollHeight - scrollRef.clientHeight;
+    const nextScrollTop = Math.max(0, Math.min(maxScrollTop, scrollRef.scrollTop + deltaY));
+    userAtBottom = scrollRef.scrollHeight - nextScrollTop - scrollRef.clientHeight <= BOTTOM_THRESHOLD_PX;
+    userScrollTop = userAtBottom ? null : nextScrollTop;
+  }
+
+  function onScroll(event: Event) {
+    if (!scrollRef) return;
+    if (Date.now() < contentChangedUntil && !wheelActive) return;
+    if (event.isTrusted || wheelActive) {
+      const distance = scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight;
+      userAtBottom = distance <= BOTTOM_THRESHOLD_PX;
+      userScrollTop = userAtBottom ? null : scrollRef.scrollTop;
+    }
+    if (props.atStart || props.loadingOlder || preserveAnchor) return;
     if (scrollRef.scrollTop < SCROLL_TRIGGER_PX) {
       preserveAnchor = {
         scrollTop: scrollRef.scrollTop,
@@ -1839,6 +1936,10 @@ function VirtualizedTimeline(props: {
         scrollRef.scrollTop = preserveAnchor.scrollTop + delta;
       }
       preserveAnchor = null;
+      // Update the tracked user position so the ResizeObserver doesn't
+      // fight the restored anchor.
+      userScrollTop = scrollRef.scrollTop;
+      userAtBottom = scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight <= BOTTOM_THRESHOLD_PX;
     });
   });
 
@@ -1846,7 +1947,9 @@ function VirtualizedTimeline(props: {
     <div
       ref={(el) => (scrollRef = el)}
       class="flex-1 overflow-y-auto px-6"
+      style={{ "overflow-anchor": "none" }}
       onScroll={onScroll}
+      onWheel={onWheel}
       data-testid="chat-timeline"
     >
       <Show when={!props.atStart && props.prompts.length > 0}>
@@ -1861,15 +1964,15 @@ function VirtualizedTimeline(props: {
               <span class="inline-flex gap-0.5">
                 <span
                   class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse"
-                  style="animation-delay:0ms"
+                  style={{ "animation-delay": "0ms" }}
                 />
                 <span
                   class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse"
-                  style="animation-delay:150ms"
+                  style={{ "animation-delay": "150ms" }}
                 />
                 <span
                   class="w-1 h-1 rounded-full bg-fg-subtle animate-pulse"
-                  style="animation-delay:300ms"
+                  style={{ "animation-delay": "300ms" }}
                 />
               </span>
               Loading older…
@@ -1896,7 +1999,7 @@ function VirtualizedTimeline(props: {
        * Top/bottom padding spacers fake the height of the
        * un-rendered prefix / suffix so the scrollbar stays
        * proportional. */}
-      <div style={{ width: "100%" }}>
+      <div ref={(el) => (contentRef = el)} style={{ width: "100%" }}>
         <div style={{ height: `${topSpacer()}px` }} aria-hidden="true" />
         <For each={virtualItems()}>
           {(vi) => {
@@ -1910,11 +2013,13 @@ function VirtualizedTimeline(props: {
                 >
                   <PromptRow
                     prompt={prompt()!}
-                    liveToken={props.liveTokens[prompt()!.id]}
-                    liveThinking={props.liveThinking[prompt()!.id]}
+                    liveTokens={props.liveTokens}
+                    liveThinking={props.liveThinking}
+                    isLast={vi.index === props.prompts.length - 1}
                     onRevert={() => props.onRevert(prompt()!)}
                     onFork={() => props.onFork(prompt()!)}
                     onResend={() => props.onResend(prompt()!)}
+                    onRetry={() => props.onRetry(prompt()!)}
                     onTruncate={() => props.onTruncate(prompt()!)}
                   />
                 </div>
@@ -1932,15 +2037,18 @@ function VirtualizedTimeline(props: {
  *  Pulled out so the virtualizer can measure / remount independently. */
 function PromptRow(props: {
   prompt: Prompt;
-  liveToken: string | undefined;
-  liveThinking: string | undefined;
+  liveTokens: Record<string, string>;
+  liveThinking: Record<string, string>;
+  isLast: boolean;
   onRevert: () => void;
   onFork: () => void;
   onResend: () => void;
+  onRetry: () => void;
   onTruncate: () => void;
 }) {
   function assistantText(): string {
-    if (props.liveToken !== undefined) return props.liveToken;
+    const live = props.liveTokens[props.prompt.id];
+    if (live !== undefined) return live;
     let out = "";
     for (const ev of props.prompt.events) {
       if (ev.type === "token") out += ev.text;
@@ -1953,7 +2061,8 @@ function PromptRow(props: {
    *  events array. Returns the empty string when the model wasn't
    *  asked to think (or doesn't support it). */
   function thinkingText(): string {
-    if (props.liveThinking !== undefined) return props.liveThinking;
+    const live = props.liveThinking[props.prompt.id];
+    if (live !== undefined) return live;
     let out = "";
     for (const ev of props.prompt.events) {
       if (ev.type === "thinking") out += ev.text;
@@ -1971,11 +2080,23 @@ function PromptRow(props: {
     );
   }
 
+  /** Error events emitted by the provider (rate limits, spawn failures,
+   *  cancellations, …). Shown prominently in the assistant bubble so the
+   *  user isn't left staring at a blank turn or a collapsed internals panel. */
+  function errorMessages(): string[] {
+    return props.prompt.events
+      .filter((e) => e.type === "error")
+      .map((e) => e.message);
+  }
+
   /** True while the agent hasn't yet finished this prompt. Used to
    *  show a placeholder assistant bubble (with a pulsing dots
    *  affordance) before the first token arrives. */
   function isPending(): boolean {
-    if (props.liveToken !== undefined || props.liveThinking !== undefined) {
+    if (
+      props.liveTokens[props.prompt.id] !== undefined ||
+      props.liveThinking[props.prompt.id] !== undefined
+    ) {
       return true;
     }
     const evs = props.prompt.events;
@@ -2162,68 +2283,81 @@ function PromptRow(props: {
             instead of leaving the user staring at their own
             bubble wondering if anything happened.
       */}
-      <Show when={assistantText() || isPending()}>
+      <Show when={assistantText() || isPending() || errorMessages().length > 0}>
         <div class="flex justify-start">
           <div class="relative group/bubble w-full">
             <div class="rounded-2xl rounded-bl-md bg-bg-1 border border-border text-[13.5px] leading-relaxed px-5 py-4 [overflow-wrap:anywhere]">
-              <Show
-                when={assistantText()}
-                fallback={
-                  <div class="flex flex-col gap-1.5" data-testid={`working-${props.prompt.id}`}>
-                    <span class="flex items-center gap-2 text-fg-subtle">
-                      <span class="inline-flex gap-1 items-end h-3">
-                        <span
-                          class="w-1.5 h-1.5 rounded-full bg-accent ag-bounce"
-                          style="animation-delay:0ms"
-                        />
-                        <span
-                          class="w-1.5 h-1.5 rounded-full bg-accent ag-bounce"
-                          style="animation-delay:160ms"
-                        />
-                        <span
-                          class="w-1.5 h-1.5 rounded-full bg-accent ag-bounce"
-                          style="animation-delay:320ms"
-                        />
-                      </span>
-                      <em class="ag-shimmer not-italic font-medium">{phrase()}…</em>
-                      <Show when={elapsed() >= 1}>
-                        <span class="text-[11px] tabular-nums opacity-70">{elapsed()}s</span>
-                      </Show>
-                    </span>
-                    <span
-                      class="text-[11.5px] text-fg-subtle inline-flex items-center gap-1.5 transition-opacity"
-                      classList={{ "opacity-0 invisible": !looksNonStreaming() }}
-                      data-testid={`nonstream-note-${props.prompt.id}`}
-                    >
-                      <span class="ag-chip !text-[10px] !py-[1px]">no live stream</span>
-                      This model returns the full reply at once — generating it now.
-                    </span>
-                  </div>
-                }
-              >
+              <Show when={assistantText()}>
                 <Markdown source={assistantText()} class="ag-prose-chat" />
-                {/* While the agent is still generating (no terminal
-                    event), show a small inline indicator after the
-                    streamed text so the user knows more is coming. */}
-                <Show when={isPending()}>
-                  <span class="inline-flex items-center gap-1.5 mt-2 text-fg-subtle text-[11.5px]">
-                    <span class="inline-flex gap-0.5 items-end h-2.5">
+              </Show>
+
+              <Show when={errorMessages().length > 0}>
+                <div class="space-y-2" data-testid={`assistant-error-${props.prompt.id}`}>
+                  <For each={errorMessages()}>
+                    {(msg) => (
+                      <div class="text-[13px] text-danger flex items-start gap-2">
+                        <span aria-hidden="true">⚠</span>
+                        <span class="whitespace-pre-wrap">{msg}</span>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+
+              {/* While the agent is still generating (no terminal
+                  event), show a small inline indicator after the
+                  streamed text so the user knows more is coming. */}
+              <Show when={isPending() && assistantText()}>
+                <span class="inline-flex items-center gap-1.5 mt-2 text-fg-subtle text-[11.5px]">
+                  <span class="inline-flex gap-0.5 items-end h-2.5">
+                    <span
+                      class="w-1 h-1 rounded-full bg-accent/60 ag-bounce"
+                      style="animation-delay:0ms"
+                    />
+                    <span
+                      class="w-1 h-1 rounded-full bg-accent/60 ag-bounce"
+                      style="animation-delay:160ms"
+                    />
+                    <span
+                      class="w-1 h-1 rounded-full bg-accent/60 ag-bounce"
+                      style="animation-delay:320ms"
+                    />
+                  </span>
+                  <em class="ag-shimmer not-italic opacity-70">generating…</em>
+                </span>
+              </Show>
+
+              <Show when={isPending() && !assistantText()}>
+                <div class="flex flex-col gap-1.5" data-testid={`working-${props.prompt.id}`}>
+                  <span class="flex items-center gap-2 text-fg-subtle">
+                    <span class="inline-flex gap-1 items-end h-3">
                       <span
-                        class="w-1 h-1 rounded-full bg-accent/60 ag-bounce"
+                        class="w-1.5 h-1.5 rounded-full bg-accent ag-bounce"
                         style="animation-delay:0ms"
                       />
                       <span
-                        class="w-1 h-1 rounded-full bg-accent/60 ag-bounce"
+                        class="w-1.5 h-1.5 rounded-full bg-accent ag-bounce"
                         style="animation-delay:160ms"
                       />
                       <span
-                        class="w-1 h-1 rounded-full bg-accent/60 ag-bounce"
+                        class="w-1.5 h-1.5 rounded-full bg-accent ag-bounce"
                         style="animation-delay:320ms"
                       />
                     </span>
-                    <em class="ag-shimmer not-italic opacity-70">generating…</em>
+                    <em class="ag-shimmer not-italic font-medium">{phrase()}…</em>
+                    <Show when={elapsed() >= 1}>
+                      <span class="text-[11px] tabular-nums opacity-70">{elapsed()}s</span>
+                    </Show>
                   </span>
-                </Show>
+                  <span
+                    class="text-[11.5px] text-fg-subtle inline-flex items-center gap-1.5 transition-opacity"
+                    classList={{ "opacity-0 invisible": !looksNonStreaming() }}
+                    data-testid={`nonstream-note-${props.prompt.id}`}
+                  >
+                    <span class="ag-chip !text-[10px] !py-[1px]">no live stream</span>
+                    This model returns the full reply at once — generating it now.
+                  </span>
+                </div>
               </Show>
             </div>
             <div class="text-left mt-1 text-[10px] text-fg-subtle">
@@ -2253,6 +2387,16 @@ function PromptRow(props: {
         >
           ↻ Resend
         </button>
+        <Show when={props.isLast}>
+          <button
+            class="ag-btn ag-btn-ghost !py-0.5 !px-1.5 !text-[11px]"
+            onClick={() => props.onRetry()}
+            data-testid={`retry-${props.prompt.id}`}
+            title="Regenerate the last response"
+          >
+            ↺ Retry
+          </button>
+        </Show>
         <button
           class="ag-btn ag-btn-ghost !py-0.5 !px-1.5 !text-[11px]"
           onClick={() => props.onFork()}

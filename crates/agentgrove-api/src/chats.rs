@@ -179,6 +179,17 @@ impl ChatRegistry {
         }
     }
 
+    /// Reset the last prompt of a chat so it can be retried. Clears its
+    /// events and touched_paths and returns the reset prompt, or `None`
+    /// if the chat is missing or has no prompts.
+    pub fn retry_prompt(&mut self, chat_id: &str) -> Option<PromptRecord> {
+        let chat = self.by_id.get_mut(chat_id)?;
+        let p = chat.prompts.last_mut()?;
+        p.events.clear();
+        p.touched_paths.clear();
+        Some(p.clone())
+    }
+
     /// Record the provider-issued session id for the chat. Called when
     /// a `SessionStart` arrives so the next turn can `--resume` it.
     pub fn set_session_id(&mut self, chat_id: &str, session_id: String) {
@@ -1323,7 +1334,7 @@ pub async fn stop_turn(State(state): State<AppState>, Path(id): Path<String>) ->
                         // Notify FE to reload
                         state.logbus.publish(
                             &format!("chat:{id}"),
-                            serde_json::json!({"type":"chat_idle"}).to_string(),
+                            serde_json::json!({"chat_idle": true}).to_string(),
                         );
                         return StatusCode::NO_CONTENT;
                     }
@@ -1340,7 +1351,7 @@ pub async fn stop_turn(State(state): State<AppState>, Path(id): Path<String>) ->
             }
             state.logbus.publish(
                 &format!("chat:{id}"),
-                serde_json::json!({"type":"chat_idle"}).to_string(),
+                serde_json::json!({"chat_idle": true}).to_string(),
             );
             StatusCode::NO_CONTENT
         }
@@ -1472,7 +1483,7 @@ pub async fn truncate_chat(
 
     state.logbus.publish(
         &format!("chat:{id}"),
-        serde_json::json!({"type":"chat_idle"}).to_string(),
+        serde_json::json!({"chat_idle": true}).to_string(),
     );
 
     Ok(Json(serde_json::json!({
@@ -1690,6 +1701,24 @@ pub(crate) fn spawn_dispatch_task(
         let topic = format!("chat:{chat_id}");
         let cwd = resolve_cwd(&state, &chat).await;
         let provider = crate::providers::resolve(&state, &chat.provider).await;
+
+        // A model switch clears the provider session. The new process
+        // has no prior context, so we prepend the last N prompts with
+        // full details before the next user message. This avoids
+        // relying on the previous model's session tokens or a
+        // separate summarization step.
+        let mut effective_body = body;
+        if chat.session_id.is_none() && !chat.prompts.is_empty() {
+            const CONTEXT_PROMPT_COUNT: usize = 20;
+            let context = build_recent_context(&chat.prompts, CONTEXT_PROMPT_COUNT);
+            if !context.is_empty() {
+                effective_body = format!(
+                    "Prior conversation context (last {count} messages):\n\n{context}\n\n---\n\nCurrent user message:\n{effective_body}",
+                    count = chat.prompts.len().min(CONTEXT_PROMPT_COUNT),
+                );
+            }
+        }
+
         if let Some(p) = provider {
             dispatch_via_provider(
                 &state,
@@ -1697,7 +1726,7 @@ pub(crate) fn spawn_dispatch_task(
                 &prompt,
                 &topic,
                 p,
-                &body,
+                &effective_body,
                 &chat.model,
                 chat.session_id.clone(),
                 chat.effort.clone(),
@@ -1705,7 +1734,7 @@ pub(crate) fn spawn_dispatch_task(
             )
             .await;
         } else {
-            dispatch_echo(&state, &chat_id, &prompt, &topic, &body).await;
+            dispatch_echo(&state, &chat_id, &prompt, &topic, &effective_body).await;
         }
         // Auto-drain (loops until queue + clear are both atomic).
         drain_until_idle(&state, &chat_id).await;
@@ -2095,6 +2124,49 @@ async fn dispatch_echo(
     persist_prompt_events(state, &prompt.id).await;
 }
 
+/// Format one prompt + its assistant events as a full-detail context
+/// entry used when a model switch needs to carry recent history over
+/// to the new provider process.
+fn format_prompt_full(prompt: &PromptRecord) -> String {
+    let mut lines = vec![format!("User: {}", prompt.content.trim())];
+    let mut reply = String::new();
+    let mut tool_notes: Vec<String> = Vec::new();
+    for ev in &prompt.events {
+        match ev {
+            AgentEvent::Token { text } => reply.push_str(text),
+            AgentEvent::ToolCall { name, args, .. } => {
+                let args_str = serde_json::to_string(args).unwrap_or_default();
+                tool_notes.push(format!("  > Tool call: `{name}` {args_str}"));
+            }
+            AgentEvent::ToolResult { name, result, .. } => {
+                let result_str = serde_json::to_string(result).unwrap_or_default();
+                tool_notes.push(format!("  > Tool result: `{name}`: {result_str}"));
+            }
+            AgentEvent::Error { message } => {
+                tool_notes.push(format!("  > Error: {message}"));
+            }
+            _ => {}
+        }
+    }
+    if !reply.trim().is_empty() {
+        lines.push(format!("Assistant: {}", reply.trim()));
+    }
+    lines.extend(tool_notes);
+    lines.join("\n")
+}
+
+/// Build a recent-context block from the last `max_prompts` prompts.
+/// Each prompt is formatted with full details so the new model can see
+/// the conversation as it happened.
+fn build_recent_context(prompts: &[PromptRecord], max_prompts: usize) -> String {
+    let start = prompts.len().saturating_sub(max_prompts);
+    prompts[start..]
+        .iter()
+        .map(format_prompt_full)
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 pub async fn revert_prompt(
     State(state): State<AppState>,
     Path((chat_id, prompt_id)): Path<(String, String)>,
@@ -2121,6 +2193,50 @@ pub async fn revert_prompt(
         .add_prompt(&chat_id, body)
         .ok_or(StatusCode::NOT_FOUND)?;
     Ok(Json(new))
+}
+
+/// Retry the last prompt of a chat. Clears the last prompt's events and
+/// touched_paths and re-dispatches it. Returns 409 if the chat is already
+/// dispatching.
+pub async fn retry_chat(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<PromptRecord>, StatusCode> {
+    let mut dispatching = state.dispatching.lock().await;
+
+    let chat = {
+        let reg = state.chats.read().await;
+        reg.get(&id).ok_or(StatusCode::NOT_FOUND)?.clone()
+    };
+    if chat.prompts.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if dispatching.contains(&id) {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    let prompt = {
+        let mut reg = state.chats.write().await;
+        reg.retry_prompt(&id).ok_or(StatusCode::NOT_FOUND)?
+    };
+    // Persist the cleared events and touched paths so the retry starts
+    // from a clean slate.
+    let _ = persist_prompt_events(&state, &prompt.id).await;
+    let _ = state
+        .chat_store
+        .write_touched_paths(&prompt.id, &serde_json::json!([]))
+        .await;
+
+    let chat = {
+        let reg = state.chats.read().await;
+        reg.get(&id).ok_or(StatusCode::NOT_FOUND)?.clone()
+    };
+
+    dispatching.insert(id.clone());
+    drop(dispatching);
+
+    spawn_dispatch_task(state, id, chat, prompt.clone(), prompt.content.clone());
+    Ok(Json(prompt))
 }
 
 #[cfg(test)]
@@ -2213,5 +2329,247 @@ mod tests {
             AgentEvent::Truncated { dropped } => assert_eq!(*dropped, 3),
             other => panic!("expected Truncated{{3}}, got {other:?}"),
         }
+    }
+
+    /// retry_prompt clears the last prompt's events and touched paths so
+    /// the same user message can be dispatched again.
+    #[test]
+    fn retry_prompt_clears_last_prompt_events_and_touched_paths() {
+        let mut reg = ChatRegistry::default();
+        let (cid, pid) = fresh_chat(&mut reg);
+        reg.append_event(
+            &cid,
+            &pid,
+            AgentEvent::Token {
+                text: "hello".into(),
+            },
+        );
+        reg.append_event(
+            &cid,
+            &pid,
+            AgentEvent::Done {
+                result: Some("hello".into()),
+                cost_usd: None,
+            },
+        );
+        {
+            let p = reg.by_id.get_mut(&cid).unwrap().prompts.iter_mut().find(|p| p.id == pid).unwrap();
+            p.touched_paths = vec!["src/main.rs".into()];
+        }
+
+        let retried = reg.retry_prompt(&cid).unwrap();
+        assert_eq!(retried.id, pid);
+        assert!(retried.events.is_empty());
+        assert!(retried.touched_paths.is_empty());
+
+        let chat = reg.get(&cid).unwrap();
+        let p = chat.prompts.iter().find(|p| p.id == pid).unwrap();
+        assert!(p.events.is_empty());
+        assert!(p.touched_paths.is_empty());
+    }
+
+    /// format_prompt_full turns a prompt + events into a full-detail
+    /// context entry with user text, assistant tokens, and tool/error notes.
+    #[test]
+    fn prompt_full_includes_user_assistant_and_tools() {
+        let prompt = PromptRecord {
+            id: "p1".into(),
+            seq: 1,
+            content: "  add auth  ".into(),
+            events: vec![
+                AgentEvent::Token {
+                    text: "I'll ".into(),
+                },
+                AgentEvent::Token {
+                    text: "add auth.".into(),
+                },
+                AgentEvent::ToolCall {
+                    name: "Edit".into(),
+                    args: serde_json::json!({"path": "src/auth.rs"}),
+                    id: None,
+                },
+                AgentEvent::ToolResult {
+                    name: "Edit".into(),
+                    result: serde_json::json!({"ok": true}),
+                    id: None,
+                },
+                AgentEvent::Error {
+                    message: "rate limited".into(),
+                },
+            ],
+            touched_paths: vec![],
+            created_at: chrono::Utc::now(),
+        };
+        let out = format_prompt_full(&prompt);
+        assert!(out.contains("User: add auth"));
+        assert!(out.contains("Assistant: I'll add auth."));
+        assert!(out.contains("Tool call: `Edit`"));
+        assert!(out.contains("Tool result: `Edit`"));
+        // Full detail means the full result JSON is preserved.
+        assert!(out.contains("{\"ok\":true}"));
+        assert!(out.contains("Error: rate limited"));
+    }
+
+    /// build_recent_context returns the last N prompts with full detail,
+    /// dropping older ones when the history is larger than the limit.
+    #[test]
+    fn recent_context_keeps_last_n_prompts() {
+        let prompts: Vec<PromptRecord> = (0..3)
+            .map(|i| PromptRecord {
+                id: format!("p{i}"),
+                seq: i + 1,
+                content: format!("msg {i}"),
+                events: vec![AgentEvent::Token {
+                    text: format!("reply {i}"),
+                }],
+                touched_paths: vec![],
+                created_at: chrono::Utc::now(),
+            })
+            .collect();
+        // Large limit -> all three prompts.
+        let full = build_recent_context(&prompts, 5);
+        assert!(full.contains("User: msg 0"));
+        assert!(full.contains("User: msg 2"));
+
+        // Limit of 2 -> only the most recent two prompts.
+        let truncated = build_recent_context(&prompts, 2);
+        assert!(!truncated.contains("User: msg 0"));
+        assert!(truncated.contains("User: msg 1"));
+        assert!(truncated.contains("User: msg 2"));
+    }
+
+    /// When a chat has prior prompts but no session_id (e.g. after a
+    /// model switch), the dispatch task prepends the recent conversation
+    /// context to the next user message.
+    #[tokio::test]
+    async fn dispatch_injects_recent_context_when_session_is_none() {
+        use crate::state::AppState;
+        use agentgrove_agents::{
+            AgentEvent, AgentProvider, ProviderDescriptor, ProviderError, ProviderId,
+            SpawnOptions,
+        };
+        use agentgrove_store::{open_pool, run_migrations};
+        use async_trait::async_trait;
+        use std::sync::Arc;
+        use tokio::sync::{Mutex, Notify};
+
+        struct MockProvider {
+            captured: Arc<Mutex<Option<String>>>,
+            notify: Arc<Notify>,
+        }
+
+        #[async_trait]
+        impl AgentProvider for MockProvider {
+            fn id(&self) -> ProviderId {
+                ProviderId::Fake
+            }
+
+            async fn detect(&self) -> ProviderDescriptor {
+                ProviderDescriptor {
+                    id: ProviderId::Fake,
+                    label: "mock".into(),
+                    available: false,
+                    path: None,
+                    version: None,
+                    default_model: "mock".into(),
+                    models: vec![],
+                    supports_resume: false,
+                    supports_current_os: true,
+                }
+            }
+
+            async fn spawn(
+                &self,
+                prompt: &str,
+                _opts: SpawnOptions,
+                events: tokio::sync::mpsc::UnboundedSender<AgentEvent>,
+            ) -> Result<(), ProviderError> {
+                self.captured.lock().await.replace(prompt.to_string());
+                let _ = events.send(AgentEvent::Token {
+                    text: "response".into(),
+                });
+                let _ = events.send(AgentEvent::Done {
+                    result: Some("response".into()),
+                    cost_usd: None,
+                });
+                self.notify.notify_one();
+                Ok(())
+            }
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let pool = open_pool(tmp.path()).await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        let mut state = AppState::new(tmp.path().to_path_buf(), pool);
+
+        let captured = Arc::new(Mutex::new(None));
+        let notify = Arc::new(Notify::new());
+        state.providers.providers = vec![Arc::new(MockProvider {
+            captured: captured.clone(),
+            notify: notify.clone(),
+        })];
+
+        let mut reg = state.chats.write().await;
+        let chat = reg.create(
+            "proj".into(),
+            None,
+            "t".into(),
+            "fake".into(),
+            "mock".into(),
+            None,
+        );
+        let chat_id = chat.id.clone();
+        let first = reg
+            .add_prompt(&chat_id, "First user message".into())
+            .unwrap();
+        reg.append_event(
+            &chat_id,
+            &first.id,
+            AgentEvent::Token {
+                text: "First assistant reply".into(),
+            },
+        );
+        // Snapshot the chat before the new prompt is added, matching the
+        // real route handler.
+        let chat = reg.get(&chat_id).unwrap().clone();
+        let second = reg
+            .add_prompt(&chat_id, "Second user message".into())
+            .unwrap();
+        drop(reg);
+
+        spawn_dispatch_task(
+            state.clone(),
+            chat_id,
+            chat,
+            second,
+            "Second user message".into(),
+        );
+
+        // Wait for the mock provider to receive the dispatch call.
+        tokio::time::timeout(std::time::Duration::from_secs(5), notify.notified())
+            .await
+            .unwrap();
+
+        let effective = captured.lock().await.take().unwrap();
+        assert!(
+            effective.contains("Prior conversation context"),
+            "expected context marker in effective body: {effective}"
+        );
+        assert!(
+            effective.contains("User: First user message"),
+            "expected prior user message in effective body: {effective}"
+        );
+        assert!(
+            effective.contains("Assistant: First assistant reply"),
+            "expected prior assistant reply in effective body: {effective}"
+        );
+        assert!(
+            effective.contains("Current user message:"),
+            "expected current-message marker in effective body: {effective}"
+        );
+        assert!(
+            effective.contains("Second user message"),
+            "expected original user message in effective body: {effective}"
+        );
     }
 }

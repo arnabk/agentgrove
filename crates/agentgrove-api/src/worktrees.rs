@@ -691,15 +691,21 @@ pub async fn history(
     Ok(Json(all.into_iter().map(Into::into).collect()))
 }
 
-/// Restore a soft-deleted worktree row by clearing `removed_at`. This
-/// only restores the database record; the git worktree on disk is **not
-/// re-created** — restoring a row whose path was physically removed via
-/// `git worktree remove` is informational only. Callers who need a
-/// functioning worktree should create a new one based on the restored
-/// row's branch.
+/// Restore a soft-deleted worktree row by clearing `removed_at` and
+/// re-creating the worktree directory on disk when it is missing.
+///
+/// The git worktree is restored as follows:
+///   * If the stored path already points to a valid git working tree,
+///     no disk changes are made.
+///   * If the local branch still exists, it is checked out at the
+///     original path.
+///   * If the branch was deleted along with the worktree, a new branch
+///     with the same name is created from the stored `base_ref`,
+///     preferring `origin/<base_ref>` after a fetch and falling back to
+///     the local ref when the remote is unreachable.
 ///
 /// Returns 404 if the id is unknown, and 409 if the row is already
-/// live.
+/// live. Returns 500 if the worktree directory cannot be re-created.
 pub async fn restore(
     State(state): State<AppState>,
     Path(worktree_id): Path<String>,
@@ -716,6 +722,26 @@ pub async fn restore(
             format!("worktree {worktree_id} is already live"),
         ));
     }
+    let project = state
+        .projects
+        .get(&existing.project_id)
+        .await
+        .map_err(|_| (StatusCode::NOT_FOUND, "project not found".into()))?;
+
+    // Re-create the on-disk worktree before flipping the row back to
+    // live. This keeps us from ever exposing a restored worktree whose
+    // path is missing, which is what caused "chats don't work, folders
+    // are missing" after restore.
+    if let Err(e) =
+        git::restore_worktree(&project.root, &existing.path, &existing.branch, &existing.base_ref)
+            .await
+    {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("git worktree restore failed: {e}"),
+        ));
+    }
+
     let changed = state
         .worktrees
         .restore(&worktree_id)
@@ -727,6 +753,13 @@ pub async fn restore(
             format!("worktree {worktree_id} could not be restored"),
         ));
     }
+    // The row was likely left in status=removing by the delete flow.
+    // Reset it to ready now that the directory is usable again.
+    let _ = state
+        .worktrees
+        .set_status(&worktree_id, WorktreeStatus::Ready)
+        .await;
+
     let fresh = state
         .worktrees
         .get(&worktree_id)

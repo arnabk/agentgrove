@@ -51,7 +51,8 @@ impl AgentProvider for FakeProvider {
             version: Some("test".into()),
             default_model: "echo".to_string(),
             models: vec!["echo".to_string()],
-            supports_resume: false,
+            supports_resume: true,
+            supports_current_os: crate::supports_current_os(crate::provider_os_support("fake")),
         }
     }
 
@@ -67,9 +68,14 @@ impl AgentProvider for FakeProvider {
         };
         if script.is_empty() {
             // Default behaviour for the env-gated production-FE
-            // fake provider: deterministic two-event response that
-            // echoes the prompt and immediately settles. Lets the
-            // FE auto-drain path complete without hanging.
+            // fake provider: deterministic three-event response that
+            // reports a session id, echoes the prompt, and immediately
+            // settles. The session id lets the BE treat this like a
+            // resume-capable provider, so context is only prepended on
+            // a model switch rather than on every turn.
+            let _ = events.send(AgentEvent::SessionStart {
+                session_id: "fake-session".into(),
+            });
             let _ = events.send(AgentEvent::Token {
                 text: format!("[fake] {prompt}"),
             });

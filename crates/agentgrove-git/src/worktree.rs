@@ -120,6 +120,107 @@ pub async fn remove_worktree(repo_path: &Path, worktree_path: &Path) -> Result<(
     Ok(())
 }
 
+/// Check whether `path` is an existing git working tree.
+async fn is_worktree_path(path: &Path) -> Result<bool, GitError> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    match run_git(&["rev-parse", "--is-inside-work-tree"], path).await {
+        Ok(out) => Ok(out.trim() == "true"),
+        Err(GitError::NonZero { .. }) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// Returns `true` if a local branch named `branch` exists.
+async fn branch_exists(repo_path: &Path, branch: &str) -> Result<bool, GitError> {
+    match run_git(
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ],
+        repo_path,
+    )
+    .await
+    {
+        Ok(_) => Ok(true),
+        Err(GitError::NonZero { .. }) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// Re-create a worktree on disk after its database row was soft-deleted.
+///
+/// If `worktree_path` already points to a valid git working tree, this
+/// is a no-op. If the path exists but is not a git worktree, the call
+/// fails so the caller does not clobber user data.
+///
+/// When the local branch still exists, it is checked out at the stored
+/// path. When it does not (e.g. the branch was deleted together with the
+/// worktree), a fresh branch with the same name is created from the
+/// stored `base_ref`. We first try `origin/<base_ref>` after a fetch, and
+/// fall back to the local `base_ref` if the remote is unreachable.
+///
+/// # Errors
+///
+/// Returns [`GitError`] if git is missing, the path is occupied by a
+/// non-git directory, or git cannot create the worktree.
+pub async fn restore_worktree(
+    repo_path: &Path,
+    worktree_path: &Path,
+    branch: &str,
+    base_ref: &str,
+) -> Result<(), GitError> {
+    if is_worktree_path(worktree_path).await? {
+        return Ok(());
+    }
+    if worktree_path.exists() {
+        return Err(GitError::NonZero {
+            code: 1,
+            stderr: format!(
+                "path exists but is not a git worktree: {}",
+                worktree_path.display()
+            ),
+        });
+    }
+
+    let wt_str = worktree_path.to_string_lossy().into_owned();
+
+    if branch_exists(repo_path, branch).await? {
+        run_git(&["worktree", "add", &wt_str, branch], repo_path).await?;
+        return Ok(());
+    }
+
+    // The branch was deleted along with the worktree. Recreate it from
+    // the base ref. Try to fetch first, but tolerate an offline remote
+    // by falling back to the local ref.
+    let _ = fetch_ref(repo_path, base_ref).await;
+    let remote_ref = format!("origin/{base_ref}");
+    if run_git(
+        &[
+            "worktree",
+            "add",
+            "-b",
+            branch,
+            &wt_str,
+            &remote_ref,
+        ],
+        repo_path,
+    )
+    .await
+    .is_err()
+    {
+        run_git(
+            &["worktree", "add", "-b", branch, &wt_str, base_ref],
+            repo_path,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 /// Garbage-collect dangling worktree administrative entries under
 /// `<repo>/.git/worktrees/`. Used by the API delete handler when
 /// the on-disk worktree directory is already gone (manual delete /

@@ -15,6 +15,7 @@ export default function TeamChatPane() {
   const [busy, setBusy] = createSignal(false);
   const [username, setUsername] = createSignal("dev");
   let scrollRef: HTMLDivElement | undefined = undefined;
+  let inputRef: HTMLInputElement | undefined = undefined;
 
   async function load() {
     try {
@@ -83,6 +84,9 @@ export default function TeamChatPane() {
     } finally {
       setBusy(false);
     }
+    // Re-enable happens in the same Solid batch, but focus must run after
+    // the DOM update removes the disabled attribute.
+    queueMicrotask(() => inputRef?.focus());
   }
 
   return (
@@ -115,6 +119,7 @@ export default function TeamChatPane() {
         <form onSubmit={send} class="flex gap-2">
           <input
             type="text"
+            ref={(el) => (inputRef = el)}
             class="ag-input flex-1 text-[13px] !py-1.5"
             placeholder="Type a message..."
             value={draft()}
