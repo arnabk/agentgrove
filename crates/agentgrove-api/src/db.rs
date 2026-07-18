@@ -157,10 +157,7 @@ pub async fn tables(
             &[],
         )
         .await?;
-    let tables = rows
-        .iter()
-        .map(|r| r.get::<_, String>(0))
-        .collect();
+    let tables = rows.iter().map(|r| r.get::<_, String>(0)).collect();
     Ok(Json(TablesResponse { tables }))
 }
 
@@ -424,7 +421,12 @@ fn rows_to_response(rows: Vec<tokio_postgres::Row>) -> QueryResponse {
         .unwrap_or_default();
     let rows = out_rows
         .into_iter()
-        .map(|m| columns.iter().map(|c| m.get(c).cloned().unwrap_or(serde_json::Value::Null)).collect())
+        .map(|m| {
+            columns
+                .iter()
+                .map(|c| m.get(c).cloned().unwrap_or(serde_json::Value::Null))
+                .collect()
+        })
         .collect();
     QueryResponse {
         columns,
@@ -440,5 +442,8 @@ fn is_read_query(sql: &str) -> bool {
         .next()
         .unwrap_or("")
         .to_lowercase();
-    matches!(head.as_str(), "select" | "with" | "values" | "explain" | "(")
+    matches!(
+        head.as_str(),
+        "select" | "with" | "values" | "explain" | "("
+    )
 }

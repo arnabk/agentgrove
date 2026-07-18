@@ -2353,7 +2353,14 @@ mod tests {
             },
         );
         {
-            let p = reg.by_id.get_mut(&cid).unwrap().prompts.iter_mut().find(|p| p.id == pid).unwrap();
+            let p = reg
+                .by_id
+                .get_mut(&cid)
+                .unwrap()
+                .prompts
+                .iter_mut()
+                .find(|p| p.id == pid)
+                .unwrap();
             p.touched_paths = vec!["src/main.rs".into()];
         }
 
@@ -2445,8 +2452,7 @@ mod tests {
     async fn dispatch_injects_recent_context_when_session_is_none() {
         use crate::state::AppState;
         use agentgrove_agents::{
-            AgentEvent, AgentProvider, ProviderDescriptor, ProviderError, ProviderId,
-            SpawnOptions,
+            AgentEvent, AgentProvider, ProviderDescriptor, ProviderError, ProviderId, SpawnOptions,
         };
         use agentgrove_store::{open_pool, run_migrations};
         use async_trait::async_trait;

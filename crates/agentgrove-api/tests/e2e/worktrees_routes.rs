@@ -300,7 +300,10 @@ async fn worktree_restore_clears_removed_at() {
     );
 
     // Confirm the directory is present before deletion.
-    assert!(std::path::Path::new(&path).exists(), "worktree path should exist before delete");
+    assert!(
+        std::path::Path::new(&path).exists(),
+        "worktree path should exist before delete"
+    );
 
     let del = h
         .delete_auth(&format!("/api/projects/{project_id}/worktrees/{id}"))
@@ -310,7 +313,10 @@ async fn worktree_restore_clears_removed_at() {
     assert_eq!(del.status(), 204);
 
     // The on-disk directory is gone after `git worktree remove`.
-    assert!(!std::path::Path::new(&path).exists(), "worktree path should be removed");
+    assert!(
+        !std::path::Path::new(&path).exists(),
+        "worktree path should be removed"
+    );
 
     // Live list no longer contains it.
     let live = h
@@ -331,10 +337,16 @@ async fn worktree_restore_clears_removed_at() {
     let restored: Value = rest.json().await.unwrap();
     assert_eq!(restored["id"], id);
     assert!(restored["removed_at"].is_null());
-    assert_eq!(restored["status"], "ready", "restored worktree should be ready");
+    assert_eq!(
+        restored["status"], "ready",
+        "restored worktree should be ready"
+    );
 
     // The directory was re-created and is registered as a git worktree.
-    assert!(std::path::Path::new(&path).exists(), "restored worktree path should exist");
+    assert!(
+        std::path::Path::new(&path).exists(),
+        "restored worktree path should exist"
+    );
     let restored_path = std::fs::canonicalize(&path).expect("canonicalize restored path");
     let list_out = run_git_in(&work(&dir), &["worktree", "list", "--porcelain"]).await;
     let found = list_out
@@ -386,7 +398,9 @@ async fn worktree_restore_recreates_deleted_branch() {
     );
 
     let del = h
-        .delete_auth(&format!("/api/projects/{project_id}/worktrees/{id}?delete_branch=true"))
+        .delete_auth(&format!(
+            "/api/projects/{project_id}/worktrees/{id}?delete_branch=true"
+        ))
         .send()
         .await
         .unwrap();
@@ -394,7 +408,10 @@ async fn worktree_restore_recreates_deleted_branch() {
 
     // Branch is gone.
     let branches = run_git_in(&work(&dir), &["branch", "--list", "restore-me"]).await;
-    assert!(branches.trim().is_empty(), "branch should have been deleted");
+    assert!(
+        branches.trim().is_empty(),
+        "branch should have been deleted"
+    );
 
     // Restore re-creates the branch and the worktree.
     let rest = h
@@ -406,7 +423,10 @@ async fn worktree_restore_recreates_deleted_branch() {
     let restored: Value = rest.json().await.unwrap();
     assert!(restored["removed_at"].is_null());
     assert_eq!(restored["status"], "ready");
-    assert!(std::path::Path::new(&path).exists(), "worktree path should be recreated");
+    assert!(
+        std::path::Path::new(&path).exists(),
+        "worktree path should be recreated"
+    );
     let restored_path = std::fs::canonicalize(&path).expect("canonicalize restored path");
 
     let list_out = run_git_in(&work(&dir), &["worktree", "list", "--porcelain"]).await;

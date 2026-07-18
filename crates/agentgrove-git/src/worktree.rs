@@ -199,14 +199,7 @@ pub async fn restore_worktree(
     let _ = fetch_ref(repo_path, base_ref).await;
     let remote_ref = format!("origin/{base_ref}");
     if run_git(
-        &[
-            "worktree",
-            "add",
-            "-b",
-            branch,
-            &wt_str,
-            &remote_ref,
-        ],
+        &["worktree", "add", "-b", branch, &wt_str, &remote_ref],
         repo_path,
     )
     .await

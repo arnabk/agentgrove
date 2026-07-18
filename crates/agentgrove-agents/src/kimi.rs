@@ -156,7 +156,11 @@ fn parse_resume_hint(line: &str) -> Option<String> {
         .collect();
     // Session ids are uuids; guard against truncating into a partial
     // token if the hint format drifts.
-    if id.len() >= 32 { Some(id) } else { None }
+    if id.len() >= 32 {
+        Some(id)
+    } else {
+        None
+    }
 }
 
 #[async_trait]
@@ -320,8 +324,8 @@ impl AgentProvider for KimiProvider {
                     if !session_announced {
                         if let Some(id) = parse_resume_hint(&line) {
                             session_announced = true;
-                            let _ = events_for_stderr
-                                .send(AgentEvent::SessionStart { session_id: id });
+                            let _ =
+                                events_for_stderr.send(AgentEvent::SessionStart { session_id: id });
                             continue;
                         }
                     }

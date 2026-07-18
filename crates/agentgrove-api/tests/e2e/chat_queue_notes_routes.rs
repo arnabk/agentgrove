@@ -1166,20 +1166,31 @@ async fn rapid_fire_then_manual_then_run_next_drains_every_item() {
         }
     }
 
-    // Final check: all 5 messages made it into the timeline.
-    let view: Value = h
-        .get_auth(&format!("/api/chats/{chat_id}"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let prompts = view["prompts"].as_array().unwrap();
-    let contents: Vec<&str> = prompts
-        .iter()
-        .map(|p| p["content"].as_str().unwrap_or(""))
-        .collect();
+    // Final check: all 5 messages made it into the timeline. Poll —
+    // the last run_next dispatch lands asynchronously after the queue
+    // reports drained, so an immediate assert races the prompt insert
+    // (seen flake on CI: rapid-4 missing).
+    let mut contents: Vec<String> = Vec::new();
+    for _ in 0..200 {
+        let view: Value = h
+            .get_auth(&format!("/api/chats/{chat_id}"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        contents = view["prompts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["content"].as_str().unwrap_or("").to_string())
+            .collect();
+        if (0..5).all(|i| contents.iter().any(|c| *c == format!("rapid-{i}"))) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
     for i in 0..5 {
         let needle = format!("rapid-{i}");
         assert!(

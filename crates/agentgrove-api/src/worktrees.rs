@@ -732,9 +732,13 @@ pub async fn restore(
     // live. This keeps us from ever exposing a restored worktree whose
     // path is missing, which is what caused "chats don't work, folders
     // are missing" after restore.
-    if let Err(e) =
-        git::restore_worktree(&project.root, &existing.path, &existing.branch, &existing.base_ref)
-            .await
+    if let Err(e) = git::restore_worktree(
+        &project.root,
+        &existing.path,
+        &existing.branch,
+        &existing.base_ref,
+    )
+    .await
     {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
