@@ -27,6 +27,9 @@ Post-launch landscape (mid-2026):
 
 ## The ideas
 
+> Only items that have been discussed and approved live here.
+> Everything else sits in the [parking lot](#parking-lot-not-approved).
+
 ### Flagship track — the plan → execute → review loop
 
 1. [GitHub Issues board](github-issues-board.md) — kanban UI over GitHub
@@ -34,39 +37,40 @@ Post-launch landscape (mid-2026):
    + agent chat. **Current leading candidate.**
 2. [Review loop: diff comments → agent](review-loop-diff-comments.md) —
    inline comments on the diff viewer become follow-up prompts.
-3. [Native PR flow](native-pr-flow.md) — create PR with AI title/body,
+3. [PR lifecycle](native-pr-flow.md) — create PR with AI title/body,
    checks, merge. Absorbs the `Closes #N` linking the board relies on.
+4. [PR management (review center)](pr-management.md) — all PRs across
+   projects: needs-my-review / assigned-to-me / authored, with age and
+   review state, plus one-click "review with agent" checkout.
 
 ### Delight track
 
-4. [Dev-server preview](dev-server-preview.md) — per-worktree port
-   detection + embedded browser pane.
 5. [Agent runs inbox & visual job manager](agent-runs-inbox.md) —
    watch CLI session dirs for runs (incl. cron-launched) and manage
    existing crontab jobs visually. **Native scheduling rejected** —
    that would compete with our own providers.
-6. [Attention system](attention-system.md) — OS notifications + unread
-   badges when a turn finishes/errors.
 
 ### Polish track
 
-7. [Composer @-file mentions](composer-file-mentions.md) — file
+6. [Composer @-file mentions](composer-file-mentions.md) — file
    autocomplete in the chat composer.
-8. [Commit & push flow](commit-push-flow.md) — one-click commit+push
-   per worktree with suggested message.
-9. [Terminal splits & presets](terminal-splits.md).
 
-### Platform track (later)
+## Parking lot (not approved)
 
-10. [Generic "any CLI" provider](generic-cli-provider.md).
-11. [MCP server mode](mcp-server-mode.md).
-12. [Remote headless mode](remote-headless.md).
-13. [Sandboxed unattended runs](sandboxed-runs.md) — deferred; heavy
-    infra, solo-dev case already works.
+Raw candidates from early brainstorming — **not on the roadmap** until
+discussed and approved individually:
+
+- Dev-server preview — per-worktree port detection + embedded browser pane.
+- Attention system — OS notifications + unread badges on finished turns.
+- Commit & push flow — one-click commit+push per worktree.
+- Terminal splits & presets.
+- Generic "any CLI" provider — user-defined launch templates.
+- MCP server mode — expose AgentGrove as MCP tools.
+- Remote headless mode — BE on a server, access from anywhere.
+- Sandboxed unattended runs — containers per workspace.
 
 ## Tentative sequencing (not final)
 
-1. Polish trio first (7, 8, 6) — fast, keeps release momentum.
-2. Flagship: issues board (1) + review loop (2) + PR flow (3).
-3. Delight: preview (4), automations (5).
-4. Platform items as the community asks for them.
+1. Polish first (6) — fast, keeps release momentum.
+2. Flagship: issues board (1) + review loop (2) + PR lifecycle (3).
+3. PR management (4) + runs inbox (5).
