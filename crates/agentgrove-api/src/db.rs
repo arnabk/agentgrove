@@ -131,6 +131,40 @@ pub async fn test(
 }
 
 // ------------------------------------------------------------------
+// /api/db/databases
+// ------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct DatabasesParams {
+    #[serde(default = "default_connection")]
+    connection: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DatabasesResponse {
+    databases: Vec<String>,
+}
+
+/// List every connectable database on the server so the FE can render
+/// a DBeaver-style connection → databases → tables tree.
+pub async fn databases(
+    State(_state): State<AppState>,
+    Query(params): Query<DatabasesParams>,
+) -> Result<Json<DatabasesResponse>, DbError> {
+    let client = connect(&params.connection).await?;
+    let rows = client
+        .query(
+            "SELECT datname FROM pg_database \
+             WHERE datistemplate = false AND datallowconn = true \
+             ORDER BY datname",
+            &[],
+        )
+        .await?;
+    let databases = rows.iter().map(|r| r.get::<_, String>(0)).collect();
+    Ok(Json(DatabasesResponse { databases }))
+}
+
+// ------------------------------------------------------------------
 // /api/db/tables
 // ------------------------------------------------------------------
 

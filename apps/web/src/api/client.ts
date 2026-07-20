@@ -700,6 +700,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ connection }),
     }),
+  listDbDatabases: (connection?: string) => {
+    const qs = new URLSearchParams();
+    if (connection) qs.set("connection", connection);
+    return req<{ databases: string[] }>(`/api/db/databases?${qs.toString()}`).then(
+      (r) => r.databases,
+    );
+  },
   listDbTables: (connection?: string) => {
     const qs = new URLSearchParams();
     if (connection) qs.set("connection", connection);

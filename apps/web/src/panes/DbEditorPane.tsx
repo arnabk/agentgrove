@@ -14,6 +14,7 @@ import {
   activeConn,
   applyDbFilter,
   clearDbFilter,
+  dbActiveDb,
   dbColumnCache,
   dbColumns,
   dbConnSubtitle,
@@ -140,6 +141,10 @@ export default function DbEditorPane() {
             <>
               <div class="px-3 py-2 border-b border-border flex items-center gap-2 bg-bg-1">
                 <span class="font-medium">{conn().name}</span>
+                <Show when={dbActiveDb()}>
+                  <span class="text-fg-subtle">·</span>
+                  <span class="text-accent">{dbActiveDb()}</span>
+                </Show>
                 <span class="text-fg-subtle text-[11.5px] truncate">
                   {dbConnSubtitle(conn().url)}
                 </span>

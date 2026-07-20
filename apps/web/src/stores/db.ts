@@ -19,6 +19,15 @@ export const [dbTables, setDbTables] = createSignal<string[]>([]);
 /** Table name → column names, prefetched in the background for SQL
  *  autocomplete. Emptied on disconnect / connection switch. */
 export const [dbColumnCache, setDbColumnCache] = createSignal<Record<string, string[]>>({});
+/** All databases on the connected server (DBeaver-style tree). */
+export const [dbDatabases, setDbDatabases] = createSignal<string[]>([]);
+/** The database the editor tab + SQL run against. Defaults to the
+ *  connection URL's database. */
+export const [dbActiveDb, setDbActiveDb] = createSignal("");
+/** Expanded databases in the rail tree. */
+export const [dbExpandedDbs, setDbExpandedDbs] = createSignal<Set<string>>(new Set());
+/** Tables per database, lazy-loaded on expand. */
+export const [dbTablesByDb, setDbTablesByDb] = createSignal<Record<string, string[]>>({});
 export const [dbTableFilter, setDbTableFilter] = createSignal("");
 export const [dbSelectedTable, setDbSelectedTable] = createSignal<string | null>(null);
 export const [dbColumns, setDbColumns] = createSignal<DbColumn[]>([]);
@@ -48,6 +57,36 @@ export function dbConnSubtitle(url: string): string {
   } catch {
     return url;
   }
+}
+
+/** The database name embedded in a postgres URL ("" when unparseable). */
+export function dbDefaultDbName(url: string): string {
+  try {
+    return decodeURIComponent(new URL(url).pathname.replace(/^\//, ""));
+  } catch {
+    return "";
+  }
+}
+
+/** The connection URL with its database swapped for `db`. Falls back
+ *  to the original URL when it doesn't parse. */
+export function dbUrlFor(url: string, db: string): string {
+  try {
+    const u = new URL(url);
+    u.pathname = `/${encodeURIComponent(db)}`;
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+/** Connection URL pointing at the currently-active database. All
+ *  table/column/row/query calls go through this. */
+export function activeDbUrl(): string | undefined {
+  const conn = activeConn();
+  if (!conn) return undefined;
+  const db = dbActiveDb();
+  return db ? dbUrlFor(conn.url, db) : conn.url;
 }
 
 let initialized = false;
@@ -98,8 +137,14 @@ export async function connectDb(conn: DbConnection) {
     setDbColumns([]);
     setDbOffset(0);
     setDbTableFilter("");
+    setDbTables([]);
+    setDbColumnCache({});
+    setDbDatabases([]);
+    setDbTablesByDb({});
+    setDbExpandedDbs(new Set<string>());
+    setDbActiveDb(dbDefaultDbName(conn.url));
   }
-  await loadDbTables();
+  await loadDatabases();
 }
 
 export function disconnectDb() {
@@ -107,9 +152,83 @@ export function disconnectDb() {
   localStorage.removeItem(ACTIVE_CONN_KEY);
   setDbTables([]);
   setDbColumnCache({});
+  setDbDatabases([]);
+  setDbTablesByDb({});
+  setDbExpandedDbs(new Set<string>());
+  setDbActiveDb("");
   setDbSelectedTable(null);
   setDbRows(null);
   setDbColumns([]);
+}
+
+/** Load the server's database list, then the active db's tables. Falls
+ *  back to flat table loading when the server refuses the database
+ *  listing (older proxies / restricted roles). */
+async function loadDatabases() {
+  const conn = activeConn();
+  if (!conn) return;
+  try {
+    const dbs = await api.listDbDatabases(conn.url);
+    setDbDatabases(dbs);
+    const active = dbActiveDb() && dbs.includes(dbActiveDb()) ? dbActiveDb() : (dbs[0] ?? "");
+    setDbActiveDb(active);
+    if (active) {
+      setDbExpandedDbs(new Set([active]));
+      await loadDbTables();
+    }
+  } catch {
+    // Restricted server: behave like before — tables of the URL's db only.
+    await loadDbTables();
+  }
+}
+
+/** Make `db` the active database: its tables drive the editor tab and
+ *  SQL execution. Expands the node in the rail tree. */
+export async function selectDb(db: string) {
+  if (!db || db === dbActiveDb()) {
+    setDbExpandedDbs((s) => {
+      const next = new Set<string>(s);
+      next.add(db);
+      return next;
+    });
+    return;
+  }
+  setDbActiveDb(db);
+  setDbExpandedDbs((s) => {
+    const next = new Set<string>(s);
+    next.add(db);
+    return next;
+  });
+  setDbSelectedTable(null);
+  setDbRows(null);
+  setDbColumns([]);
+  await loadDbTables();
+}
+
+/** Expand/collapse a database in the rail tree, lazy-loading its
+ *  tables on first expand. Does NOT change the active database. */
+export function toggleDbExpanded(db: string) {
+  const s = new Set(dbExpandedDbs());
+  if (s.has(db)) {
+    s.delete(db);
+    setDbExpandedDbs(s);
+    return;
+  }
+  s.add(db);
+  setDbExpandedDbs(s);
+  if (!dbTablesByDb()[db]) void loadTablesForDb(db);
+}
+
+/** Load tables for an arbitrary database into the tree cache. */
+async function loadTablesForDb(db: string) {
+  const conn = activeConn();
+  if (!conn) return;
+  try {
+    const list = await api.listDbTables(dbUrlFor(conn.url, db));
+    setDbTablesByDb((m) => ({ ...m, [db]: list }));
+  } catch (e) {
+    pushToast({ title: "DB error", message: String(e), level: "error" });
+  }
 }
 
 let prefetchToken = 0;
@@ -138,18 +257,20 @@ async function prefetchColumns(url: string, tables: string[]) {
 }
 
 export async function loadDbTables() {
-  const conn = activeConn();
-  if (!conn) return;
+  const url = activeDbUrl();
+  if (!url) return;
   setDbLoading(true);
   try {
-    const list = await api.listDbTables(conn.url);
+    const list = await api.listDbTables(url);
     setDbTables(list);
+    const db = dbActiveDb();
+    if (db) setDbTablesByDb((m) => ({ ...m, [db]: list }));
     setDbColumnCache({});
-    void prefetchColumns(conn.url, list);
+    void prefetchColumns(url, list);
   } catch (e) {
     setDbTables([]);
     pushToast({
-      title: `Cannot connect to ${conn.name}`,
+      title: `Cannot load tables for ${dbActiveDb() || "database"}`,
       message: String(e),
       level: "error",
     });
@@ -159,15 +280,15 @@ export async function loadDbTables() {
 }
 
 export async function loadDbTableData(table: string, resetOffset = true) {
-  const conn = activeConn();
-  if (!conn) return;
+  const url = activeDbUrl();
+  if (!url) return;
   if (resetOffset) setDbOffset(0);
   setDbLoading(true);
   try {
     const [cols, data] = await Promise.all([
-      api.listDbColumns(table, conn.url).then((r) => r.columns),
+      api.listDbColumns(table, url).then((r) => r.columns),
       api.listDbRows(table, {
-        connection: conn.url,
+        connection: url,
         limit: DB_PAGE_LIMIT,
         offset: dbOffset(),
         filter_col: dbFilterCol(),
@@ -186,13 +307,13 @@ export async function loadDbTableData(table: string, resetOffset = true) {
 }
 
 export async function runDbSql() {
-  const conn = activeConn();
+  const url = activeDbUrl();
   const q = dbSql().trim();
-  if (!conn || !q) return;
+  if (!url || !q) return;
   setDbLoading(true);
   setDbSelectedTable(null);
   try {
-    const data = await api.runDbQuery(q, conn.url);
+    const data = await api.runDbQuery(q, url);
     setDbRows(data);
   } catch (e) {
     pushToast({ title: "DB error", message: String(e), level: "error" });

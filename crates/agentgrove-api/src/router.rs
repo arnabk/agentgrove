@@ -21,6 +21,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/version", get(version))
         .route("/api/db/info", get(db::info))
         .route("/api/db/test", post(db::test))
+        .route("/api/db/databases", get(db::databases))
         .route("/api/db/tables", get(db::tables))
         .route("/api/db/tables/:table/columns", get(db::columns))
         .route("/api/db/tables/:table/rows", get(db::rows))
