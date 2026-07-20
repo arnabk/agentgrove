@@ -53,6 +53,7 @@ On Linux, install the same packages with your distro's package manager (e.g., `a
 All detailed docs live under [`docs/`](./docs/):
 
 - [Features](./docs/features.md)
+- [Roadmap (working draft)](./docs/roadmap/README.md)
 - [Architecture](./docs/architecture/overview.md)
 - [Contributing](./docs/CONTRIBUTING.md)
 - [Local dev guide](./docs/guides/local-dev.md)
