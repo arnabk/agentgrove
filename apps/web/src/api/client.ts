@@ -295,6 +295,10 @@ export const api = {
   // Worktrees
   listWorktrees: (projectId: string) =>
     req<Worktree[]>(`/api/projects/${encodeURIComponent(projectId)}/worktrees`),
+  listBranches: (projectId: string) =>
+    req<{ name: string; current: boolean }[]>(
+      `/api/projects/${encodeURIComponent(projectId)}/branches`,
+    ),
   createWorktree: (
     projectId: string,
     body: {

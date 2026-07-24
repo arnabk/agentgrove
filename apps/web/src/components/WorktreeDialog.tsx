@@ -22,10 +22,18 @@ export default function WorktreeDialog(props: Props) {
   // add -b` for an existing branch.
   const [historyBranches, setHistoryBranches] = createSignal<Set<string>>(new Set());
 
+  // Branches that exist in *git* for this project, whatever their
+  // worktree status. Without these, suggest could offer a name that
+  // only exists as a git branch (deleted worktree row, branch created
+  // elsewhere) and `git worktree add -b` would reject it — the user
+  // had to keep clicking suggest until a fresh name came up.
+  const [gitBranches, setGitBranches] = createSignal<Set<string>>(new Set());
+
   const takenBranches = () => {
     const out = new Set<string>();
     for (const b of liveBranches()) out.add(b);
     for (const b of historyBranches()) out.add(b);
+    for (const b of gitBranches()) out.add(b);
     return out;
   };
 
@@ -126,6 +134,18 @@ export default function WorktreeDialog(props: Props) {
       })
       .catch(() => {
         // ignore — fall back to live-only suggestions
+      });
+    void api
+      .listBranches(props.projectId)
+      .then((entries) => {
+        setGitBranches(new Set(entries.map((b) => b.name)));
+        // Re-seed once git branches are in if the user hasn't typed yet.
+        if (!branch().trim()) {
+          setBranch(suggestBranchName(takenBranches()));
+        }
+      })
+      .catch(() => {
+        // ignore — fall back to live+history suggestions
       });
     if (!branch().trim()) {
       setBranch(suggestBranchName(takenBranches()));
