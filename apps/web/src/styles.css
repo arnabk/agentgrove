@@ -1233,3 +1233,13 @@ textarea::placeholder {
     -webkit-text-fill-color: var(--ag-fg);
   }
 }
+
+/* Terminal: make bright-black (color index 8) clearly faint and italic.
+ * zsh-autosuggestions paints its ghost text in fg-8, and with the default
+ * near-normal grey it read as typed text — after `l`+Tab users saw "lls"
+ * when the buffer was only "ll". Fainter + italic makes the ghost
+ * unmistakably a suggestion, not input. */
+.xterm .xterm-fg-8 {
+  color: #666c74 !important;
+  font-style: italic !important;
+}

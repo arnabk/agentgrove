@@ -69,12 +69,19 @@ export default function TerminalPane(props: Props) {
     host.style.inset = "0";
     host.style.display = "none";
     host.dataset.testid = `term-${id()}`;
+    // Resolve the theme background to a concrete color. Passing the raw
+    // "var(--ag-bg-1)" string worked for the DOM-renderer stylesheet but
+    // xterm's internal canvas layers (e.g. the scrollable element) parse
+    // colors in JS, fail on var(), and fall back to #000 — which is what
+    // the black strip on the terminal's right edge was.
+    const termBg =
+      getComputedStyle(document.documentElement).getPropertyValue("--ag-bg-1").trim() || "#14171c";
     const term = new Terminal({
       fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 13,
       lineHeight: 1.3,
       theme: {
-        background: "var(--ag-bg-1)" as unknown as string,
+        background: termBg,
         foreground: "#e8ecf2",
         cursor: "#7c5cff",
       },
