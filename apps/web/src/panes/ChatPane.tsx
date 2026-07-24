@@ -1736,7 +1736,20 @@ function VirtualizedTimeline(props: {
   function scrollToBottom() {
     const len = props.prompts.length;
     if (len === 0) return;
+    markProgrammatic(400);
     virtualizer.scrollToIndex(len - 1, { align: "end" });
+  }
+
+  /** Programmatic-scroll guard. Chrome reports scroll events caused by
+   *  OUR scrollTop writes (scrollToIndex, anchor restores) as trusted,
+   *  so `onScroll` was recording them as user intent — on chat switch
+   *  the intermediate positions during measurement settling became the
+   *  "user position" and the ResizeObserver kept restoring the wrong
+   *  spot (the "scroll jumps around" bug). While this window is active
+   *  and no real wheel gesture is in flight, onScroll ignores events. */
+  let programmaticUntil = 0;
+  function markProgrammatic(ms = 250) {
+    programmaticUntil = Date.now() + ms;
   }
 
   /** Apply the user's scroll rule: if we haven't established a user
@@ -1747,6 +1760,7 @@ function VirtualizedTimeline(props: {
     if (userScrollTop === null || userAtBottom) {
       scrollToBottom();
     } else {
+      markProgrammatic();
       scrollRef.scrollTop = userScrollTop;
     }
   }
@@ -1827,6 +1841,7 @@ function VirtualizedTimeline(props: {
       if (userScrollTop === null || userAtBottom) {
         scrollToBottom();
       } else {
+        markProgrammatic();
         scrollRef.scrollTop = userScrollTop;
       }
     });
@@ -1906,6 +1921,7 @@ function VirtualizedTimeline(props: {
 
   function onScroll(event: Event) {
     if (!scrollRef) return;
+    if (Date.now() < programmaticUntil && !wheelActive) return;
     if (Date.now() < contentChangedUntil && !wheelActive) return;
     if (event.isTrusted || wheelActive) {
       const distance = scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight;
@@ -1934,6 +1950,7 @@ function VirtualizedTimeline(props: {
       if (!scrollRef || !preserveAnchor) return;
       const delta = scrollRef.scrollHeight - preserveAnchor.scrollHeight;
       if (delta > 0) {
+        markProgrammatic();
         scrollRef.scrollTop = preserveAnchor.scrollTop + delta;
       }
       preserveAnchor = null;
