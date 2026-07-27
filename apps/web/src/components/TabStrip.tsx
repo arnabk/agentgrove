@@ -150,7 +150,7 @@ export default function TabStrip() {
 
   return (
     <header
-      class="h-10 px-2 flex items-center gap-1 border-b border-border bg-bg-1 overflow-x-auto shrink-0"
+      class="h-10 px-2 flex items-center gap-1 bg-bg-1 overflow-x-auto shrink-0"
       data-testid="tab-strip"
     >
       <For each={tabs()}>
