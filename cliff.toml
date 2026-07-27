@@ -1,0 +1,55 @@
+# git-cliff configuration for AgentGrove release notes.
+#
+# We cut a release on every push to main (see .github/workflows/release.yml),
+# which means the commit history is interleaved with automated
+# `chore: bump version to X [skip ci]` commits. Those MUST be filtered out
+# or every release body is half version-bump noise. Commits otherwise follow
+# Conventional Commits (`feat(scope):`, `fix(scope):`, `docs:`, `test:`…),
+# which git-cliff groups automatically via the parsers below.
+
+[changelog]
+# Rendered as the body of each GitHub Release. `release.yml` feeds
+# `git cliff --current` output into softprops/action-gh-release.
+header = ""
+
+body = """
+{%- for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits -%}
+- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | upper_first | replace(from=" [skip ci]", to="") | replace(from=" [skip release]", to="") | trim }} ({{ commit.id | truncate(length=7, end="") }})
+{% endfor %}
+{% endfor -%}
+"""
+
+footer = ""
+
+# Remove these so the release body is human-readable, not a git dump.
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+
+# Tags are `vX.Y.Z`.
+tag_pattern = "v[0-9]+\\.[0-9]+\\.[0-9]+"
+
+# Protect the changelog from the automated release machinery + reverts.
+commit_parsers = [
+    { message = "^chore: bump version", skip = true },
+    { message = "^chore\\(release\\)", skip = true },
+    { message = "^Revert", skip = true },
+    { message = "^feat", group = "Added" },
+    { message = "^fix", group = "Fixed" },
+    { message = "^perf", group = "Performance" },
+    { message = "^refactor", group = "Changed" },
+    { message = "^style", group = "Changed" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^test", group = "Testing" },
+    { message = "^build", group = "Build" },
+    { message = "^ci", group = "Build" },
+    { message = "^chore", group = "Chore" },
+    { message = ".*", group = "Other" },
+]
+
+# Stable, deterministic ordering inside each group.
+sort_commits = "newest"

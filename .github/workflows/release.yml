@@ -93,23 +93,35 @@ jobs:
           ref: ${{ needs.tag.outputs.tag }}
           fetch-depth: 0
 
+      - name: Install git-cliff
+        run: |
+          set -euo pipefail
+          VERSION="2.13.1"
+          curl -sSL "https://github.com/orhun/git-cliff/releases/download/v${VERSION}/git-cliff-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz --strip-components=1 "git-cliff-${VERSION}/git-cliff"
+          sudo mv git-cliff /usr/local/bin/
+          git cliff --version
+
       - name: Generate changelog
         id: changelog
         run: |
           set -euo pipefail
-          # Find the previous tag (the one before our new tag).
-          PREV=$(git tag --sort=-v:refname | head -2 | tail -1 || echo "")
-          if [ -z "$PREV" ] || [ "$PREV" = "${{ needs.tag.outputs.tag }}" ]; then
-            echo "body=Initial release 🎉" >> "$GITHUB_OUTPUT"
-          else
-            BODY=$(git log --oneline "$PREV".."${{ needs.tag.outputs.tag }}" --pretty=format:"- %s" | head -50)
-            # GitHub Actions multiline output.
-            {
-              echo "body<<EOF"
-              echo "$BODY"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
+          # The release job checks out the new tag (ref: tag), so HEAD is
+          # exactly the release commit. `git cliff --current` renders the
+          # range from the previous tag to this one, grouped by commit
+          # type, with the automated version-bump commits filtered out.
+          BODY=$(git cliff --config cliff.toml --current --strip all)
+          # If there were no user-facing commits between tags (e.g. only
+          # version bumps), fall back to a friendly one-liner rather than
+          # publishing an empty release body.
+          if [ -z "${BODY//[$' \t\n']/}" ]; then
+            BODY="Maintenance release — no user-facing changes."
           fi
+          {
+            echo "body<<EOF"
+            echo "$BODY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
