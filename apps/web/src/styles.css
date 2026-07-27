@@ -111,6 +111,187 @@
   --ag-danger: #f7768e;
 }
 
+/* ---------- Material — a designed dark system -----------------------------
+   Not a color swap: a coherent, layered design language for the whole app.
+
+   Principles:
+     • Tonal scale — every surface derives from ONE blue-violet neutral
+       hue, ramped evenly (canvas → panel → elevated → overlay) so depth
+       is expressed by real luminance steps, not hairline borders.
+     • True elevation — raised surfaces carry a faint top-edge highlight
+       and a soft layered shadow, which is what makes a dark UI read as
+       three-dimensional rather than a flat wall.
+     • One accent, used sparingly — a designed indigo→violet with a
+       state-layer (soft) for hover/active/selected and a readable
+       on-accent for filled controls.
+     • Calm canvas — the maze texture is off; instead a near-imperceptible
+       top-light gradient keeps the background from reading as a void.
+
+   Everything is scoped to [data-theme-id="material-dark"]; the other
+   themes are untouched. kind="dark" keeps the [data-theme="dark"] base.
+--------------------------------------------------------------------------- */
+[data-theme-id="material-dark"] {
+  /* -- Tonal surface scale (single hue: blue-violet neutral ~ 250°) -- */
+  --ag-bg: #0e0f15; /* canvas — deepest (chat area, app bg) */
+  --ag-bg-1: #15171f; /* surface-1: rail, sidebar, top bar */
+  --ag-bg-2: #1d1f2a; /* surface-2: cards, inputs, assistant bubble */
+  --ag-bg-3: #262935; /* surface-3: hover state */
+  --ag-bg-4: #31343f; /* surface-4: active state / overlay */
+
+  /* -- On-surface text scale -- */
+  --ag-fg: #e9e9f1; /* primary text */
+  --ag-fg-muted: #a6a8ba; /* secondary text */
+  --ag-fg-subtle: #70727f; /* tertiary / disabled */
+
+  /* -- Hairline borders (kept faint; elevation does the real work) -- */
+  --ag-border: #262932;
+  --ag-border-strong: #363a46;
+
+  /* -- Accent: designed indigo→violet -- */
+  --ag-accent: #9d95ff; /* primary */
+  --ag-accent-hover: #b2abff;
+  --ag-accent-fg: #14102e; /* text on filled accent */
+  --ag-accent-soft: rgba(157, 149, 255, 0.18); /* state layer */
+
+  /* -- Semantic (tonal, not neon) -- */
+  --ag-success: #6fce96;
+  --ag-warning: #e0b96e;
+  --ag-danger: #ef9393;
+
+  /* -- Depth: layered soft shadows + larger confident radii -- */
+  --ag-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.42), 0 1px 3px rgba(0, 0, 0, 0.2);
+  --ag-shadow-2: 0 8px 24px rgba(0, 0, 0, 0.46), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --ag-radius: 14px;
+  --ag-radius-sm: 9px;
+
+  /* -- Canvas texture off; replaced by a top-light gradient below -- */
+  --ag-maze-opacity: 0;
+  --ag-maze-color: transparent;
+
+  /* A faint top-edge highlight shared by raised surfaces. */
+  --ag-elev-hairline: rgba(255, 255, 255, 0.04);
+}
+
+/* Canvas: subtle top-light so the deep background isn't a dead void. */
+[data-theme-id="material-dark"] body {
+  background:
+    radial-gradient(120% 60% at 50% -10%, rgba(157, 149, 255, 0.05), transparent 60%), var(--ag-bg);
+}
+
+/* ---------- Elevation mapping -------------------------------------------
+   Rail + sidebar + top bar sit on surface-1 (raised over the canvas);
+   cards / bubbles / popovers sit on surface-2 with a top highlight. */
+[data-theme-id="material-dark"] .ag-shell {
+  background-color: var(--ag-bg-1);
+}
+[data-theme-id="material-dark"] .ag-pane {
+  background-color: var(--ag-bg);
+}
+[data-theme-id="material-dark"] .ag-surface {
+  background-color: var(--ag-bg-2);
+  border-color: transparent;
+  box-shadow:
+    inset 0 1px 0 0 var(--ag-elev-hairline),
+    var(--ag-shadow-1);
+}
+
+/* ---------- Controls -----------------------------------------------------
+   Primary: filled accent, readable on-accent text, no gradient shine —
+   a single confident tone with a gentle hover lift. */
+[data-theme-id="material-dark"] .ag-btn-primary {
+  background: var(--ag-accent);
+  color: var(--ag-accent-fg);
+  border-color: transparent;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  font-weight: 600;
+}
+[data-theme-id="material-dark"] .ag-btn-primary:hover:not(:disabled) {
+  background: var(--ag-accent-hover);
+  box-shadow:
+    inset 0 1px 0 0 var(--ag-elev-hairline),
+    var(--ag-shadow-1);
+}
+
+/* Secondary + inputs read as raised surfaces with a top highlight. */
+[data-theme-id="material-dark"] .ag-btn-secondary,
+[data-theme-id="material-dark"] .ag-input,
+[data-theme-id="material-dark"] .ag-select-trigger {
+  box-shadow: inset 0 1px 0 0 var(--ag-elev-hairline);
+}
+
+/* Active/selected state uses the accent state-layer, never a hard fill. */
+[data-theme-id="material-dark"] .ag-list-item.is-active {
+  background-color: var(--ag-accent-soft);
+}
+
+/* ---------- Chat ----------------------------------------------------------
+   User bubble: a QUIET container — surface tone, not a violet wall. The
+   "this is yours" signal comes from right-alignment, narrower width, and
+   a thin accent edge, so long messages don't read as a saturated slab.
+   Assistant bubble: a raised surface-2 card with a top highlight — the
+   agent "handing you" a response card. */
+[data-theme-id="material-dark"] [data-testid^="user-bubble-"] {
+  background-color: color-mix(in srgb, var(--ag-accent) 12%, var(--ag-bg-2)) !important;
+  color: var(--ag-fg) !important;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--ag-accent) 26%, transparent),
+    inset 0 1px 0 0 var(--ag-elev-hairline) !important;
+}
+/* Narrow the user bubble so the user/assistant asymmetry reads at a
+   glance. The TSX uses max-w-[80%]; pull it in for this theme. */
+[data-theme-id="material-dark"] .group\/bubble.max-w-\[80\%\] {
+  max-width: 64%;
+}
+[data-theme-id="material-dark"] .rounded-2xl.rounded-bl-md.bg-bg-1 {
+  background-color: var(--ag-bg-2) !important;
+  border-color: transparent !important;
+  box-shadow:
+    inset 0 1px 0 0 var(--ag-elev-hairline),
+    var(--ag-shadow-1) !important;
+}
+
+/* The composer sits on the deepest canvas; give it a real raised shell. */
+[data-theme-id="material-dark"] .ag-chat-input-shell {
+  background-color: var(--ag-bg-2) !important;
+  border-color: transparent !important;
+  box-shadow:
+    inset 0 1px 0 0 var(--ag-elev-hairline),
+    var(--ag-shadow-1);
+}
+
+/* ---------- Type polish ---------------------------------------------------
+   Slightly tightened leading + calmer tracking for a modern, composed
+   feel; numerals in stats/badges stay tabular. */
+[data-theme-id="material-dark"] {
+  font-feature-settings:
+    "cv02" 1,
+    "cv03" 1,
+    "cv04" 1,
+    "cv11" 1,
+    "ss01" 1;
+}
+[data-theme-id="material-dark"] .ag-chip,
+[data-theme-id="material-dark"] .ag-kbd,
+[data-theme-id="material-dark"] [data-testid="mem-indicator"] {
+  font-feature-settings: "tnum" 1;
+}
+
+/* ---------- Scrollbars: slimmer, calmer ---------- */
+[data-theme-id="material-dark"] ::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+[data-theme-id="material-dark"] ::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ag-bg-4) 80%, transparent);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+[data-theme-id="material-dark"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--ag-bg-4);
+  background-clip: padding-box;
+}
+
 /* ---------- Base ---------- */
 
 :root {

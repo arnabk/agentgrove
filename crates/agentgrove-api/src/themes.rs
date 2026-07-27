@@ -71,6 +71,18 @@ fn builtin() -> Vec<Theme> {
                 accent: "#7aa2f7".into(),
             },
         },
+        Theme {
+            id: "material-dark".into(),
+            name: "Material Dark".into(),
+            kind: "dark".into(),
+            custom: false,
+            colors: ThemeColors {
+                bg: "#0e0f15".into(),
+                fg: "#e9e9f1".into(),
+                muted: "#a6a8ba".into(),
+                accent: "#9d95ff".into(),
+            },
+        },
     ]
 }
 

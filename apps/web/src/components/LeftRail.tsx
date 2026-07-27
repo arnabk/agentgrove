@@ -513,7 +513,7 @@ export default function LeftRail() {
       }}
       data-testid="left-rail"
     >
-      <div class="px-5 h-12 flex items-center gap-2.5 border-b border-border">
+      <div class="px-5 h-12 flex items-center gap-2.5">
         <Logo class="w-[1.2em] h-[1.2em]" />
         <span class="text-[0.9em] font-semibold tracking-tight">AgentGrove</span>
       </div>

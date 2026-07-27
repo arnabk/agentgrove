@@ -146,6 +146,7 @@ async fn themes_list_contains_builtins() {
     assert!(names.contains(&"light-default".into()));
     assert!(names.contains(&"solarized-dark".into()));
     assert!(names.contains(&"tokyo-night".into()));
+    assert!(names.contains(&"material-dark".into()));
 }
 
 #[tokio::test]
