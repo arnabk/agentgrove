@@ -39,6 +39,7 @@ notify = { workspace = true }
 notify-debouncer-full = { workspace = true }
 reqwest = { workspace = true }
 whoami = { workspace = true }
+open = "5"
 tokio-postgres = { version = "0.7", default-features = false, features = ["runtime", "with-serde_json-1"] }
 
 [dev-dependencies]

@@ -3,7 +3,7 @@
 use crate::{
     backups, branches, chats, db, diag, editor, files, fs as fsapi, git as gitapi,
     health::{health, version},
-    layout, notes, projects, providers, queue, scratchpad, settings,
+    layout, notes, open, projects, providers, queue, scratchpad, settings,
     state::AppState,
     team_chat, terminal, themes, uploads, worktrees, ws,
 };
@@ -43,6 +43,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         // Project branches (list + switch)
         .route("/api/projects/:id/branches", get(branches::list_branches))
+        .route("/api/projects/:id/open", post(open::open_project))
         .route("/api/projects/:id/branch", post(branches::switch_handler))
         // Cmd+P fuzzy file finder. The index is lazy: the first
         // search call scans the project root with `ignore`
@@ -62,6 +63,7 @@ pub fn build_router(state: AppState) -> Router {
         // Worktree history (soft-deleted) + restore
         .route("/api/worktrees/history", get(worktrees::history))
         .route("/api/worktrees/:id/restore", post(worktrees::restore))
+        .route("/api/worktrees/:id/open", post(open::open_worktree))
         // Remote drift + PR status for a worktree branch.
         .route(
             "/api/worktrees/:id/remote-status",

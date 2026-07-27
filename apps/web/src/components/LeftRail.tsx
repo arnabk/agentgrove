@@ -780,6 +780,19 @@ export default function LeftRail() {
                                 >
                                   <RefreshIcon /> Refresh files
                                 </button>
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                  onClick={() => {
+                                    setOpenMenuFor(null);
+                                    void api.openProjectFolder(p.id).catch(() => {});
+                                  }}
+                                  title="Reveal this project's folder in the OS file manager"
+                                  data-testid={`open-folder-${p.id}`}
+                                >
+                                  <FolderOpenIcon /> Open folder
+                                </button>
                                 <Show when={p.is_git}>
                                   <button
                                     type="button"
@@ -1209,6 +1222,19 @@ export default function LeftRail() {
                                     >
                                       <RefreshIcon /> Refresh files
                                     </button>
+                                    <button
+                                      type="button"
+                                      role="menuitem"
+                                      class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                      onClick={() => {
+                                        setOpenMenuFor(null);
+                                        void api.openWorktreeFolder(w.id).catch(() => {});
+                                      }}
+                                      title="Reveal this worktree's folder in the OS file manager"
+                                      data-testid={`open-folder-wt-${w.id}`}
+                                    >
+                                      <FolderOpenIcon /> Open folder
+                                    </button>
 
                                     {/* ── Danger ── */}
                                     <div class="my-1 border-t border-border" />
@@ -1497,6 +1523,37 @@ function FolderIcon() {
         d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"
         stroke="currentColor"
         stroke-width="1.6"
+        stroke-linejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Folder with an "open-out" arrow — used for the "Open folder" menu
+ *  action that reveals the project / worktree root in the OS file
+ *  manager (Finder / Explorer / xdg-open). */
+function FolderOpenIcon() {
+  return (
+    <svg
+      width="1em"
+      height="1em"
+      viewBox="0 0 24 24"
+      fill="none"
+      class="text-fg-subtle shrink-0"
+      aria-hidden="true"
+    >
+      <path
+        d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v4M3 7v10a2 2 0 0 0 2 2h6"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+      />
+      <path
+        d="M15 18h6m0 0-2.5-2.5M21 18l-2.5 2.5"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
         stroke-linejoin="round"
       />
     </svg>

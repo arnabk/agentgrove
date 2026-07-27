@@ -16,6 +16,7 @@ pub mod health;
 pub mod layout;
 pub mod logbus;
 pub mod notes;
+pub mod open;
 pub mod projects;
 pub mod providers;
 pub mod queue;

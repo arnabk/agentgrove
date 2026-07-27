@@ -299,6 +299,10 @@ export const api = {
     req<{ name: string; current: boolean }[]>(
       `/api/projects/${encodeURIComponent(projectId)}/branches`,
     ),
+  openProjectFolder: (projectId: string) =>
+    req<void>(`/api/projects/${encodeURIComponent(projectId)}/open`, { method: "POST" }),
+  openWorktreeFolder: (worktreeId: string) =>
+    req<void>(`/api/worktrees/${encodeURIComponent(worktreeId)}/open`, { method: "POST" }),
   createWorktree: (
     projectId: string,
     body: {
