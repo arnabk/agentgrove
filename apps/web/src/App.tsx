@@ -381,14 +381,21 @@ export default function App() {
                 }
               >
                 {/* Top bar: unified tab strip + settings + indicators */}
-                <div class="flex items-center h-12 border-b border-border bg-bg-1 shrink-0">
-                  {/* App icon + left rail toggle */}
+                <div class="flex items-center h-12 border-b border-border bg-transparent shrink-0">
+                  {/* App icon: only shown when the left rail is hidden, as an
+                      anchor to bring it back. The rail toggle itself lives
+                      with the other panel toggles on the right. */}
                   <div class="flex items-center shrink-0 ml-1 gap-0.5">
                     <Show when={!leftRailOpen()}>
                       <span class="flex items-center justify-center w-7 h-7" title="AgentGrove">
                         <Logo class="w-5 h-5" />
                       </span>
                     </Show>
+                  </div>
+                  <div class="flex-1 min-w-0 overflow-hidden">
+                    <TabStrip />
+                  </div>
+                  <div class="flex items-center gap-2 px-3 shrink-0">
                     <button
                       type="button"
                       class="ag-btn ag-btn-ghost ag-btn-icon"
@@ -411,11 +418,6 @@ export default function App() {
                         <path d="M9 3v18" />
                       </svg>
                     </button>
-                  </div>
-                  <div class="flex-1 min-w-0 overflow-hidden">
-                    <TabStrip />
-                  </div>
-                  <div class="flex items-center gap-2 px-3 shrink-0">
                     <button
                       type="button"
                       class="ag-btn ag-btn-ghost ag-btn-icon"
