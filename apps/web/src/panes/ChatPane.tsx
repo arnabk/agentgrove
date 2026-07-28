@@ -1354,7 +1354,7 @@ export default function ChatPane() {
               onDrop={onDrop}
               onDragOver={onDragOver}
               onDragLeave={onDragLeave}
-              class="px-4 py-3 border-t border-border bg-bg-1 flex flex-col gap-2 relative"
+              class="px-4 py-3 border-t border-border bg-transparent flex flex-col gap-2 relative"
               classList={{ "ring-2 ring-accent ring-inset": dragActive() }}
               data-testid="chat-input-form"
             >

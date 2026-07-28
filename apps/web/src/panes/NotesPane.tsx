@@ -335,7 +335,7 @@ export default function NotesPane() {
           Visibility only — the document is never mutated, so a checked
           item is one un-click away from coming back. */}
       <div
-        class="flex-1 overflow-auto bg-bg-1"
+        class="flex-1 overflow-auto bg-transparent"
         data-testid="notes-host"
         classList={{
           "opacity-50 pointer-events-none": !loaded(),
