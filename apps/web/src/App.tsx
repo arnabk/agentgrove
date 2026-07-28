@@ -22,6 +22,7 @@ import Welcome from "./components/Welcome";
 import { installRouteSync } from "./lib/routeSync";
 import { installCrossInstanceSync } from "./lib/crossInstanceSync";
 import { declareMemorySource, estimateJsonBytes, recordMemoryUsage } from "./lib/memory";
+import { startMemoryMonitor } from "./lib/memMonitor";
 import { extractVisits } from "./lib/celestial";
 
 declareMemorySource("rail.projects", "Project + worktree state");
@@ -187,6 +188,13 @@ export default function App() {
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     onCleanup(() => window.removeEventListener("scroll", onScroll));
+  });
+
+  // Memory / resource growth monitor: samples heap + DOM + live WS count
+  // on a timer and reports a trend to the client log, so a long-running
+  // tab leaves a trail we can read after an "Aw, Snap" crash. Idempotent.
+  onMount(() => {
+    startMemoryMonitor();
   });
 
   // Bidirectional sync between the URL and the active workspace state.
