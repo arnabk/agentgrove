@@ -9,11 +9,9 @@ Rust backend + SolidJS frontend. Cross-platform (Linux, macOS, Windows).
 
 ## Demo
 
-One recording, most of the important features end to end — real captures of the live app, recorded inside the isolated Docker demo stack so the host dev server is untouched. Click to watch:
+One recording, most of the important features end to end — real captures of the live app, recorded inside the isolated Docker demo stack so the host dev server is untouched. Click the thumbnail to watch:
 
-<video src="https://github.com/arnabk/agentgrove/raw/main/docs/demos/agentgrove-demo.mp4" poster="./docs/demos/agentgrove-demo-thumb.jpg" controls muted width="100%"></video>
-
-[![AgentGrove demo](./docs/demos/agentgrove-demo-thumb.jpg)](https://github.com/arnabk/agentgrove/raw/main/docs/demos/agentgrove-demo.mp4)
+[![AgentGrove demo — full walkthrough](./docs/demos/agentgrove-demo-thumb.jpg)](https://github.com/arnabk/agentgrove/raw/main/docs/demos/agentgrove-demo.mp4)
 
 The walkthrough covers, in order: workspace overview, AI chat, prompt queue, worktree sessions, integrated terminal, database editor, file search, git diff, notes, team chat, settings, revert-with-AI, and layout toggles.
 
