@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createMemo, createSignal, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { ALL_CELESTIAL, type CelestialKind } from "../lib/celestial";
 
 /* global CanvasRenderingContext2D, WheelEvent */
@@ -316,8 +316,12 @@ export default function GalaxyMapDialog(props: Props) {
   onMount(() => {
     resizeAndDraw();
     window.addEventListener("resize", resizeAndDraw);
-    return () => window.removeEventListener("resize", resizeAndDraw);
   });
+  // Solid's onMount IGNORES its return value (unlike React's useEffect),
+  // so the resize listener above would otherwise never be removed —
+  // leaking one listener plus this dialog's captured scope on every open.
+  // Register the teardown as a real onCleanup instead.
+  onCleanup(() => window.removeEventListener("resize", resizeAndDraw));
 
   createEffect(() => {
     visited();
