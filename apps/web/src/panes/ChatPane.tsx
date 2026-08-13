@@ -57,8 +57,23 @@ import {
  * are dropped on backfill if needed.
  */
 
-/** Hard cap on prompts held in the FE store per chat (ADR-0006). */
-const MAX_PROMPTS_IN_VIEW = 2000;
+/** Hard cap on prompts held in the FE store per chat (ADR-0006).
+ *  DOM is virtualized, so this only bounds the *data* the Solid store
+ *  retains (each prompt carries an events array that Solid wraps in a
+ *  reactive proxy). 600 keeps a windowed chat fully scrollable while
+ *  bounding worst-case retention well below what 2000 × 200 events
+ *  (≈400K proxied objects) cost before. */
+const MAX_PROMPTS_IN_VIEW = 600;
+
+/** Hard cap on events kept per prompt in the FE store. Mirrors the
+ *  BE's bounded per-prompt buffer (`Truncated { dropped }` sentinel):
+ *  while a turn streams, every tool / done / error event is pushed
+ *  here with no bound, so a long agent run could balloon a single
+ *  prompt to thousands of proxied events. Dropping the oldest real
+ *  event (never token/thinking — those live in `liveTokens`/`liveThinking`
+ *  and are mirrored into events only by the BE window) keeps the tail
+ *  the UI actually renders. */
+const MAX_EVENTS_IN_VIEW = 400;
 
 interface ChatStore {
   /** Loaded chat metadata + paged prompts. `null` until the first fetch. */
@@ -501,6 +516,13 @@ export default function ChatPane() {
           const before = localOnly.filter((p) => p.seq >= 0 && p.seq < beFirstSeq);
           const after = localOnly.filter((p) => p.seq < 0 || p.seq > beLastSeq);
           s.prompts = [...before, ...view.prompts, ...after];
+          // Cap at MAX_PROMPTS_IN_VIEW. Unlike backfill (which drops
+          // the newest — history readers want the oldest), a reconcile
+          // must keep the TAIL: the in-flight prompt and the freshest
+          // context are what the user is watching. Drop from the front.
+          if (s.prompts.length > MAX_PROMPTS_IN_VIEW) {
+            s.prompts = s.prompts.slice(s.prompts.length - MAX_PROMPTS_IN_VIEW);
+          }
           // Drop any liveTokens / liveThinking entries whose prompt
           // has reached a terminal event in the BE copy — they're
           // canonical now.
@@ -559,6 +581,63 @@ export default function ChatPane() {
     let reconnectDelay = 1_000;
     const RECONNECT_MAX = 10_000;
 
+    // Token-frame batching. A streaming turn delivers token/thinking
+    // deltas dozens of times per second; committing each one to the
+    // store forces a full timeline re-render, which re-parses the
+    // entire accumulated assistant reply through `marked` + DOMPurify
+    // (O(n²) work per frame) and re-measures every virtual row. That
+    // churn is what drove JS heap into the GBs during active turns.
+    // Merge up to ~100ms of deltas into ONE store commit — still
+    // visually live, ~10-20x fewer renders. Control frames (tool
+    // events, done, error) flush the buffer first so ordering holds.
+    let pendingFrames: WsFrame[] = [];
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function flushFrames() {
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+      if (pendingFrames.length === 0) return;
+      const batch = pendingFrames;
+      pendingFrames = [];
+      // Pre-merge deltas per prompt so a 100ms burst is ONE string
+      // concat + ONE store update, not one per message.
+      const tokens = new Map<string, string>();
+      const thinking = new Map<string, string>();
+      for (const f of batch) {
+        if (f.event.type === "token") {
+          tokens.set(f.promptId, (tokens.get(f.promptId) ?? "") + f.event.text);
+        } else if (f.event.type === "thinking") {
+          thinking.set(f.promptId, (thinking.get(f.promptId) ?? "") + f.event.text);
+        }
+      }
+      setChatStore(
+        produce((s) => {
+          for (const [pid, text] of tokens) {
+            s.liveTokens[pid] = (s.liveTokens[pid] ?? "") + text;
+          }
+          for (const [pid, text] of thinking) {
+            s.liveThinking[pid] = (s.liveThinking[pid] ?? "") + text;
+          }
+        }),
+      );
+    }
+
+    function enqueueFrame(frame: WsFrame) {
+      const t = frame.event.type;
+      const isDelta = t === "token" || t === "thinking";
+      if (!isDelta) {
+        // Control frame: apply after any buffered deltas so ordering
+        // is preserved (e.g. `done` must follow the final tokens).
+        flushFrames();
+        setChatStore(produce((s) => applyWsFrame(s, frame)));
+        return;
+      }
+      pendingFrames.push(frame);
+      if (!flushTimer) flushTimer = setTimeout(flushFrames, 100);
+    }
+
     function connect() {
       if (closed) return;
       try {
@@ -608,7 +687,7 @@ export default function ChatPane() {
         }
         const frame = parseWsFrame(ev.data);
         if (!frame) return;
-        setChatStore(produce((s) => applyWsFrame(s, frame)));
+        enqueueFrame(frame);
       });
       socket.addEventListener("close", () => {
         socket = null;
@@ -636,6 +715,9 @@ export default function ChatPane() {
 
     onCleanup(() => {
       closed = true;
+      // Flush any buffered deltas so a chat switch / unmount mid-turn
+      // doesn't silently drop the tail of the stream.
+      flushFrames();
       if (reconnectTimer) clearTimeout(reconnectTimer);
       try {
         socket?.close();
@@ -728,25 +810,39 @@ export default function ChatPane() {
 
   // Report this chat's memory footprint to the global registry. The
   // estimate sums prompt content + per-event JSON + the per-prompt
-  // live token buffer. We recompute on every store change; the work
-  // is O(prompts + events), bounded by the FE store cap.
+  // live token buffer. Recomputing on EVERY store change is wasteful:
+  // a streaming turn mutates the store dozens of times a second, and
+  // each scan is O(prompts × events) with a JSON.stringify per event
+  // — pure GC churn. Throttle to one scan/second; the footprint is a
+  // slow-moving signal so a 1s lag is invisible in the MemoryIndicator.
+  let memTimer: ReturnType<typeof setTimeout> | undefined;
   createEffect(() => {
-    let bytes = 0;
-    for (const p of chatStore.prompts) {
-      bytes += estimateStringBytes(p.content);
-      bytes += estimateStringBytes(p.id);
-      bytes += 32; // small constant for the prompt envelope
-      for (const ev of p.events) {
-        bytes += estimateJsonBytes(ev);
+    void chatStore.prompts;
+    void chatStore.liveTokens;
+    void chatStore.liveThinking;
+    if (memTimer) return;
+    memTimer = setTimeout(() => {
+      memTimer = undefined;
+      let bytes = 0;
+      for (const p of chatStore.prompts) {
+        bytes += estimateStringBytes(p.content);
+        bytes += estimateStringBytes(p.id);
+        bytes += 32; // small constant for the prompt envelope
+        for (const ev of p.events) {
+          bytes += estimateJsonBytes(ev);
+        }
       }
-    }
-    for (const live of Object.values(chatStore.liveTokens)) {
-      bytes += estimateStringBytes(live);
-    }
-    for (const live of Object.values(chatStore.liveThinking)) {
-      bytes += estimateStringBytes(live);
-    }
-    recordMemoryUsage("chat.activeView", bytes);
+      for (const live of Object.values(chatStore.liveTokens)) {
+        bytes += estimateStringBytes(live);
+      }
+      for (const live of Object.values(chatStore.liveThinking)) {
+        bytes += estimateStringBytes(live);
+      }
+      recordMemoryUsage("chat.activeView", bytes);
+    }, 1000);
+  });
+  onCleanup(() => {
+    if (memTimer) clearTimeout(memTimer);
   });
 
   /** Hand a list of File objects to the BE. Successful uploads append
@@ -1675,6 +1771,17 @@ function VirtualizedTimeline(props: {
   let userAtBottom = true;
   let lastContentHeight = 0;
 
+  // Initial-mount / chat-switch "settling" window. On first load a chat's
+  // rows measure one after another, so the ResizeObserver fires many
+  // times as scrollHeight ratchets up. Running the rAF enforce-LOOP on
+  // each of those fires is what makes the viewport visibly jump around
+  // for the first few hundred ms ("screen flickers on navigate"). While
+  // settling we instead pin to the bottom with a single direct write per
+  // fire — no rAF loop — which is jump-free because we always land on the
+  // freshest tail. `null` = not settling.
+  let settlingUntil: number | null = null;
+  const SETTLE_MS = 600;
+
   const virtualizer = createVirtualizer({
     get count() {
       return props.prompts.length;
@@ -1688,19 +1795,53 @@ function VirtualizedTimeline(props: {
     getItemKey: (i) => props.prompts[i]?.id ?? i,
   });
 
+  // Stable-reference cache for the mapped virtual items, keyed by the
+  // virtualizer's item key (prompt id). `<For>` reconciles by array-item
+  // *reference*: if this memo returned a fresh object on every run (it
+  // re-runs on every measure / reconcile / scroll), `<For>` would treat
+  // every row as new and REMOUNT each PromptRow — throwing away its local
+  // UI state (the "Show full response" expand, internals open/closed) and
+  // re-parsing the whole markdown reply. That remount storm is what made
+  // an expanded bubble snap shut ~100ms later and drove the load flicker.
+  // We hand back the SAME object when nothing about the row changed so
+  // `<For>` keeps the component mounted.
+  type VKey = string | number | bigint;
+  type VItem = { index: number; key: VKey; start: number; end: number; size: number };
+  const viCache = new Map<VKey, VItem>();
   const virtualItems = createMemo(() => {
-    // Track both the source count and the virtualizer total size so
-    // this memo re-runs whenever the virtual window is recomputed.
+    // Track the source count and the virtualizer total size so this memo
+    // re-runs whenever the virtual window is recomputed.
     void props.prompts.length;
     void props.prompts.map((p) => p.id).join(",");
     void virtualizer.getTotalSize();
-    return virtualizer.getVirtualItems().map((vi) => ({
-      index: vi.index,
-      key: vi.key,
-      start: vi.start,
-      end: vi.end,
-      size: vi.size,
-    }));
+    const items = virtualizer.getVirtualItems();
+    const liveKeys = new Set<VKey>();
+    const out = items.map((vi) => {
+      liveKeys.add(vi.key);
+      let entry = viCache.get(vi.key);
+      if (entry && entry.key === vi.key && entry.index === vi.index) {
+        // Same logical row (same prompt id + same window index): reuse the
+        // SAME object reference so `<For>` keeps the PromptRow mounted, and
+        // just update its geometry fields in place. `start`/`size` change
+        // on every measure as a row's height settles; if that produced a
+        // NEW array item each time, `<For>` would remount the row and wipe
+        // its local UI state (the "Show full response" expand snapping shut
+        // ~100ms after a click was exactly this). Rows are laid out in flow
+        // (position: static), so PromptRow never reads start/size — only the
+        // top/bottom spacers do, and they read these mutated fields live.
+        entry.start = vi.start;
+        entry.end = vi.end;
+        entry.size = vi.size;
+        return entry;
+      }
+      entry = { index: vi.index, key: vi.key, start: vi.start, end: vi.end, size: vi.size };
+      viCache.set(vi.key, entry);
+      return entry;
+    });
+    for (const k of viCache.keys()) {
+      if (!liveKeys.has(k)) viCache.delete(k);
+    }
+    return out;
   });
 
   /** Height of the un-rendered prefix in pixels. The first virtual
@@ -1776,6 +1917,7 @@ function VirtualizedTimeline(props: {
     if (prevLength === 0 && len > 0) {
       userScrollTop = null;
       userAtBottom = true;
+      settlingUntil = Date.now() + SETTLE_MS;
       // eslint-disable-next-line solid/reactivity
       queueMicrotask(() => enforceScrollRule());
     } else if (firstId !== prevFirstId && len > 0 && prevLength > 0) {
@@ -1783,6 +1925,7 @@ function VirtualizedTimeline(props: {
       if (!isBackfill) {
         userScrollTop = null;
         userAtBottom = true;
+        settlingUntil = Date.now() + SETTLE_MS;
         // eslint-disable-next-line solid/reactivity
         queueMicrotask(() => enforceScrollRule());
       }
@@ -1856,6 +1999,20 @@ function VirtualizedTimeline(props: {
       lastContentHeight = h;
       wheelActive = false;
       if (wheelTimeout) clearTimeout(wheelTimeout);
+      // Initial-mount / chat-switch settling: rows are still measuring,
+      // so scrollHeight keeps ratcheting. Pin to the bottom with ONE
+      // direct write per fire (no rAF enforce-loop) to avoid the visible
+      // jitter. The window auto-expires after SETTLE_MS.
+      if (settlingUntil !== null) {
+        if (Date.now() < settlingUntil) {
+          if (userScrollTop === null || userAtBottom) {
+            markProgrammatic();
+            virtualizer.scrollToIndex(props.prompts.length - 1, { align: "end" });
+          }
+          return;
+        }
+        settlingUntil = null;
+      }
       if (userScrollTop === null) {
         scrollToBottom();
         return;
@@ -2133,6 +2290,40 @@ function PromptRow(props: {
   };
   const [userExpanded, setUserExpanded] = createSignal(false);
 
+  // Assistant replies can be enormous (a single agent turn may emit a
+  // multi-thousand-line markdown doc). Left uncapped, one prompt renders
+  // as a 6000–10000px bubble, so prompt-level virtualization can't help
+  // — the whole reply is always mounted (hundreds of <code> nodes,
+  // costly re-measure, load-time scroll flicker). Cap the height the same
+  // way we already cap long *user* bubbles: collapse behind a fixed
+  // max-height with a "Show full response" toggle. Gated on a length
+  // heuristic so normal replies are untouched. While the turn is still
+  // streaming we never collapse — the user is actively watching it grow.
+  const assistantLenHeuristic = (text: string) =>
+    text.length > 4000 || text.split("\n").length > 60;
+  const [assistantExpanded, setAssistantExpanded] = createSignal(false);
+
+  // Ref to the assistant bubble element so we can keep its INNER scroll
+  // pinned to the bottom while it's in capped (`overflow-y-auto`) mode.
+  // A capped bubble otherwise shows the TOP of the reply; the user wants
+  // the newest content (the end of the answer) visible first, matching
+  // how the outer timeline sticks to the latest turn.
+  let assistantBubbleEl: HTMLDivElement | undefined;
+  const isAssistantCapped = () =>
+    !isPending() && assistantLenHeuristic(assistantText()) && !assistantExpanded();
+  createEffect(() => {
+    // Re-run whenever the capped state flips or the reply text grows
+    // (streaming reconcile), so a freshly-capped bubble lands at the end.
+    const capped = isAssistantCapped();
+    void assistantText();
+    if (!capped || !assistantBubbleEl) return;
+    const el = assistantBubbleEl;
+    // Defer to after layout so scrollHeight reflects the rendered markdown.
+    queueMicrotask(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  });
+
   // ---- "working…" liveliness while we wait for output ----
   // While a prompt is pending and no assistant text has streamed yet,
   // we run a little timer so the wait feels alive (a cycling status
@@ -2160,13 +2351,18 @@ function PromptRow(props: {
     }
   });
 
-  // Reset internals state when the virtualizer recycles this row for a
-  // different prompt; otherwise the previous row's toggle state leaks.
-  createEffect(() => {
-    void props.prompt.id;
-    setInternalsOpen(isPending());
-    autoClosedInternals = false;
-  });
+  // NOTE: we deliberately do NOT reset per-row toggle state on prompt
+  // change. The timeline's `<For>` is keyed by prompt id (via the
+  // virtualizer's getItemKey + a stable-reference cache on virtualItems),
+  // so a PromptRow instance is only ever reused for the SAME prompt id —
+  // a genuinely different prompt gets a fresh PromptRow with expand state
+  // defaulting to false. An explicit reset-on-id-change effect was worse
+  // than useless here: `prompt()` is an index lookup into a store array
+  // that briefly reshuffles during reconcile/measure, so the resolved id
+  // could flicker for a frame, firing the reset and snapping the user's
+  // "Show full response" (and open internals) shut ~100ms after they
+  // clicked. Letting component identity do the job is both correct and
+  // cheaper.
 
   function onToggleInternals(e: Event & { currentTarget: { open: boolean } }) {
     if (e.isTrusted) autoClosedInternals = true;
@@ -2304,7 +2500,18 @@ function PromptRow(props: {
       <Show when={assistantText() || isPending() || errorMessages().length > 0}>
         <div class="flex justify-start">
           <div class="relative group/bubble w-full">
-            <div class="rounded-2xl rounded-bl-md bg-bg-1 border border-border text-[13.5px] leading-relaxed px-5 py-4 [overflow-wrap:anywhere]">
+            <div
+              ref={(el) => (assistantBubbleEl = el)}
+              class="rounded-2xl rounded-bl-md bg-bg-1 border border-border text-[13.5px] leading-relaxed px-5 py-4 [overflow-wrap:anywhere]"
+              classList={{
+                // Collapse very long finished replies to a capped,
+                // internally-scrolling window. Never while streaming
+                // (isPending) — the user is watching it grow — and never
+                // once the user has expanded it.
+                "max-h-[32rem] overflow-y-auto": isAssistantCapped(),
+              }}
+              data-testid={`assistant-bubble-${props.prompt.id}`}
+            >
               <Show when={assistantText()}>
                 <Markdown source={assistantText()} class="ag-prose-chat" />
               </Show>
@@ -2378,6 +2585,16 @@ function PromptRow(props: {
                 </div>
               </Show>
             </div>
+            <Show when={!isPending() && assistantLenHeuristic(assistantText())}>
+              <button
+                type="button"
+                class="mt-1 text-[11.5px] text-accent hover:underline"
+                onClick={() => setAssistantExpanded((v) => !v)}
+                data-testid={`assistant-bubble-toggle-${props.prompt.id}`}
+              >
+                {assistantExpanded() ? "Show less" : "Show full response"}
+              </button>
+            </Show>
             <div class="text-left mt-1 text-[10px] text-fg-subtle">
               {formatTime(props.prompt.created_at)}
             </div>
@@ -2741,6 +2958,30 @@ function parseWsFrame(raw: unknown): WsFrame | null {
   return { promptId: msg.prompt_id, event: msg.event };
 }
 
+/** Append an event to a prompt's events array with a hard bound.
+ *  Mirrors the BE's `Truncated { dropped }` sentinel: once `events`
+ *  reaches `max` entries, the oldest *real* event (index 1 when a
+ *  sentinel is present, otherwise index 0) is dropped and the new
+ *  event is appended, keeping the tail the UI renders. token/thinking
+ *  events never reach this path (they live in `liveTokens`/`liveThinking`),
+ *  and `done`/`error` are always at the tail, so nothing the renderer
+ *  needs is evicted. */
+function appendEventBounded(events: AgentEvent[], ev: AgentEvent, max: number): void {
+  if (events.length < max) {
+    events.push(ev);
+    return;
+  }
+  const first = events[0];
+  if (first && first.type === "truncated") {
+    events.splice(1, 1); // drop oldest real event
+    first.dropped += 1;
+  } else {
+    events[0] = { type: "truncated", dropped: 1 };
+    events.splice(1, 1); // drop oldest real event
+  }
+  events.push(ev);
+}
+
 /** Apply a decoded WS frame to the chat store. Called inside a
  *  `produce` block so all mutations are batched into one update.
  *
@@ -2768,7 +3009,7 @@ function applyWsFrame(s: ChatStore, frame: WsFrame): void {
   const idx = s.prompts.findIndex((p) => p.id === promptId);
   if (idx < 0) return;
   const prompt = s.prompts[idx]!;
-  prompt.events.push(ev);
+  appendEventBounded(prompt.events, ev, MAX_EVENTS_IN_VIEW);
   if (ev.type === "done" || ev.type === "error") {
     // Stream finished — drop the live buffers so PromptRow falls
     // back to the events array (canonical, persisted text).

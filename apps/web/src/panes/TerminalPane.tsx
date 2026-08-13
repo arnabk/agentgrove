@@ -8,9 +8,22 @@ import { declareMemorySource, recordMemoryUsage } from "../lib/memory";
 
 declareMemorySource("terminal.scrollback", "Terminal scrollback");
 
-function reportTerminalBytes(cache: Map<string, { lastBytes: number }>) {
+/** Lines of scrollback xterm keeps per terminal. This bounds the
+ *  terminal's real retention (a ring buffer of rows×cols×lines), so
+ *  explicit is better than relying on the library default. */
+const SCROLLBACK_LINES = 2000;
+
+function reportTerminalBytes(cache: Map<string, CachedSession>) {
   let total = 0;
-  for (const sess of cache.values()) total += sess.lastBytes * 2;
+  for (const sess of cache.values()) {
+    // Bound the estimate by the ring-buffer size instead of cumulative
+    // bytes written: xterm discards lines beyond SCROLLBACK_LINES, so
+    // the retained footprint is stable and ~4 bytes/cell (char + attr).
+    const cols = sess.term.cols || 80;
+    const rows = sess.term.rows || 24;
+    const cells = (SCROLLBACK_LINES + rows) * cols;
+    total += cells * 4;
+  }
   recordMemoryUsage("terminal.scrollback", total);
 }
 import { closeTerminalTab } from "../stores/app";
@@ -21,7 +34,6 @@ interface CachedSession {
   host: HTMLDivElement;
   ws: WebSocket;
   closing: boolean;
-  lastBytes: number;
 }
 
 const cache = new Map<string, CachedSession>();
@@ -86,13 +98,14 @@ export default function TerminalPane(props: Props) {
         cursor: "#7c5cff",
       },
       cursorBlink: true,
+      scrollback: SCROLLBACK_LINES,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
 
     const ws = openTerminalWs(id());
-    const session: CachedSession = { term, fit, host, ws, closing: false, lastBytes: 0 };
+    const session: CachedSession = { term, fit, host, ws, closing: false };
     cache.set(id(), session);
 
     const currentId = id();
@@ -116,8 +129,6 @@ export default function TerminalPane(props: Props) {
       }
       const bytes = new Uint8Array(ev.data as ArrayBuffer);
       term.write(bytes);
-      session.lastBytes += bytes.byteLength;
-      reportTerminalBytes(cache);
     };
 
     ws.onclose = () => {
@@ -134,6 +145,7 @@ export default function TerminalPane(props: Props) {
       return;
     }
     sess.term.scrollToBottom();
+    reportTerminalBytes(cache);
     const cols = sess.term.cols;
     const rows = sess.term.rows;
     void api.resizeTerminal(id(), cols, rows).catch(() => {});
