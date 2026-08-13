@@ -1,0 +1,2 @@
+FROM postgres:17-alpine
+COPY demo-seed.sql /docker-entrypoint-initdb.d/demo-seed.sql

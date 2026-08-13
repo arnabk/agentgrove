@@ -41,7 +41,7 @@ for i in $(seq 1 60); do
 done
 
 echo "[demo] seeding demo project directory..."
-docker exec -u agentgrove agentgrove-agentgrove-demo-1 sh -c "mkdir -p ${DEMO_PROJECT}"
+docker compose -f docker/docker-compose.demo.yml exec -T -u agentgrove agentgrove-demo sh -c "mkdir -p ${DEMO_PROJECT}"
 
 echo "[demo] recording videos..."
 cd apps/web

@@ -7,13 +7,13 @@
 
 services:
   postgres:
-    image: postgres:17-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=demo
-    volumes:
-      - ./demo-seed.sql:/docker-entrypoint-initdb.d/demo-seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d demo"]
       interval: 2s
