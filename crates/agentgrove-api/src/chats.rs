@@ -1707,10 +1707,15 @@ pub(crate) fn spawn_dispatch_task(
         // full details before the next user message. This avoids
         // relying on the previous model's session tokens or a
         // separate summarization step.
-        let mut effective_body = body;
+        let compacting = is_compact_command(&body) && chat.provider == "claude";
+        let mut effective_body = if compacting {
+            compact_prompt().to_string()
+        } else {
+            body
+        };
         if chat.session_id.is_none() && !chat.prompts.is_empty() {
             const CONTEXT_PROMPT_COUNT: usize = 20;
-            let context = build_recent_context(&chat.prompts, CONTEXT_PROMPT_COUNT);
+            let context = build_resume_context(&chat.prompts, CONTEXT_PROMPT_COUNT);
             if !context.is_empty() {
                 effective_body = format!(
                     "Prior conversation context (last {count} messages):\n\n{context}\n\n---\n\nCurrent user message:\n{effective_body}",
@@ -1720,21 +1725,56 @@ pub(crate) fn spawn_dispatch_task(
         }
 
         if let Some(p) = provider {
-            dispatch_via_provider(
+            let stale_session = dispatch_via_provider(
                 &state,
                 &chat_id,
                 &prompt,
                 &topic,
-                p,
+                p.clone(),
                 &effective_body,
                 &chat.model,
                 chat.session_id.clone(),
                 chat.effort.clone(),
-                cwd,
+                cwd.clone(),
             )
             .await;
+            if stale_session && chat.session_id.is_some() {
+                clear_provider_session(&state, &chat_id).await;
+                let retry_prompt = {
+                    let mut reg = state.chats.write().await;
+                    reg.retry_prompt(&chat_id)
+                };
+                if let Some(retry_prompt) = retry_prompt {
+                    persist_prompt_events(&state, &retry_prompt.id).await;
+                    let context = build_resume_context(&chat.prompts, 20);
+                    let retry_body = if context.is_empty() {
+                        effective_body.clone()
+                    } else {
+                        format!(
+                            "Prior conversation context (last {count} messages):\n\n{context}\n\n---\n\nCurrent user message:\n{effective_body}",
+                            count = chat.prompts.len().min(20),
+                        )
+                    };
+                    dispatch_via_provider(
+                        &state,
+                        &chat_id,
+                        &retry_prompt,
+                        &topic,
+                        p,
+                        &retry_body,
+                        &chat.model,
+                        None,
+                        chat.effort.clone(),
+                        cwd,
+                    )
+                    .await;
+                }
+            }
         } else {
             dispatch_echo(&state, &chat_id, &prompt, &topic, &effective_body).await;
+        }
+        if compacting {
+            clear_provider_session(&state, &chat_id).await;
         }
         // Auto-drain (loops until queue + clear are both atomic).
         drain_until_idle(&state, &chat_id).await;
@@ -1803,9 +1843,10 @@ async fn dispatch_via_provider(
     resume_session_id: Option<String>,
     effort: Option<String>,
     cwd: std::path::PathBuf,
-) {
+) -> bool {
     use agentgrove_agents::SpawnOptions;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
+    let mut stale_session = false;
     // Effective auto-approve = global default from settings.json
     // (defaulting to `true`) until the per-chat override lands in
     // migration 0010 + ChatRecord. Reading the file per turn is
@@ -1990,8 +2031,6 @@ async fn dispatch_via_provider(
                     .await;
 
                     if let AgentEvent::SessionStart { session_id } = &other {
-                        // Persist + cache in one helper so a restart
-                        // remembers the provider's resume token.
                         let sid = session_id.clone();
                         if let Err(e) =
                             persist_chat_update(state, chat_id, None, None, None, Some(Some(&sid)))
@@ -1999,6 +2038,9 @@ async fn dispatch_via_provider(
                         {
                             tracing::warn!(chat_id, error = %e, "persist session_id failed");
                         }
+                    }
+                    if let AgentEvent::Error { message } = &other {
+                        stale_session = message.contains("Session not found");
                     }
                     let payload = serde_json::json!({
                         "prompt_id": prompt.id,
@@ -2088,6 +2130,7 @@ async fn dispatch_via_provider(
     // a restart. We deliberately wait until the spawn task ends —
     // mid-stream token deltas would slam SQLite at ~20 writes/sec.
     persist_prompt_events(state, &prompt.id).await;
+    stale_session
 }
 
 /// Fallback echo dispatcher for chats whose provider is not in the
@@ -2165,6 +2208,24 @@ fn build_recent_context(prompts: &[PromptRecord], max_prompts: usize) -> String 
         .map(format_prompt_full)
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+fn build_resume_context(prompts: &[PromptRecord], max_prompts: usize) -> String {
+    build_recent_context(prompts, max_prompts)
+}
+
+fn is_compact_command(body: &str) -> bool {
+    body.trim().eq_ignore_ascii_case("/compact")
+}
+
+fn compact_prompt() -> &'static str {
+    "Summarize the conversation so far into a concise continuation context. Preserve decisions, requirements, relevant code paths, commands, errors, and unresolved work."
+}
+
+async fn clear_provider_session(state: &AppState, chat_id: &str) {
+    if let Err(error) = persist_chat_update(state, chat_id, None, None, None, Some(None)).await {
+        tracing::warn!(chat_id, error = %error, "clear provider session failed");
+    }
 }
 
 pub async fn revert_prompt(
