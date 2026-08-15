@@ -523,10 +523,11 @@ async fn patch_chat_rejects_empty_model() {
 }
 
 #[tokio::test]
-async fn queue_auto_drains_pending_items_after_send() {
+async fn queue_is_manual_only_and_does_not_auto_drain() {
+    // The queue is manual-only: a normal send while items are queued
+    // must NEVER auto-drain them. Only the just-sent prompt dispatches;
+    // the pre-queued items stay pending until the user runs them.
     let h = BeHarness::start().await;
-    // Use a fake/echo chat so the dispatch is synchronous and the
-    // inline auto-drain finishes before the HTTP response returns.
     let chat: Value = h
         .post_auth("/api/worktrees/wt-drain/chats")
         .json(&json!({"title":"drain","provider":"fake","model":"echo"}))
@@ -538,8 +539,8 @@ async fn queue_auto_drains_pending_items_after_send() {
         .unwrap();
     let chat_id = chat["id"].as_str().unwrap().to_owned();
 
-    // Pre-queue two items while no turn is in flight (mode defaults
-    // to auto).
+    // Pre-queue two items while no turn is in flight. Under the old
+    // auto default these would have drained; now they must be parked.
     for body in ["alpha", "beta"] {
         let res = h
             .post_auth(&format!("/api/chats/{chat_id}/queue"))
@@ -550,10 +551,19 @@ async fn queue_auto_drains_pending_items_after_send() {
         assert_eq!(res.status(), 200);
     }
 
-    // Fire a normal prompt. The handler returns immediately with the
-    // new prompt; the dispatch + auto-drain run on a background task.
-    // We poll until the chat reaches 3 prompts (first + alpha + beta)
-    // — should land within a few hundred ms for the echo provider.
+    // The queue reports Manual mode regardless of what a client asks.
+    let q0: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}/queue"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(q0["mode"], "manual", "queue must always be manual");
+
+    // Fire a normal prompt. It dispatches; the queued items must NOT
+    // follow it into the timeline.
     let res = h
         .post_auth(&format!("/api/chats/{chat_id}/prompts"))
         .json(&json!({"content":"first"}))
@@ -562,95 +572,9 @@ async fn queue_auto_drains_pending_items_after_send() {
         .unwrap();
     assert_eq!(res.status(), 200);
 
-    let mut view: Value = Value::Null;
-    for _ in 0..50 {
-        view = h
-            .get_auth(&format!("/api/chats/{chat_id}"))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        if view["prompts"].as_array().map(|a| a.len()).unwrap_or(0) >= 3 {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    let prompts = view["prompts"].as_array().unwrap();
-    assert_eq!(
-        prompts.len(),
-        3,
-        "expected first + 2 drained, got {:?}",
-        prompts.iter().map(|p| &p["content"]).collect::<Vec<_>>()
-    );
-    assert_eq!(prompts[0]["content"], "first");
-    assert_eq!(prompts[1]["content"], "alpha");
-    assert_eq!(prompts[2]["content"], "beta");
-
-    // Queue state: drained items are removed (we don't keep a "done"
-    // history — once a queue item becomes a real prompt in the chat
-    // timeline, leaving a copy in the queue dock just confused users).
-    let mut q: Value = Value::Null;
-    for _ in 0..50 {
-        q = h
-            .get_auth(&format!("/api/chats/{chat_id}/queue"))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        let items = q["items"].as_array().unwrap();
-        if items.is_empty() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    let items = q["items"].as_array().unwrap();
-    assert_eq!(
-        items.len(),
-        0,
-        "expected queue empty after drain, got {items:?}"
-    );
-}
-
-#[tokio::test]
-async fn queue_manual_mode_does_not_auto_drain() {
-    let h = BeHarness::start().await;
-    let chat: Value = h
-        .post_auth("/api/worktrees/wt-manual/chats")
-        .json(&json!({"title":"m","provider":"fake","model":"echo"}))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let chat_id = chat["id"].as_str().unwrap().to_owned();
-
-    // Flip to manual.
-    let res = h
-        .post_auth(&format!("/api/chats/{chat_id}/queue/mode"))
-        .json(&json!({"mode":"manual"}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 204);
-
-    h.post_auth(&format!("/api/chats/{chat_id}/queue"))
-        .json(&json!({"body":"x"}))
-        .send()
-        .await
-        .unwrap();
-
-    // Normal send: should NOT drain.
-    h.post_auth(&format!("/api/chats/{chat_id}/prompts"))
-        .json(&json!({"content":"hi"}))
-        .send()
-        .await
-        .unwrap();
-
+    // Give any (incorrect) drain a chance to run, then assert it did
+    // NOT: the chat has exactly one prompt and both items are pending.
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
     let view: Value = h
         .get_auth(&format!("/api/chats/{chat_id}"))
         .send()
@@ -659,7 +583,11 @@ async fn queue_manual_mode_does_not_auto_drain() {
         .json()
         .await
         .unwrap();
-    assert_eq!(view["prompts"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        view["prompts"].as_array().unwrap().len(),
+        1,
+        "only the sent prompt should dispatch; queue must not auto-drain"
+    );
 
     let q: Value = h
         .get_auth(&format!("/api/chats/{chat_id}/queue"))
@@ -669,7 +597,31 @@ async fn queue_manual_mode_does_not_auto_drain() {
         .json()
         .await
         .unwrap();
-    assert_eq!(q["items"][0]["status"], "pending");
+    let items = q["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "both queued items should still be parked");
+    assert!(items.iter().all(|i| i["status"] == "pending"));
+
+    // Manual dispatch: run_next pops exactly one item into the timeline.
+    let nxt = h
+        .post_auth(&format!("/api/chats/{chat_id}/queue/next"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(nxt.status(), 200);
+
+    let q2: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}/queue"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        q2["items"].as_array().unwrap().len(),
+        1,
+        "run_next should remove exactly one item from the queue"
+    );
 }
 
 // ---------------------------------------------------------------
@@ -680,10 +632,8 @@ async fn queue_manual_mode_does_not_auto_drain() {
 //   - Idle + queue empty           → dispatch
 //   - Busy                         → queue
 //   - Idle + queue non-empty       → queue (FIFO preserved)
-//   - Auto mode drains the queue   → covered by existing
-//     `queue_auto_drains_pending_items_after_send`; not re-tested here
-//   - Manual mode parks            → covered by existing
-//     `queue_manual_mode_does_not_auto_drain`
+//   - Queue never auto-drains      → covered by
+//     `queue_is_manual_only_and_does_not_auto_drain`
 
 async fn make_chat(h: &BeHarness, suffix: &str, provider: &str, model: &str) -> String {
     let res = h
@@ -810,18 +760,12 @@ async fn smart_send_enqueues_when_queue_has_pending_items() {
 }
 
 #[tokio::test]
-async fn smart_send_drains_queue_in_order_under_auto_mode() {
+async fn run_next_dispatches_queued_items_one_at_a_time_in_order() {
+    // Manual-only queue: `run_next` pops EXACTLY ONE item per call, in
+    // FIFO order. There is no auto-drain — the user drives every step.
     let h = BeHarness::start().await;
-    let chat_id = make_chat(&h, "smart-auto", "fake", "echo").await;
+    let chat_id = make_chat(&h, "smart-manual", "fake", "echo").await;
 
-    // Queue defaults to auto. Pre-load two items; first smart-send
-    // is idle + queue non-empty so this one should ALSO enqueue.
-    // The auto-drain triggered by ... we need to trigger a dispatch
-    // somehow to start the drain loop. Pre-queue two items, then
-    // a smart-send: per the spec the smart-send sees queue non-
-    // empty and enqueues. We then trigger drain via `run_next` to
-    // pop the first item (which starts the background task with
-    // auto-drain enabled — popping the rest).
     for body in ["a", "b"] {
         h.post_auth(&format!("/api/chats/{chat_id}/queue"))
             .json(&json!({"body": body}))
@@ -829,6 +773,7 @@ async fn smart_send_drains_queue_in_order_under_auto_mode() {
             .await
             .unwrap();
     }
+    // Smart-send while the queue is non-empty parks behind a + b.
     let smart_res = h
         .post_auth(&format!("/api/chats/{chat_id}/messages"))
         .json(&json!({"content":"c"}))
@@ -838,34 +783,57 @@ async fn smart_send_drains_queue_in_order_under_auto_mode() {
     let smart: Value = smart_res.json().await.unwrap();
     assert_eq!(smart["kind"], "queued");
 
-    // Kick the first item via run_next; the auto-drain loop should
-    // pop the remaining ones because the chat stays in auto mode.
-    h.post_auth(&format!("/api/chats/{chat_id}/queue/next"))
-        .send()
-        .await
-        .unwrap();
-
-    // Poll until 3 prompts are dispatched (a, b, c) in that order.
-    let mut view: Value = Value::Null;
-    for _ in 0..80 {
-        view = h
-            .get_auth(&format!("/api/chats/{chat_id}"))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        if view["prompts"].as_array().map(|a| a.len()).unwrap_or(0) >= 3 {
-            break;
+    // Dispatch each item explicitly. run_next can return 409 while the
+    // previous turn's dispatch flag is still settling — that's expected,
+    // so we retry until it pops (200). After each pop we wait for the
+    // echo turn to land, then confirm exactly ONE more prompt appeared —
+    // proving nothing auto-drains behind it.
+    for (i, expected) in ["a", "b", "c"].iter().enumerate() {
+        let mut popped = false;
+        for _ in 0..100 {
+            let nxt = h
+                .post_auth(&format!("/api/chats/{chat_id}/queue/next"))
+                .send()
+                .await
+                .unwrap();
+            match nxt.status().as_u16() {
+                200 => {
+                    popped = true;
+                    break;
+                }
+                409 => {
+                    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+                }
+                other => panic!("run_next {i} returned unexpected status {other}"),
+            }
         }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(popped, "run_next {i} never dispatched an item");
+
+        let want = i + 1;
+        let mut view: Value = Value::Null;
+        for _ in 0..80 {
+            view = h
+                .get_auth(&format!("/api/chats/{chat_id}"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if view["prompts"].as_array().map(|a| a.len()).unwrap_or(0) >= want {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let prompts = view["prompts"].as_array().unwrap();
+        assert_eq!(
+            prompts.len(),
+            want,
+            "expected exactly {want} prompt(s) after {} run_next call(s), got {prompts:?}",
+            i + 1
+        );
+        assert_eq!(prompts[i]["content"], *expected);
     }
-    let prompts = view["prompts"].as_array().unwrap();
-    assert_eq!(prompts.len(), 3, "expected 3 drained, got {prompts:?}");
-    assert_eq!(prompts[0]["content"], "a");
-    assert_eq!(prompts[1]["content"], "b");
-    assert_eq!(prompts[2]["content"], "c");
 }
 
 #[tokio::test]
@@ -881,8 +849,9 @@ async fn smart_send_unknown_chat_returns_404() {
 }
 
 /// Rapid-fire 10 concurrent smart-send calls to the same chat. None
-/// must be lost: every message either lands in the prompt timeline or
-/// is recorded as a queue item that the auto-drain processes.
+/// must be lost: with the manual-only queue exactly one message
+/// dispatches into the timeline and the remaining nine land as queued
+/// items — the total across both surfaces is always 10.
 ///
 /// This is the regression test for the concurrency bug where two
 /// requests could both see "not dispatching, queue empty" before
@@ -911,9 +880,11 @@ async fn smart_send_no_loss_under_concurrent_fire() {
         );
     }
 
-    // After auto-drain, all 10 should be in the timeline as prompts.
-    // Poll because the dispatch + drain runs in background tasks.
+    // No auto-drain: exactly one send dispatches; the rest park. Poll
+    // until the in-flight turn settles, then assert prompts + queued
+    // items together account for all 10 with nothing lost.
     let mut prompts_count = 0usize;
+    let mut queued_count = 0usize;
     for _ in 0..80 {
         let view: Value = h
             .get_auth(&format!("/api/chats/{chat_id}"))
@@ -924,30 +895,28 @@ async fn smart_send_no_loss_under_concurrent_fire() {
             .await
             .unwrap();
         prompts_count = view["prompts"].as_array().map(|a| a.len()).unwrap_or(0);
-        // Total = 10 messages; chat view caps at 50 so we should see them all.
-        if prompts_count >= 10 {
+        let q: Value = h
+            .get_auth(&format!("/api/chats/{chat_id}/queue"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        queued_count = q["items"].as_array().map(|a| a.len()).unwrap_or(0);
+        if prompts_count + queued_count >= 10 {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
     assert_eq!(
-        prompts_count, 10,
-        "expected all 10 concurrent sends to land as prompts; got {prompts_count}"
+        prompts_count, 1,
+        "manual-only: exactly one message should dispatch; got {prompts_count}"
     );
-
-    // Queue should be empty (auto-drain removed everything).
-    let q: Value = h
-        .get_auth(&format!("/api/chats/{chat_id}/queue"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let items = q["items"].as_array().unwrap();
-    assert!(
-        items.is_empty(),
-        "expected empty queue post-drain, got {items:?}"
+    assert_eq!(
+        prompts_count + queued_count,
+        10,
+        "no message may be lost: {prompts_count} dispatched + {queued_count} queued"
     );
 }
 
@@ -1216,16 +1185,11 @@ async fn rapid_fire_then_manual_then_run_next_drains_every_item() {
     );
 }
 
-/// Switching from auto to manual WHILE the agent is mid-turn must
-/// not orphan Running queue items. Specifically: if auto-drain pops
-/// an item to Running but the loop exits (due to mode flip) before
-/// `mark_done` runs, the item must not be left dangling.
-///
-/// The simplest contract: after every dispatch_task ends — whether
-/// it completes the drain or bails out — there must be no Running
-/// items left in the queue. The current implementation calls
-/// mark_done inside the loop, AFTER each dispatch, so this should
-/// always hold. This test pins the contract.
+/// Spamming the (now no-op) mode toggle while a turn is in flight must
+/// never orphan queue items as Running. The queue is manual-only, so
+/// `set_mode` does nothing and no auto-drain pops items — but we keep
+/// this test to pin the invariant: after any dispatch settles there
+/// are zero Running items, only Pending ones the user can still run.
 #[tokio::test]
 async fn mode_flip_mid_drain_does_not_orphan_running_items() {
     let h = BeHarness::start().await;
@@ -1380,16 +1344,15 @@ async fn smart_send_publishes_chat_idle_after_dispatch_completes() {
     assert!(saw_idle, "never saw the `chat_idle` event after dispatch");
 }
 
-/// Repeated rapid-fire (10 sends back-to-back) followed by auto
-/// drain. Confirms:
-///   - No message is dropped.
-///   - Prompts land in the timeline in submission order.
-///   - The queue empties to zero.
+/// Repeated rapid-fire (10 sends back-to-back) on the manual-only
+/// queue, then manual drain via `run_next`. Confirms:
+///   - No message is dropped (1 dispatched + 9 queued = 10).
+///   - `run_next` empties the queue in submission order.
 ///   - The dispatching flag clears (a follow-up send works idle-fast).
 ///
 /// This is the canonical "open source release" regression: anyone
-/// touching `send_message` / `spawn_dispatch_task` / `mark_done`
-/// must keep this green.
+/// touching `send_message` / `spawn_dispatch_task` / `mark_done` /
+/// `run_next` must keep this green.
 #[tokio::test]
 async fn rapid_fire_10_then_followup_send_runs_immediately() {
     let h = BeHarness::start().await;
@@ -1404,8 +1367,19 @@ async fn rapid_fire_10_then_followup_send_runs_immediately() {
         assert_eq!(res.unwrap().status(), 200);
     }
 
-    // Wait for drain.
+    // Manual-only: exactly one dispatched, nine parked. Wait for the
+    // in-flight turn to settle, then assert the split.
+    let mut queued = 0usize;
     for _ in 0..100 {
+        let q: Value = h
+            .get_auth(&format!("/api/chats/{chat_id}/queue"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        queued = q["items"].as_array().map(|a| a.len()).unwrap_or(0);
         let view: Value = h
             .get_auth(&format!("/api/chats/{chat_id}"))
             .send()
@@ -1415,10 +1389,42 @@ async fn rapid_fire_10_then_followup_send_runs_immediately() {
             .await
             .unwrap();
         let n = view["prompts"].as_array().map(|a| a.len()).unwrap_or(0);
-        if n >= 10 {
+        if n == 1 && queued == 9 {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(queued, 9, "expected 9 parked items, got {queued}");
+
+    // Drain the queue manually, one run_next per item. Each pop must
+    // land the next burst prompt in order.
+    for target in 2..=10usize {
+        // run_next can 409 if the previous turn is still settling; retry.
+        for _ in 0..50 {
+            let res = h
+                .post_auth(&format!("/api/chats/{chat_id}/queue/next"))
+                .send()
+                .await
+                .unwrap();
+            if res.status() == 200 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        for _ in 0..100 {
+            let view: Value = h
+                .get_auth(&format!("/api/chats/{chat_id}"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if view["prompts"].as_array().map(|a| a.len()).unwrap_or(0) >= target {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
     }
 
     let view: Value = h
@@ -1440,9 +1446,11 @@ async fn rapid_fire_10_then_followup_send_runs_immediately() {
         );
     }
 
-    // Queue is empty + a follow-up send dispatches immediately
-    // (not queued). Wait briefly for the dispatching flag to
-    // clear, then check.
+    // Queue is empty + a follow-up send dispatches immediately once the
+    // dispatching flag clears. If it parks (previous turn still
+    // settling) we cancel the queued copy — otherwise a leftover
+    // pending item would route every later send to the queue too — then
+    // retry. Caps at ~1.5 s; if it never dispatches the flag is stuck.
     for _ in 0..50 {
         let res = h
             .post_auth(&format!("/api/chats/{chat_id}/messages"))
@@ -1454,10 +1462,13 @@ async fn rapid_fire_10_then_followup_send_runs_immediately() {
         if body["kind"] == "dispatched" {
             return; // success
         }
-        // If queued, the previous burst's task hasn't fully cleared
-        // yet — wait + try again. Caps at 1 s; if we still can't
-        // dispatch the bug is real.
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        if let Some(item_id) = body["item_id"].as_str() {
+            let _ = h
+                .delete_auth(&format!("/api/chats/{chat_id}/queue/{item_id}"))
+                .send()
+                .await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
     }
     panic!("follow-up send was never dispatched immediately (dispatching flag stuck?)");
 }
@@ -1605,27 +1616,15 @@ async fn queue_item_patch_updates_body() {
     assert_eq!(updated["body"], "new text");
 }
 
-/// Flipping manual → auto on an IDLE chat with a pending backlog must
-/// kick a drain. This is the user-reported bug: queue items while in
-/// manual mode, send some manually, then re-enable auto-send — and the
-/// queue just sat there instead of draining. The normal drain only
-/// fires on send / turn-completion; an idle chat has no in-flight turn
-/// to trigger it, so `set_mode` must kick one itself.
+/// Flipping the queue mode is a no-op now: the queue is manual-only, so
+/// even a request to enable "auto" must NOT drain a pending backlog.
+/// This guards against a regression back to auto-send.
 #[tokio::test]
-async fn flip_to_auto_on_idle_chat_drains_pending_backlog() {
+async fn set_mode_auto_is_ignored_and_never_drains() {
     let h = BeHarness::start().await;
     let chat_id = make_chat(&h, "flip-drain", "fake", "echo").await;
 
-    // Manual mode so enqueued items park (don't auto-drain).
-    let res = h
-        .post_auth(&format!("/api/chats/{chat_id}/queue/mode"))
-        .json(&json!({"mode": "manual"}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 204);
-
-    // Queue three items while manual — they stay pending.
+    // Queue three items while idle — they must stay pending.
     for i in 0..3 {
         h.post_auth(&format!("/api/chats/{chat_id}/queue"))
             .json(&json!({"body": format!("parked-{i}")}))
@@ -1634,23 +1633,8 @@ async fn flip_to_auto_on_idle_chat_drains_pending_backlog() {
             .unwrap();
     }
 
-    // Sanity: all three pending, chat idle (no prompts dispatched).
-    let q: Value = h
-        .get_auth(&format!("/api/chats/{chat_id}/queue"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(
-        q["items"].as_array().unwrap().len(),
-        3,
-        "expected 3 parked items, got {:?}",
-        q["items"]
-    );
-
-    // Re-enable auto-send on the idle chat. This MUST kick a drain.
+    // Ask for auto mode. The endpoint accepts it (204, wire compat) but
+    // the queue is manual-only, so nothing may drain.
     let res = h
         .post_auth(&format!("/api/chats/{chat_id}/queue/mode"))
         .json(&json!({"mode": "auto"}))
@@ -1659,30 +1643,9 @@ async fn flip_to_auto_on_idle_chat_drains_pending_backlog() {
         .unwrap();
     assert_eq!(res.status(), 204);
 
-    // Wait for the drain: all 3 land as prompts, queue empties.
-    let mut drained = false;
-    for _ in 0..100 {
-        let view: Value = h
-            .get_auth(&format!("/api/chats/{chat_id}"))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        let prompts = view["prompts"].as_array().map(|a| a.len()).unwrap_or(0);
-        if prompts >= 3 {
-            drained = true;
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-    assert!(
-        drained,
-        "queue did not drain after flipping to auto on an idle chat"
-    );
+    // Give any (incorrect) drain a chance to run, then assert it didn't.
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
 
-    // Prompts landed in FIFO order.
     let view: Value = h
         .get_auth(&format!("/api/chats/{chat_id}"))
         .send()
@@ -1691,30 +1654,24 @@ async fn flip_to_auto_on_idle_chat_drains_pending_backlog() {
         .json()
         .await
         .unwrap();
-    let prompts = view["prompts"].as_array().unwrap();
-    assert_eq!(prompts.len(), 3, "expected 3 drained prompts: {prompts:?}");
-    for (i, p) in prompts.iter().enumerate() {
-        assert_eq!(p["content"].as_str().unwrap(), format!("parked-{i}"));
-    }
+    assert_eq!(
+        view["prompts"].as_array().map(|a| a.len()).unwrap_or(0),
+        0,
+        "queue must not auto-drain even when auto mode is requested"
+    );
 
-    // Queue should be empty (items removed by mark_done). Poll briefly
-    // because on slow CI runners the drain task may not have committed
-    // the removal yet.
-    let mut queue_empty = false;
-    for _ in 0..40 {
-        let q: Value = h
-            .get_auth(&format!("/api/chats/{chat_id}/queue"))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        if q["items"].as_array().unwrap().is_empty() {
-            queue_empty = true;
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    assert!(queue_empty, "queue not empty after auto drain");
+    let q: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}/queue"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(q["mode"], "manual", "mode must always report manual");
+    assert_eq!(
+        q["items"].as_array().unwrap().len(),
+        3,
+        "all three items must still be parked"
+    );
 }

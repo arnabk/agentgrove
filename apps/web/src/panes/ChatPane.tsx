@@ -190,10 +190,6 @@ export default function ChatPane() {
     total: number;
     pending: number;
     running: number;
-    /** Per-chat queue mode read straight from the BE so the
-     *  composer's mode dropdown reflects what the server will
-     *  actually do, not a stale FE assumption. */
-    mode: "auto" | "manual";
   } | null>(null);
   createEffect(() => {
     const id = activeId();
@@ -210,7 +206,6 @@ export default function ChatPane() {
           total: q.items.length,
           pending: q.items.filter((i) => i.status === "pending").length,
           running: q.items.filter((i) => i.status === "running").length,
-          mode: q.mode,
         });
       } catch {
         // ignore — badge is best-effort
@@ -277,7 +272,6 @@ export default function ChatPane() {
     }
     return visible.map((item) => queueItemCache.get(item.id)!);
   });
-  const queueMode = () => queueState()?.mode ?? "auto";
   // Lock the whole queue while the agent is working (product decision):
   // queued items can't be edited / removed / reordered mid-turn.
   const queueLocked = () => isStreaming();
@@ -331,33 +325,35 @@ export default function ChatPane() {
     }
   }
 
-  async function setQueueMode(mode: "auto" | "manual") {
-    setQueueBusy(true);
-    try {
-      await api.setQueueMode(activeId()!, mode);
-      await refreshQueue();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setQueueBusy(false);
-    }
-  }
-
   async function runNextQueue() {
     setQueueBusy(true);
+    // Optimistically drop the head (next) item so its card disappears
+    // the instant the user hits "Send next" — the BE has already
+    // popped + dispatched it into the timeline, and the reconcile
+    // below makes the removal authoritative. Without this the card
+    // lingered until the next poll / a manual refresh.
+    const head = queueItems()[0];
+    if (head) {
+      setQueueState((prev) =>
+        prev ? { ...prev, items: prev.items.filter((i) => i.id !== head.id) } : prev,
+      );
+    }
     try {
       await api.runNextQueue(activeId()!);
       await refreshQueue();
     } catch (e) {
+      // Dispatch failed — put the queue back the way the BE sees it so
+      // the optimistically-removed card reappears.
+      await refreshQueue();
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setQueueBusy(false);
     }
   }
 
-  // Poll the queue while a chat is active. Cheap (small JSON) + the
-  // BE auto-drains, so most queues shrink fast; this just keeps the
-  // inline cards in sync. Also re-reads on every chat switch.
+  // Poll the queue while a chat is active. Cheap (small JSON); keeps
+  // the inline cards in sync as a backstop for the optimistic removal
+  // + WS reconcile. Also re-reads on every chat switch.
   createEffect(() => {
     const id = activeId();
     if (!id) {
@@ -677,7 +673,8 @@ export default function ChatPane() {
             }
             if (parsed.chat_idle) {
               void reconcileChat();
-              // Turn finished: the queue unlocks + may have auto-drained.
+              // Turn finished: the queue unlocks (still manual — the
+              // user picks the next message to send).
               void refreshQueue();
               return;
             }
@@ -904,9 +901,8 @@ export default function ChatPane() {
    *     when the response resolves.
    *   - **busy** → POST /api/chats/:id/queue (enqueue the prompt).
    *     The user sees their entry land in the Queue panel instantly.
-   *     The BE will drain it when the current turn finishes (manual
-   *     mode: user clicks Run next; auto mode: BE auto-drains —
-   *     wiring still pending).
+   *     The queue is manual-only: the item waits there until the user
+   *     clicks "Send next". Nothing auto-sends.
    *
    * Attachments are bundled into the prompt body the same way for
    * both paths; queue items carry the full body so the dispatch
@@ -1410,7 +1406,6 @@ export default function ChatPane() {
           <Show when={activeId()}>
             <QueueTimeline
               items={queueItems()}
-              mode={queueMode()}
               busy={queueBusy()}
               locked={queueLocked()}
               expanded={queueExpanded()}
@@ -1418,7 +1413,6 @@ export default function ChatPane() {
               onCancel={(item) => void cancelQueueItem(item)}
               onUpdate={(item, body) => void updateQueueItem(item, body)}
               onRunNext={() => void runNextQueue()}
-              onSetMode={(m) => void setQueueMode(m)}
               onItemEditing={onQueueItemEditing}
             />
           </Show>
@@ -1683,10 +1677,10 @@ export default function ChatPane() {
                         disabled={!activeId() || (!input().trim() && uploads().length === 0)}
                         // Always "Send" while idle. The send handler routes
                         // idle messages to the dispatch path and busy ones
-                        // to the queue path automatically; queue mode
-                        // defaults to auto, so the BE drains messages
-                        // back-to-back. We swap to a Stop button (below)
-                        // while the agent is mid-turn.
+                        // to the queue path automatically. The queue is
+                        // manual-only: parked messages wait until the user
+                        // clicks "Send next". We swap to a Stop button
+                        // (below) while the agent is mid-turn.
                         title="Send to the agent"
                         data-testid="chat-send"
                       >

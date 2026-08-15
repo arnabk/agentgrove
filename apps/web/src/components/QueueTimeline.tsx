@@ -17,7 +17,6 @@ import { QueueCard } from "./queueCard";
  */
 export default function QueueTimeline(props: {
   items: QueueItem[];
-  mode: "auto" | "manual";
   busy: boolean;
   /** True while the agent is working — locks the whole queue. */
   locked: boolean;
@@ -26,7 +25,6 @@ export default function QueueTimeline(props: {
   onCancel: (item: QueueItem) => void;
   onUpdate: (item: QueueItem, body: string) => void;
   onRunNext: () => void;
-  onSetMode: (mode: "auto" | "manual") => void;
   /** Called when any card enters/leaves edit mode (item id + state) so
    *  the parent can pause queue polling during an edit. */
   onItemEditing: (itemId: string, editing: boolean) => void;
@@ -54,43 +52,12 @@ export default function QueueTimeline(props: {
             </span>
           </Show>
 
-          {/* Auto-send toggle + Send-next live on the header row. Both
-              disabled while locked. */}
-          <label
-            class="ml-auto inline-flex items-center gap-2 select-none cursor-pointer"
-            title={
-              props.mode === "auto"
-                ? "Auto-send ON — queued messages send automatically as soon as the agent finishes."
-                : "Auto-send OFF — queued messages wait until you click Send."
-            }
-          >
-            <span class="text-[11px] text-fg-subtle uppercase tracking-wider">Auto-send</span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={props.mode === "auto"}
-              disabled={props.busy}
-              onClick={() => props.onSetMode(props.mode === "auto" ? "manual" : "auto")}
-              data-testid={props.mode === "auto" ? "queue-mode-auto" : "queue-mode-manual"}
-              class="relative inline-flex h-4 w-7 items-center rounded-full transition-colors disabled:opacity-50"
-              classList={{
-                "bg-accent": props.mode === "auto",
-                "bg-bg-3 border border-border": props.mode !== "auto",
-              }}
-            >
-              <span
-                class="inline-block h-3 w-3 rounded-full bg-white shadow transition-transform"
-                classList={{
-                  "translate-x-3.5": props.mode === "auto",
-                  "translate-x-0.5": props.mode !== "auto",
-                }}
-              />
-            </button>
-          </label>
+          {/* Manual-only queue: the user decides what goes next. There
+              is no auto-send — "Send next" dispatches the head item. */}
           <Show when={!props.locked}>
             <button
               type="button"
-              class="ag-btn ag-btn-primary ag-btn-sm shrink-0"
+              class="ml-auto ag-btn ag-btn-primary ag-btn-sm shrink-0"
               disabled={props.busy}
               onClick={() => props.onRunNext()}
               title="Send the next queued message into the chat now"

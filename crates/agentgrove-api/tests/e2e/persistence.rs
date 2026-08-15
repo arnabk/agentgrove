@@ -38,30 +38,56 @@ async fn chats_and_prompts_survive_restart() {
     let h = BeHarness::start().await;
     let chat_id = make_chat(&h, "persist").await;
 
-    // Two smart-sends. Echo provider so the agent turn finishes
-    // quickly; the test waits for both to land in the timeline
-    // before bouncing the server.
+    // Two smart-sends. The queue is manual-only, so a message only
+    // dispatches when the chat is idle; while the previous turn's
+    // dispatch flag is still held a send parks in the queue instead.
+    // We therefore retry each send until it reports "dispatched",
+    // which also proves the dispatch flag clears after every turn.
+    // Echo provider keeps each turn fast.
     for body in ["alpha", "beta"] {
-        h.post_auth(&format!("/api/chats/{chat_id}/messages"))
-            .json(&json!({"content": body}))
-            .send()
-            .await
-            .unwrap();
-    }
-    // Wait until both prompts are visible.
-    for _ in 0..50 {
-        let view: Value = h
-            .get_auth(&format!("/api/chats/{chat_id}"))
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        if view["prompts"].as_array().map(|a| a.len()).unwrap_or(0) >= 2 {
-            break;
+        let mut dispatched = false;
+        for _ in 0..100 {
+            let res = h
+                .post_auth(&format!("/api/chats/{chat_id}/messages"))
+                .json(&json!({"content": body}))
+                .send()
+                .await
+                .unwrap();
+            let v: Value = res.json().await.unwrap();
+            if v["kind"] == "dispatched" {
+                dispatched = true;
+                break;
+            }
+            // Parked (previous turn still settling) — cancel the queued
+            // copy so we don't leave a duplicate, then retry.
+            if let Some(item_id) = v["item_id"].as_str() {
+                let _ = h
+                    .delete_auth(&format!("/api/chats/{chat_id}/queue/{item_id}"))
+                    .send()
+                    .await;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(dispatched, "'{body}' never dispatched (flag stuck?)");
+        // Wait for the turn to land before sending the next.
+        for _ in 0..50 {
+            let view: Value = h
+                .get_auth(&format!("/api/chats/{chat_id}"))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            let has = view["prompts"]
+                .as_array()
+                .map(|a| a.iter().any(|p| p["content"] == body))
+                .unwrap_or(false);
+            if has {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
     }
 
     // Restart and re-fetch.
@@ -89,21 +115,15 @@ async fn chats_and_prompts_survive_restart() {
     }
 }
 
-/// Pending queue items + the mode toggle survive a restart. We
-/// deliberately keep auto-drain off so the test stays
-/// deterministic — items must still be in the queue after bounce.
+/// Pending queue items survive a restart. The queue is manual-only, so
+/// enqueued items just sit there until the user runs them; after a
+/// bounce they must still be present and in order.
 #[tokio::test]
 async fn queue_items_and_mode_survive_restart() {
     let h = BeHarness::start().await;
     let chat_id = make_chat(&h, "persist-queue").await;
 
-    // Flip to manual + enqueue three items directly (the smart-send
-    // path would auto-drain the first one).
-    h.post_auth(&format!("/api/chats/{chat_id}/queue/mode"))
-        .json(&json!({"mode": "manual"}))
-        .send()
-        .await
-        .unwrap();
+    // Enqueue three items directly. Nothing auto-drains (manual-only).
     for body in ["one", "two", "three"] {
         h.post_auth(&format!("/api/chats/{chat_id}/queue"))
             .json(&json!({"body": body}))

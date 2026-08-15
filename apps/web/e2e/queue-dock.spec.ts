@@ -1,21 +1,16 @@
 // Inline queue behaviour.
 //
 // The queue lives at the bottom of the chat timeline, just above the
-// composer. It shows a total count, an auto-send toggle, and — once
-// items are queued — a "Send next" action that pushes the head of the
-// queue into the chat.
+// composer. It is manual-only: it shows a total count and — once items
+// are queued — a "Send next" action that pushes the head of the queue
+// into the chat. There is NO auto-send toggle; nothing ever auto-sends.
 
 import { test, expect } from "@playwright/test";
 import { bootstrapWithChat, BE_URL } from "./helpers";
 
 test.describe("inline queue", () => {
-  test("queue timeline is shown when items are queued", async ({ page }) => {
+  test("queue timeline is shown when items are queued (no auto-send toggle)", async ({ page }) => {
     const chatId = await bootstrapWithChat(page);
-    await fetch(`${BE_URL}/api/chats/${chatId}/queue/mode`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "manual" }),
-    });
 
     await fetch(`${BE_URL}/api/chats/${chatId}/queue`, {
       method: "POST",
@@ -32,22 +27,21 @@ test.describe("inline queue", () => {
     await expect(
       page.locator(`[data-testid="tab-host-${chatId}"] [data-testid="queue-timeline-total"]`),
     ).toBeVisible({ timeout: 5_000 });
-    const toggle = page
-      .locator(`[data-testid="tab-host-${chatId}"] [data-testid="queue-mode-auto"]`)
-      .or(page.locator(`[data-testid="tab-host-${chatId}"] [data-testid="queue-mode-manual"]`));
-    await expect(toggle).toBeVisible();
+
+    // The auto/manual toggle has been removed — the queue is manual-only.
+    await expect(
+      page.locator(`[data-testid="tab-host-${chatId}"] [data-testid="queue-mode-auto"]`),
+    ).toHaveCount(0);
+    await expect(
+      page.locator(`[data-testid="tab-host-${chatId}"] [data-testid="queue-mode-manual"]`),
+    ).toHaveCount(0);
   });
 
   test("queued items show a Send-next action and fill the timeline width", async ({ page }) => {
     const chatId = await bootstrapWithChat(page);
 
-    // Park the queue in manual mode and enqueue two items via the BE so
-    // they sit waiting (manual mode never auto-drains).
-    await fetch(`${BE_URL}/api/chats/${chatId}/queue/mode`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "manual" }),
-    });
+    // Enqueue two items via the BE so they sit waiting. The queue is
+    // manual-only, so nothing auto-drains.
     for (const body of ["first queued item", "second queued item"]) {
       await fetch(`${BE_URL}/api/chats/${chatId}/queue`, {
         method: "POST",

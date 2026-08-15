@@ -8,7 +8,7 @@
 //! ephemeral in-memory map. See `docs/architecture/chat-queue-routing.md`.
 
 use crate::state::AppState;
-use agentgrove_store::{QueueItemRow, QueueMode, QueueStatus};
+use agentgrove_store::{QueueItemRow, QueueStatus};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -27,23 +27,6 @@ pub enum Mode {
     Auto,
     /// Park pending messages until the user runs them.
     Manual,
-}
-
-impl From<Mode> for QueueMode {
-    fn from(m: Mode) -> Self {
-        match m {
-            Mode::Auto => Self::Auto,
-            Mode::Manual => Self::Manual,
-        }
-    }
-}
-impl From<QueueMode> for Mode {
-    fn from(m: QueueMode) -> Self {
-        match m {
-            QueueMode::Auto => Self::Auto,
-            QueueMode::Manual => Self::Manual,
-        }
-    }
 }
 
 /// Wire shape for queue item lifecycle.
@@ -115,27 +98,23 @@ pub struct QueueState {
 // store calls can fail; the call sites either propagate the error
 // or log + carry on depending on whether the operation is critical.
 
-/// True if the chat's queue mode is auto. Defaults to true when no
-/// row exists (the FE flips to manual only when the user toggles).
-pub async fn is_auto(state: &AppState, chat_id: &str) -> bool {
-    match state.queue_store.get_mode(chat_id).await {
-        Ok(m) => matches!(m, QueueMode::Auto),
-        Err(e) => {
-            tracing::warn!(chat_id, error = %e, "queue mode read failed; defaulting to auto");
-            true
-        }
-    }
+/// True if the chat's queue should auto-drain.
+///
+/// The queue is **manual-only** by product decision: messages sent
+/// while the agent is busy are parked, and the user explicitly
+/// dispatches the next one via "Run next". Nothing ever auto-sends,
+/// so this is a hard `false` — kept as a function (rather than
+/// deleting every call site) so the drain guards short-circuit and
+/// the concurrency invariants around the `dispatching` lock stay
+/// intact.
+pub async fn is_auto(_state: &AppState, _chat_id: &str) -> bool {
+    false
 }
 
 /// Read the full queue state for a chat (mode + items, lowest
-/// position first).
+/// position first). Mode is always `Manual` — see [`is_auto`].
 pub async fn read_state(state: &AppState, chat_id: &str) -> QueueState {
-    let mode: Mode = state
-        .queue_store
-        .get_mode(chat_id)
-        .await
-        .unwrap_or(QueueMode::Auto)
-        .into();
+    let mode = Mode::Manual;
     // Only surface Pending + Running items to the FE. Done items have
     // already been dispatched into the chat timeline; leaving them in
     // the queue list made stale cards linger (and clicking ✕ on a Done
@@ -167,15 +146,6 @@ pub async fn enqueue_item(
         .enqueue(chat_id, body)
         .await
         .map(Into::into)
-}
-
-/// Set the queue mode (auto or manual).
-pub async fn write_mode(
-    state: &AppState,
-    chat_id: &str,
-    mode: Mode,
-) -> Result<(), agentgrove_store::QueueError> {
-    state.queue_store.set_mode(chat_id, mode.into()).await
 }
 
 /// Pop the next pending item, marking it Running atomically.
@@ -247,41 +217,15 @@ pub async fn enqueue(
         })
 }
 
+/// `PUT /api/chats/:chat_id/queue/mode` — retained for wire
+/// compatibility with older clients. The queue is manual-only now, so
+/// the requested mode is ignored: we never enable auto-drain. Returns
+/// 204 so an old FE toggle still succeeds silently.
 pub async fn set_mode(
-    State(state): State<AppState>,
-    Path(chat_id): Path<String>,
-    Json(body): Json<ModeBody>,
+    State(_state): State<AppState>,
+    Path(_chat_id): Path<String>,
+    Json(_body): Json<ModeBody>,
 ) -> StatusCode {
-    let mode = body.mode;
-    if let Err(e) = write_mode(&state, &chat_id, mode).await {
-        tracing::warn!(chat_id, error = %e, "queue mode write failed");
-        return StatusCode::INTERNAL_SERVER_ERROR;
-    }
-
-    // Flipping manual → auto on an idle chat with a pending backlog
-    // must kick a drain. Otherwise the queue just sits there: the
-    // normal drain only fires on send / turn-completion, and there's
-    // no in-flight turn after a manual send finishes. Without this,
-    // re-enabling auto-send appears to do nothing — the user's exact
-    // complaint. Mirrors the idle-kick in `stop_chat`.
-    if matches!(mode, Mode::Auto) {
-        let mut dispatching = state.dispatching.lock().await;
-        let is_dispatching = dispatching.contains(&chat_id);
-        if !is_dispatching {
-            let pending = read_state(&state, &chat_id)
-                .await
-                .items
-                .iter()
-                .filter(|i| i.status == Status::Pending)
-                .count();
-            if pending > 0 {
-                dispatching.insert(chat_id.clone());
-                drop(dispatching);
-                crate::chats::spawn_drain_task(state.clone(), chat_id.clone());
-            }
-        }
-    }
-
     StatusCode::NO_CONTENT
 }
 
