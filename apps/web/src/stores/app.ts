@@ -576,6 +576,30 @@ export function closeTerminalTab(id: string) {
   closeTab(id);
 }
 
+/** Rebind a terminal tab to a NEW backend PTY id, preserving its
+ *  position, label and cwd. Used when a terminal's original PTY is
+ *  gone (e.g. the backend was restarted) and the user restarts the
+ *  shell in place — the tab must survive with the same slot, only the
+ *  underlying session id changes. Searches every scope so it works
+ *  regardless of which scope is active when the restart completes. */
+export function replaceTerminalId(oldId: string, newId: string) {
+  for (const key of Object.keys(state.byScope)) {
+    const scope = state.byScope[key];
+    if (!scope?.tabs.some((t) => t.id === oldId)) continue;
+    setState(
+      "byScope",
+      key,
+      produce((s) => {
+        const tab = s.tabs.find((t) => t.id === oldId);
+        if (tab) tab.id = newId;
+        if (s.activeTab === oldId) s.activeTab = newId;
+      }),
+    );
+    scheduleScopeLayoutWrite(key);
+    return;
+  }
+}
+
 export function setActiveTerminal(id: string) {
   setActiveTab(id);
 }

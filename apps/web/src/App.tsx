@@ -491,7 +491,10 @@ export default function App() {
                           </Show>
                           <Show when={tab.kind === "terminal"}>
                             <Suspense>
-                              <TerminalPane terminalId={tab.id} />
+                              <TerminalPane
+                                terminalId={tab.id}
+                                cwd={tab.kind === "terminal" ? tab.cwd : undefined}
+                              />
                             </Suspense>
                           </Show>
                           <Show when={tab.kind === "editor"}>
