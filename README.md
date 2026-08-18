@@ -32,7 +32,7 @@ On Linux, install the same packages with your distro's package manager (e.g. `ap
 
 ## Features
 
-What you can do with it today. For longer explanations, see [docs/features.md](docs/features.md).
+What you can do with it today.
 
 ### Project Management
 
@@ -210,7 +210,6 @@ What you can do with it today. For longer explanations, see [docs/features.md](d
 
 All detailed docs live under [`docs/`](./docs/):
 
-- [Features](./docs/features.md)
 - [Roadmap (working draft)](./docs/roadmap/README.md)
 - [Architecture](./docs/architecture/overview.md)
 - [Contributing](./docs/CONTRIBUTING.md)
