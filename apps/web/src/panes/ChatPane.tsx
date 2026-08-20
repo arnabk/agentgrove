@@ -272,9 +272,16 @@ export default function ChatPane() {
     }
     return visible.map((item) => queueItemCache.get(item.id)!);
   });
-  // Lock the whole queue while the agent is working (product decision):
-  // queued items can't be edited / removed / reordered mid-turn.
-  const queueLocked = () => isStreaming();
+  // Lock the queue only while the BE is actively dispatching a queued
+  // item (queue has a `running` item). We deliberately do NOT gate this
+  // on `isStreaming()` (the inferred chat-timeline busy flag): that flag
+  // depends on the tail prompt's terminal event landing in the store,
+  // and when it gets stuck the queue would lock forever and the
+  // "Send next" button would never re-appear — which is exactly the
+  // "can't send the queue item" bug. The BE already rejects a concurrent
+  // run_next with 409, so unlocking here is safe; at worst the click
+  // no-ops and surfaces a transient error.
+  const queueLocked = () => queueState()?.items.some((i) => i.status === "running") ?? false;
 
   async function refreshQueue() {
     const id = activeId();
