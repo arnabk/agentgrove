@@ -37,6 +37,29 @@ else
     fi
   done
 fi
+
+# Agent CLIs (opencode / claude / kimi) are user-authenticated tools the
+# app spawns via `which`. Under a service manager (launchd/systemd) the
+# PATH is minimal and does NOT include the dirs these install into, so
+# detection fails even though they work in an interactive shell. Add the
+# common install locations plus the active nvm node bin (opencode ships a
+# shim there too). Only real directories are appended.
+for d in \
+  "$HOME/.opencode/bin" \
+  "$HOME/.local/bin" \
+  "$HOME/bin" \
+  "$HOME/.bun/bin" \
+  "$HOME/.deno/bin"; do
+  [ -d "$d" ] && PATH="$PATH:$d"
+done
+# The node bin dir where `node` currently resolves (nvm installs CLIs
+# like opencode alongside node). Covers the case where node IS found via
+# an nvm shim but its sibling CLIs are not yet on PATH.
+_node_bin="$(command -v node 2>/dev/null)"
+if [ -n "$_node_bin" ]; then
+  _node_dir="$(cd "$(dirname "$_node_bin")" && pwd)"
+  case ":$PATH:" in *":$_node_dir:"*) : ;; *) PATH="$PATH:$_node_dir" ;; esac
+fi
 export PATH
 
 LOG_DIR="$REPO/.data/logs"

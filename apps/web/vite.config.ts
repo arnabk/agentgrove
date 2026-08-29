@@ -24,7 +24,11 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    strictPort: false,
+    // Pin the UI to :5173. The frontend's API base URL is derived from
+    // this port (api/client.ts maps :5173 → backend :4317), so if Vite
+    // silently fell back to :5174 (the default when 5173 is busy) the
+    // app would load but never reach the backend. Fail loudly instead.
+    strictPort: true,
     host: "0.0.0.0",
     allowedHosts: true,
     headers: isolationHeaders,

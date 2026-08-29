@@ -30,6 +30,23 @@ just dev    # starts BE (hot reload) + FE (HMR) on http://localhost:5173
 
 On Linux, install the same packages with your distro's package manager (e.g. `apt install nodejs pnpm` or `pacman -S node pnpm just`). Windows users can use `winget install Rustlang.Rustup OpenJS.NodeJS pnpm.just` or the [rustup](https://rustup.rs/) and [pnpm](https://pnpm.io/installation) installers.
 
+### Keep it running (auto-start on login)
+
+`just dev` runs in the foreground and stops when you close the terminal or
+reboot. To have AgentGrove start automatically on login and restart itself
+if it ever crashes, install it as a native OS service (no Docker — it keeps
+full access to git, the filesystem, terminals, and your agent CLIs):
+
+```sh
+just service-install     # macOS launchd · Linux systemd --user · Windows Task Scheduler
+just service-uninstall   # stop + remove (your data in ./.data is untouched)
+```
+
+The app then serves on http://localhost:4317 (backend + frontend on one
+port) and comes back on its own after a reboot. For a plain foreground run
+without hot reload, use `just console` (or `just start`). See
+[Troubleshooting](#troubleshooting) if the page ever looks blank or empty.
+
 ## Features
 
 What you can do with it today.
@@ -205,6 +222,40 @@ What you can do with it today.
 - **3 green CI badges** — CI, Release, Nightly; cross-platform nightly matrix
 - **Auto-release** — every merge to main bumps the version and builds 4-platform binaries + a GitHub Release
 - **ADRs** — architecture decision records documenting key choices
+
+## Troubleshooting
+
+- **Blank page or empty app (no projects) after a reboot.** The dev server
+  isn't running, so the frontend has no backend to talk to — your data is
+  safe, the backend is just down. Start it with `just dev` (or install the
+  service, see [Keep it running](#keep-it-running-auto-start-on-login)).
+  Verify the backend with `curl -s http://localhost:4317/health` →
+  `{"status":"ok",...}`.
+
+- **"I lost all my data!" after restarting the backend by hand.** You almost
+  certainly didn't. The backend defaults `AGENTGROVE_PORT` to a **random**
+  port when the variable is unset, so launching `./target/debug/agentgrove`
+  directly makes the frontend unable to reach it and the app looks empty.
+  Your database is untouched at `./.data/agentgrove.sqlite` (with timestamped
+  copies under `./.data/backups/`). Always start via `just dev` / `just
+  start` / `just console` / the service, which set `AGENTGROVE_PORT=4317`.
+
+- **Backend won't build: `feature 'edition2024' is required … Cargo 1.83`.**
+  A system/Homebrew `cargo` is shadowing rustup's on your `PATH`. This
+  project pins Rust 1.95 via `rust-toolchain.toml`; put rustup first:
+  `export PATH="$HOME/.cargo/bin:$PATH"`. The `just` run scripts already do
+  this for you.
+
+- **Service installed but the app never comes up (macOS, repo on an external
+  drive).** launchd can't open a job's log files on a non-boot volume and
+  fails with `EX_CONFIG` (78). The installer already routes the supervisor
+  log to `~/Library/Logs/agentgrove.service.*.log` to avoid this; if you
+  hand-rolled a plist, do the same. App logs remain in `.data/logs/`.
+
+- **Missing source: `could not find Cargo.toml` / `crates/agentgrove-*`.**
+  Your checkout is a partial *sparse checkout*. Restore the full tree with
+  `git sparse-checkout disable` — it does not touch `./.data` or
+  `node_modules`.
 
 ## Documentation
 

@@ -18,6 +18,15 @@ The server takes a snapshot on **every startup** AND a separate
 snapshot **before every migration run**. You have to actively go
 out of your way to lose data.
 
+> **"All my data is gone!" — almost always a false alarm.** The backend
+> defaults `AGENTGROVE_PORT` to a *random* port when the variable is
+> unset. If you launch `./target/debug/agentgrove` directly instead of via
+> `just dev` / `just start` / `just console` / the service, it binds a
+> random port, the frontend can't reach it, and the app looks empty even
+> though `agentgrove.sqlite` is intact. Restart on the fixed port
+> (`AGENTGROVE_PORT=4317 …`, which the run scripts set for you) and your
+> data reappears. Nothing was lost.
+
 ## How snapshots work
 
 `<state_dir>/backups/` contains directories named
