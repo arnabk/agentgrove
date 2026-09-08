@@ -110,6 +110,39 @@ pub async fn list_for_project(
     Ok(Json(all.into_iter().map(Into::into).collect()))
 }
 
+/// Tear down a worktree that was created on disk but then failed during
+/// its pre-script. We don't leave invalid worktrees around: remove the
+/// git worktree (force, since the pre-script may have left a dirty
+/// tree), delete the freshly-created branch, and drop the DB row so the
+/// LeftRail shows nothing rather than a broken `failed` entry.
+///
+/// Everything is best-effort + logged: this runs inside the create task
+/// after the pre-script already failed, so there's no caller to return
+/// an error to. A partial cleanup is still better than leaving the whole
+/// broken worktree in place.
+async fn cleanup_failed_worktree(
+    state: &AppState,
+    project_root: &std::path::Path,
+    wt_path: &std::path::Path,
+    branch: &str,
+    wt_id: &str,
+) {
+    if let Err(e) = git::remove_worktree(project_root, wt_path).await {
+        tracing::warn!(wt_id, error = %e, "cleanup: git worktree remove failed");
+        // Clear any dangling administrative state under .git/worktrees/.
+        let _ = git::prune_worktrees(project_root).await;
+    }
+    // The pre-script branch was created by `git worktree add -b`; drop it
+    // so a retry with the same name doesn't collide. `-D` because it may
+    // be ahead of base. Harmless if it's already gone.
+    if let Err(e) = git::delete_branch(project_root, branch).await {
+        tracing::warn!(wt_id, branch, error = %e, "cleanup: git branch delete failed");
+    }
+    if let Err(e) = state.worktrees.delete(wt_id).await {
+        tracing::warn!(wt_id, error = %e, "cleanup: worktree row delete failed");
+    }
+}
+
 pub async fn create(
     State(state): State<AppState>,
     Path(project_id): Path<String>,
@@ -322,23 +355,35 @@ pub async fn create(
             match res {
                 Ok(0) => {}
                 Ok(code) => {
-                    let _ = state_for_task
-                        .worktrees
-                        .set_status(&wt_id, WorktreeStatus::Failed)
-                        .await;
-                    state_for_task.logbus.publish(
-                        "sync",
-                        serde_json::json!({
-                            "kind": "worktree_updated",
-                            "worktree_id": wt_id,
-                            "project_id": project_id_for_task,
-                        })
-                        .to_string(),
-                    );
+                    // The worktree exists on disk but its pre-script
+                    // failed — tear it down rather than leaving a broken
+                    // `failed` worktree around.
                     state_for_task.logbus.publish(
                         &topic_for_task,
                         serde_json::json!({"type":"stderr","line": format!("pre-script exited {code}")})
                             .to_string(),
+                    );
+                    state_for_task.logbus.publish(
+                        &topic_for_task,
+                        serde_json::json!({"type":"stderr","line": "pre-script failed — removing the worktree"})
+                            .to_string(),
+                    );
+                    cleanup_failed_worktree(
+                        &state_for_task,
+                        &project_root,
+                        &wt_path_for_task,
+                        &branch,
+                        &wt_id,
+                    )
+                    .await;
+                    state_for_task.logbus.publish(
+                        "sync",
+                        serde_json::json!({
+                            "kind": "worktree_removed",
+                            "worktree_id": wt_id,
+                            "project_id": project_id_for_task,
+                        })
+                        .to_string(),
                     );
                     state_for_task.logbus.publish(
                         &topic_for_task,
@@ -347,23 +392,32 @@ pub async fn create(
                     return;
                 }
                 Err(e) => {
-                    let _ = state_for_task
-                        .worktrees
-                        .set_status(&wt_id, WorktreeStatus::Failed)
-                        .await;
-                    state_for_task.logbus.publish(
-                        "sync",
-                        serde_json::json!({
-                            "kind": "worktree_updated",
-                            "worktree_id": wt_id,
-                            "project_id": project_id_for_task,
-                        })
-                        .to_string(),
-                    );
                     state_for_task.logbus.publish(
                         &topic_for_task,
                         serde_json::json!({"type":"stderr","line": format!("pre-script error: {e}")})
                             .to_string(),
+                    );
+                    state_for_task.logbus.publish(
+                        &topic_for_task,
+                        serde_json::json!({"type":"stderr","line": "pre-script failed — removing the worktree"})
+                            .to_string(),
+                    );
+                    cleanup_failed_worktree(
+                        &state_for_task,
+                        &project_root,
+                        &wt_path_for_task,
+                        &branch,
+                        &wt_id,
+                    )
+                    .await;
+                    state_for_task.logbus.publish(
+                        "sync",
+                        serde_json::json!({
+                            "kind": "worktree_removed",
+                            "worktree_id": wt_id,
+                            "project_id": project_id_for_task,
+                        })
+                        .to_string(),
                     );
                     state_for_task.logbus.publish(
                         &topic_for_task,

@@ -290,11 +290,25 @@ export default function WorktreeDialog(props: Props) {
    *  the LeftRail row appear as soon as it transitions to `failed`,
    *  rather than waiting for the user to close the dialog. */
   function pollStatus(wtId: string) {
+    // Track whether the row ever showed up. A failed pre-script now
+    // auto-removes the worktree on the BE, so the row will appear
+    // (creating/pre_script) and then vanish — we must treat that
+    // disappearance as a failure, not keep polling forever.
+    let seen = false;
     statusPoll = setInterval(async () => {
       try {
         await refreshWorktreesForProject(props.projectId);
         const me = (state.worktrees[props.projectId] ?? []).find((w) => w.id === wtId);
-        if (!me) return;
+        if (!me) {
+          // Gone after we'd seen it → the BE removed a failed worktree.
+          if (seen) {
+            if (statusPoll !== null) clearInterval(statusPoll);
+            statusPoll = null;
+            setPhase("failed");
+          }
+          return;
+        }
+        seen = true;
         if (me.status === "ready") {
           if (statusPoll !== null) clearInterval(statusPoll);
           statusPoll = null;
@@ -368,9 +382,15 @@ export default function WorktreeDialog(props: Props) {
             <h3 class="text-[15px] font-semibold mb-1">
               <Show when={phase() === "running"}>Creating worktree…</Show>
               <Show when={phase() === "ready"}>Worktree ready</Show>
-              <Show when={phase() === "failed"}>Worktree failed</Show>
+              <Show when={phase() === "failed"}>Worktree failed — removed</Show>
             </h3>
-            <p class="text-[13px] text-fg-muted mb-4 font-mono break-all">{branch()}</p>
+            <p class="text-[13px] text-fg-muted mb-1 font-mono break-all">{branch()}</p>
+            <Show when={phase() === "failed"}>
+              <p class="text-[12px] text-fg-subtle mb-4">
+                The pre-script failed, so the worktree was removed automatically. Fix the script and
+                try again — nothing invalid was left behind.
+              </p>
+            </Show>
             <div
               ref={(el) => (consoleHost = el)}
               class="h-72 overflow-auto rounded-md border border-border bg-bg-0 p-3 font-mono text-[12px] leading-[1.5]"
@@ -414,15 +434,12 @@ export default function WorktreeDialog(props: Props) {
                   type="button"
                   class="ag-btn ag-btn-ghost"
                   onClick={() => {
-                    // The worktree row WAS created on the BE — git
-                    // worktree add succeeded but the pre-script later
-                    // exited non-zero, so the row is sitting in
-                    // `failed` state. We MUST call onCreated() here
-                    // (not onCancel) so the parent refreshes its
-                    // worktree list and surfaces the failed row to
-                    // the user. Calling onCancel would leave the row
-                    // invisible until the next manual page refresh,
-                    // which was the bug report.
+                    // The pre-script failed, so the BE already removed
+                    // the worktree (no invalid trees left around). We
+                    // still call onCreated() — with no id — so the
+                    // parent just refreshes its (now-shorter) worktree
+                    // list; it won't auto-select anything since nothing
+                    // was created successfully.
                     try {
                       socket?.close();
                     } catch {

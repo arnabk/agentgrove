@@ -78,6 +78,31 @@ async fn wait_for_terminal_status(h: &BeHarness, project_id: &str, wt_id: &str) 
     panic!("worktree {wt_id} did not reach terminal status in time");
 }
 
+/// Poll until the entry with `wt_id` disappears from the project's
+/// worktree list (auto-removed after a failed pre-script). Returns true
+/// if it was gone within the timeout, false otherwise.
+async fn wait_for_removal(h: &BeHarness, project_id: &str, wt_id: &str) -> bool {
+    for _ in 0..50 {
+        let arr: Value = h
+            .get_auth(&format!("/api/projects/{project_id}/worktrees"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let present = arr
+            .as_array()
+            .map(|items| items.iter().any(|i| i["id"] == wt_id))
+            .unwrap_or(false);
+        if !present {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    false
+}
+
 async fn make_project(h: &BeHarness) -> (tempfile::TempDir, String) {
     let dir = make_repo().await;
     let res = h
@@ -150,14 +175,14 @@ async fn worktree_pre_script_runs() {
 }
 
 #[tokio::test]
-async fn worktree_pre_script_failure_marks_status_failed() {
+async fn worktree_pre_script_failure_auto_removes_worktree() {
     let h = BeHarness::start().await;
-    let (_dir, project_id) = make_project(&h).await;
+    let (dir, project_id) = make_project(&h).await;
 
     // POST returns 200 immediately even when the pre-script will
-    // fail — the background task surfaces the failure by flipping
-    // the worktree's status to `failed` and publishing stderr/exit
-    // events on the LogBus topic.
+    // fail. A failed pre-script must NOT leave a broken `failed`
+    // worktree around — the background task tears it down (git
+    // worktree remove + branch delete + drop the DB row).
     let res = h
         .post_auth(&format!("/api/projects/{project_id}/worktrees"))
         .json(&json!({
@@ -171,8 +196,27 @@ async fn worktree_pre_script_failure_marks_status_failed() {
     assert_eq!(res.status(), 200);
     let wt: Value = res.json().await.unwrap();
     let wt_id = wt["id"].as_str().unwrap().to_owned();
-    let status = wait_for_terminal_status(&h, &project_id, &wt_id).await;
-    assert_eq!(status, "failed");
+
+    // The worktree should disappear from the list once cleanup runs.
+    let removed = wait_for_removal(&h, &project_id, &wt_id).await;
+    assert!(removed, "failed-pre-script worktree should be auto-removed");
+
+    // And its branch should be gone too, so a retry with the same name
+    // doesn't collide.
+    let branches: Value = h
+        .get_auth(&format!("/api/projects/{project_id}/branches"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let has_branch = branches
+        .as_array()
+        .map(|a| a.iter().any(|b| b["name"] == "bad-script"))
+        .unwrap_or(false);
+    assert!(!has_branch, "failed worktree's branch should be deleted");
+    let _ = dir;
 }
 
 #[tokio::test]

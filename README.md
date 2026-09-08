@@ -71,7 +71,7 @@ What you can do with it today.
 - **Branch rename** — rename a worktree's git branch without leaving the app
 - **Remote drift badges** — ahead/behind/diverged counts on each worktree row; click behind to sync
 - **PR/MR badges** — see open PR/MR status, checks, review decision, and merge when ready
-- **Worktree status badges** — `creating`, `pre_script`, and `failed` states are visible inline
+- **Worktree status badges** — `creating` and `pre_script` states are visible inline; a worktree whose pre-script fails is removed automatically (git worktree + branch + record) so no invalid worktrees linger
 - **Galaxy Map** — a zoomable map of every worktree you've visited, kept across removals; repeat visits to the same body show a ×N count, and the name pool spans 260+ real stars, planets, and galaxies so names rarely repeat
 - **VSCode-style git diff** — staged/unstaged groups with an inline CodeMirror merge view
 - **Diff toggles** — soft-wrap and collapse-unchanged-lines, remembered per user
