@@ -658,6 +658,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ path, content }),
     }),
+  /** Delete a single file. Directories are rejected by the BE. */
+  deleteFile: (path: string) =>
+    req<void>(`/api/editor/file?path=${encodeURIComponent(path)}`, { method: "DELETE" }),
   fileDiff: (path: string) =>
     req<{ path: string; head: string; working: string }>(
       `/api/editor/diff?path=${encodeURIComponent(path)}`,

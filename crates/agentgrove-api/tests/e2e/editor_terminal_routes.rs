@@ -36,6 +36,55 @@ async fn editor_read_write_roundtrip() {
 }
 
 #[tokio::test]
+async fn editor_delete_file_removes_it() {
+    let h = BeHarness::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let f = dir.path().join("gone.txt");
+    std::fs::write(&f, "bye").unwrap();
+
+    let del = h
+        .delete_auth(&format!(
+            "/api/editor/file?path={}",
+            urlencoding::encode(&f.to_string_lossy())
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(del.status(), 204);
+    assert!(!f.exists(), "file should be gone from disk");
+
+    // Deleting again → 404 (already gone).
+    let again = h
+        .delete_auth(&format!(
+            "/api/editor/file?path={}",
+            urlencoding::encode(&f.to_string_lossy())
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(again.status(), 404);
+}
+
+#[tokio::test]
+async fn editor_delete_refuses_directory() {
+    let h = BeHarness::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let sub = dir.path().join("subdir");
+    std::fs::create_dir(&sub).unwrap();
+
+    let del = h
+        .delete_auth(&format!(
+            "/api/editor/file?path={}",
+            urlencoding::encode(&sub.to_string_lossy())
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(del.status(), 400, "directories must not be deletable here");
+    assert!(sub.exists(), "directory must be left intact");
+}
+
+#[tokio::test]
 async fn editor_tree_lists_entries() {
     let h = BeHarness::start().await;
     let dir = tempfile::tempdir().unwrap();

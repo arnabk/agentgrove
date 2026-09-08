@@ -187,7 +187,9 @@ pub fn build_router(state: AppState) -> Router {
         // Editor
         .route(
             "/api/editor/file",
-            get(editor::read).post(editor::write_file),
+            get(editor::read)
+                .post(editor::write_file)
+                .delete(editor::delete_file),
         )
         .route("/api/editor/diff", get(editor::diff))
         .route("/api/editor/tree", get(editor::tree))

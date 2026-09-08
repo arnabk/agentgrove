@@ -101,6 +101,37 @@ pub async fn write_file(
     Ok(StatusCode::NO_CONTENT)
 }
 
+pub async fn delete_file(
+    State(state): State<AppState>,
+    Query(q): Query<ReadQuery>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let path = PathBuf::from(&q.path);
+    if !path.is_absolute() {
+        return Err((StatusCode::BAD_REQUEST, "path must be absolute".into()));
+    }
+    let md = fs::metadata(&path).await.map_err(|e| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("cannot stat {}: {e}", path.display()),
+        )
+    })?;
+    // Only delete regular files. Directory removal is intentionally not
+    // supported here — it has a much larger blast radius and would need
+    // an explicit recursive confirmation flow.
+    if md.is_dir() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "refusing to delete a directory; only files can be deleted".into(),
+        ));
+    }
+    fs::remove_file(&path)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    // Drop it from the open-history set so a stale entry doesn't linger.
+    state.editor.write().await.open_history.remove(&path);
+    Ok(StatusCode::NO_CONTENT)
+}
+
 pub async fn diff(Query(q): Query<ReadQuery>) -> Result<Json<DiffResponse>, (StatusCode, String)> {
     let path = PathBuf::from(&q.path);
     if !path.is_absolute() {

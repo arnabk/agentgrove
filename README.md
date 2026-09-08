@@ -172,6 +172,7 @@ What you can do with it today.
 - **Gitignore-aware** — uses the `ignore` crate's parallel walker (same as ripgrep)
 - **Live index** — per-project file index with manual refresh
 - **Empty-query browse** — opens the first 50 indexed files before you type
+- **Delete files from the tree** — right-click (or the hover ⋮ menu) any file in the left-nav explorer to delete it, with a confirm prompt; directories are protected
 
 ### Settings & Themes
 

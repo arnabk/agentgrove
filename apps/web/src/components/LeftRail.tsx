@@ -929,6 +929,7 @@ export default function LeftRail() {
                           depth={1}
                           initiallyOpen
                           refreshKey={treeRefreshKey(p.root)}
+                          onChanged={() => refreshTree(p.root)}
                         />
                       </Show>
                     </li>
@@ -1364,6 +1365,7 @@ export default function LeftRail() {
                                 depth={1}
                                 initiallyOpen
                                 refreshKey={treeRefreshKey(w.path)}
+                                onChanged={() => refreshTree(w.path)}
                               />
                             </Show>
                           </li>
@@ -1628,6 +1630,28 @@ function KebabIcon() {
       <circle cx="12" cy="5" r="1.6" />
       <circle cx="12" cy="12" r="1.6" />
       <circle cx="12" cy="19" r="1.6" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg
+      width="1em"
+      height="1em"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      class="shrink-0"
+      aria-hidden="true"
+    >
+      <path d="M3 6h18" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+      <path d="M10 11v6M14 11v6" />
     </svg>
   );
 }
@@ -1905,6 +1929,9 @@ interface DirNodeProps {
   depth: number;
   initiallyOpen?: boolean;
   refreshKey?: number | undefined;
+  /** Refresh the owning tree after a mutation (e.g. a file delete).
+   *  Passed down so a nested FileRow can refresh the correct root. */
+  onChanged?: (() => void) | undefined;
 }
 
 /** Lists the children of `path`. Renders as a nested <ul>. Lazy-loaded
@@ -1930,13 +1957,21 @@ function DirNode(props: DirNodeProps) {
         {(entry) => (
           <Show
             when={entry.is_dir}
-            fallback={<FileRow path={entry.path} name={entry.name} depth={props.depth} />}
+            fallback={
+              <FileRow
+                path={entry.path}
+                name={entry.name}
+                depth={props.depth}
+                onChanged={props.onChanged}
+              />
+            }
           >
             <FolderRow
               path={entry.path}
               name={entry.name}
               depth={props.depth}
               refreshKey={props.refreshKey}
+              onChanged={props.onChanged}
             />
           </Show>
         )}
@@ -1958,6 +1993,7 @@ function FolderRow(props: {
   name: string;
   depth: number;
   refreshKey?: number | undefined;
+  onChanged?: (() => void) | undefined;
 }) {
   const [open, setOpen] = createSignal(false);
   return (
@@ -1975,31 +2011,123 @@ function FolderRow(props: {
         <span class="truncate text-[0.83em]">{props.name}</span>
       </button>
       <Show when={open()}>
-        <DirNode path={props.path} depth={props.depth + 1} refreshKey={props.refreshKey} />
+        <DirNode
+          path={props.path}
+          depth={props.depth + 1}
+          refreshKey={props.refreshKey}
+          onChanged={props.onChanged}
+        />
       </Show>
     </li>
   );
 }
 
-function FileRow(props: { path: string; name: string; depth: number }) {
+function FileRow(props: {
+  path: string;
+  name: string;
+  depth: number;
+  onChanged?: (() => void) | undefined;
+}) {
   const isActive = () => selectedFilePath() === props.path;
+  const [menuOpen, setMenuOpen] = createSignal(false);
+  const [deleting, setDeleting] = createSignal(false);
+
+  async function doDelete() {
+    setMenuOpen(false);
+    const ok = await confirm({
+      title: "Delete file",
+      body: (
+        <span>
+          Delete <span class="font-mono">{props.name}</span>? This removes it from disk and can't be
+          undone here.
+        </span>
+      ),
+      confirmLabel: "Delete",
+      danger: true,
+      testId: "confirm-delete-file",
+    });
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      await api.deleteFile(props.path);
+      pushToast({ title: "File deleted", message: props.name, level: "info" });
+      props.onChanged?.();
+    } catch (e) {
+      pushToast({
+        title: "Delete failed",
+        message: e instanceof Error ? e.message : String(e),
+        level: "error",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
-    <li>
+    <li class="relative group/filerow">
       <button
         type="button"
         class="w-full flex items-center gap-1.5 px-2 py-[3px] rounded text-left cursor-pointer select-none"
         classList={{
           "bg-accent-soft text-fg": isActive(),
           "hover:bg-bg-2 text-fg-muted hover:text-fg": !isActive(),
+          "opacity-50": deleting(),
         }}
         style={{ "padding-left": `${20 + props.depth * 12}px` }}
         onClick={() => selectFile(props.path)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenuOpen(true);
+        }}
         title={props.path}
         data-testid={`tree-file-${props.path}`}
       >
         <TreeFileIcon />
-        <span class="truncate text-[0.83em]">{props.name}</span>
+        <span class="truncate text-[0.83em] flex-1">{props.name}</span>
+        {/* Hover affordance so the action is discoverable without a
+            right-click. Opens the same popup menu. */}
+        <span
+          role="button"
+          tabindex="0"
+          class="shrink-0 opacity-0 group-hover/filerow:opacity-100 p-0.5 rounded text-fg-subtle hover:text-fg hover:bg-bg-3"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpen((v) => !v);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              setMenuOpen((v) => !v);
+            }
+          }}
+          aria-label={`Actions for ${props.name}`}
+          data-testid={`tree-file-menu-btn-${props.path}`}
+        >
+          <KebabIcon />
+        </span>
       </button>
+      <Show when={menuOpen()}>
+        {/* Click-away backdrop closes the popup. */}
+        <div class="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} />
+        <div
+          role="menu"
+          class="absolute right-1 top-full mt-0.5 z-30 min-w-[140px] py-1 rounded-lg border border-border bg-bg-1 shadow-xl text-[12.5px]"
+          onClick={(e) => e.stopPropagation()}
+          data-testid={`tree-file-menu-${props.path}`}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2 text-danger disabled:opacity-50"
+            disabled={deleting()}
+            onClick={() => void doDelete()}
+            data-testid={`tree-file-delete-${props.path}`}
+          >
+            <TrashIcon /> Delete
+          </button>
+        </div>
+      </Show>
     </li>
   );
 }
