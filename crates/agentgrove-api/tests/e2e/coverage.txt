@@ -13,6 +13,7 @@ DELETE /api/projects/{project_id}/worktrees/{worktree_id}
 PATCH /api/projects/{project_id}/worktrees/{worktree_id}
 GET /api/worktrees/history
 POST /api/worktrees/{id}/restore
+POST /api/worktrees/{id}/merge-base
 GET /api/worktrees/{id}/chats
 POST /api/worktrees/{id}/chats
 GET /api/projects/{id}/chats
@@ -32,8 +33,10 @@ GET /api/chats/{id}/queue
 POST /api/chats/{id}/queue
 POST /api/chats/{id}/queue/mode
 POST /api/chats/{id}/queue/next
+POST /api/chats/{id}/queue/reorder
 DELETE /api/chats/{chat_id}/queue/{item_id}
 PATCH /api/chats/{chat_id}/queue/{item_id}
+POST /api/chats/{chat_id}/queue/{item_id}/dispatch
 GET /api/chats/{id}/notes
 POST /api/chats/{id}/notes
 DELETE /api/chats/{chat_id}/notes/{note_id}

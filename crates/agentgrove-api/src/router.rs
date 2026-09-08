@@ -45,6 +45,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/projects/:id/branches", get(branches::list_branches))
         .route("/api/projects/:id/open", post(open::open_project))
         .route("/api/projects/:id/branch", post(branches::switch_handler))
+        .route("/api/projects/:id/pull", post(branches::pull_handler))
         // Cmd+P fuzzy file finder. The index is lazy: the first
         // search call scans the project root with `ignore`
         // (parallel, gitignore-aware), subsequent calls reuse the
@@ -70,6 +71,7 @@ pub fn build_router(state: AppState) -> Router {
             get(worktrees::remote_status),
         )
         .route("/api/worktrees/:id/merge-pr", post(worktrees::merge_pr))
+        .route("/api/worktrees/:id/merge-base", post(worktrees::merge_base))
         // Chats
         .route(
             "/api/worktrees/:id/chats",
@@ -115,9 +117,14 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/chats/:id/queue/mode", post(queue::set_mode))
         .route("/api/chats/:id/queue/next", post(queue::run_next))
+        .route("/api/chats/:id/queue/reorder", post(queue::reorder))
         .route(
             "/api/chats/:chat_id/queue/:item_id",
             delete(queue::cancel).patch(queue::update_item),
+        )
+        .route(
+            "/api/chats/:chat_id/queue/:item_id/dispatch",
+            post(queue::dispatch_item),
         )
         // Notes (chat-scoped, legacy)
         .route("/api/chats/:id/notes", get(notes::list).post(notes::add))

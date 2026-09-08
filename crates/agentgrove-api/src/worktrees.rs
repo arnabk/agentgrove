@@ -876,3 +876,62 @@ pub async fn merge_pr(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+#[derive(Debug, serde::Serialize)]
+pub struct MergeBaseResultDto {
+    /// Short human-readable summary from git (e.g. "Already up to date."
+    /// or "Fast-forward" / "Merge made by the 'ort' strategy.").
+    pub summary: String,
+}
+
+/// `POST /api/worktrees/:id/merge-base` — merge the latest remote state
+/// of the worktree's base ref (the branch it was created from) into its
+/// current branch. Fetches `origin/<base_ref>` then merges it. On a
+/// conflict the merge is aborted server-side and a clear error is
+/// returned so the worktree is never left half-merged.
+pub async fn merge_base(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<MergeBaseResultDto>, (StatusCode, String)> {
+    let wt = state
+        .worktrees
+        .get(&id)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, format!("worktree not found: {e}")))?;
+    match git::merge_base_into_worktree(&wt.path, &wt.base_ref).await {
+        Ok(out) => {
+            let summary = out
+                .lines()
+                .map(str::trim)
+                .find(|l| {
+                    l.starts_with("Already up to date")
+                        || l.starts_with("Fast-forward")
+                        || l.starts_with("Updating ")
+                        || l.starts_with("Merge made")
+                })
+                .unwrap_or("Merged latest from base.")
+                .to_string();
+            Ok(Json(MergeBaseResultDto { summary }))
+        }
+        Err(git::GitError::GitNotFound) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "git binary not found on PATH".into(),
+        )),
+        Err(git::GitError::NonZero { code, stderr }) => {
+            // A conflict is the common case here; the merge was aborted
+            // server-side so the tree is clean. Surface a 409 so the FE
+            // can tell the user to resolve via a chat/agent flow.
+            let msg = if stderr.contains("conflict") || stderr.contains("CONFLICT") {
+                format!(
+                    "Merging origin/{} would conflict — resolve it in a chat or terminal. \
+                     The worktree was left unchanged.",
+                    wt.base_ref
+                )
+            } else {
+                format!("git merge failed (exit {code}): {stderr}")
+            };
+            Err((StatusCode::CONFLICT, msg))
+        }
+        Err(git::GitError::Io(e)) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("io: {e}"))),
+    }
+}

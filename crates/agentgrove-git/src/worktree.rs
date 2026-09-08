@@ -86,6 +86,69 @@ pub async fn fetch_ref(repo_path: &Path, base_ref: &str) -> Result<(), GitError>
     Ok(())
 }
 
+/// Pull the latest changes for the repo's currently checked-out branch
+/// from its upstream, fast-forward only.
+///
+/// `--ff-only` is deliberate: it advances the local branch when it is
+/// strictly behind its upstream and refuses (non-zero) when the local
+/// branch has diverged, rather than creating a merge commit the user
+/// did not ask for. This keeps the action safe to trigger from a menu
+/// on the main repo — the worst case is a clean "not possible to
+/// fast-forward" error the caller surfaces verbatim.
+///
+/// Returns git's stdout (e.g. `Fast-forward` / `Already up to date.`)
+/// so the caller can show a short summary toast.
+///
+/// # Errors
+///
+/// Returns [`GitError`] if git is missing, I/O fails, or git returns
+/// non-zero (no upstream configured, diverged history, or a network /
+/// auth failure — `GIT_TERMINAL_PROMPT=0` prevents hanging on a prompt).
+pub async fn pull_current(repo_path: &Path) -> Result<String, GitError> {
+    run_git(&["pull", "--ff-only"], repo_path).await
+}
+
+/// Merge the latest remote state of `base_ref` into the worktree's
+/// current branch. This is the "merge latest from where it was created
+/// from" action: `git fetch origin <base_ref>` then
+/// `git merge origin/<base_ref>`.
+///
+/// Unlike [`pull_current`] this is a real merge (not `--ff-only`) so a
+/// worktree that has its own commits still integrates upstream changes —
+/// which is exactly what you want when catching a feature branch up to
+/// its base. On a conflict git exits non-zero and leaves the worktree in
+/// a merging state; we abort the merge so the tree is left clean and the
+/// caller can surface a "resolve conflicts" message rather than stranding
+/// the user mid-merge. The merge is run in `worktree_path` (the worktree's
+/// own checkout), never the main repo.
+///
+/// Returns git's merge stdout on success.
+///
+/// # Errors
+///
+/// Returns [`GitError`] if git is missing, the fetch/merge fails
+/// (network, unknown ref, or conflicts — after aborting), or I/O fails.
+pub async fn merge_base_into_worktree(
+    worktree_path: &Path,
+    base_ref: &str,
+) -> Result<String, GitError> {
+    // Refresh the remote-tracking ref first so the merge target is
+    // current. Propagate fetch failures (offline / bad remote) verbatim.
+    run_git(&["fetch", "origin", base_ref], worktree_path).await?;
+    let target = format!("origin/{base_ref}");
+    match run_git(&["merge", "--no-edit", &target], worktree_path).await {
+        Ok(out) => Ok(out),
+        Err(e) => {
+            // On any merge failure (most commonly conflicts) leave the
+            // worktree clean by aborting the half-applied merge. Ignore
+            // the abort's own result — if there was nothing to abort
+            // (e.g. the merge failed before starting) that's fine.
+            let _ = run_git(&["merge", "--abort"], worktree_path).await;
+            Err(e)
+        }
+    }
+}
+
 /// Create a new worktree at `worktree_path` rooted in `repo_path`, on a
 /// new branch `branch` based on `base_ref`.
 ///

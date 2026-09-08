@@ -187,6 +187,20 @@ async fn list_worktrees_for_unknown_project_404() {
 }
 
 #[tokio::test]
+async fn merge_base_for_unknown_worktree_404() {
+    // Route is wired; a missing worktree resolves to 404 (the happy-path
+    // merge is covered by agentgrove-git's real origin+clone+worktree
+    // integration tests, which this harness can't set up cheaply).
+    let h = BeHarness::start().await;
+    let res = h
+        .post_auth("/api/worktrees/does-not-exist/merge-base")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
 async fn worktree_history_lists_and_filters_after_delete() {
     let h = BeHarness::start().await;
     let (_dir, project_id) = make_project(&h).await;
