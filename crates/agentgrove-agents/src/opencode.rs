@@ -232,6 +232,11 @@ impl AgentProvider for OpencodeProvider {
             .take()
             .ok_or_else(|| ProviderError::Io(std::io::Error::other("no stdout on child")))?;
         let events_for_stdout = events.clone();
+        // Set when the stdout stream itself carried an `error` event.
+        // The exit handler below uses this to avoid emitting a second,
+        // less-specific error from its stderr fallback.
+        let stream_errored = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stream_errored_stdout = stream_errored.clone();
         let stdout_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             // Track which session+message ids we've already emitted
@@ -247,6 +252,10 @@ impl AgentProvider for OpencodeProvider {
                 match serde_json::from_str::<serde_json::Value>(&line) {
                     Ok(v) => {
                         for ev in translate(&v, &mut session_announced, &mut last_text_per_part) {
+                            if matches!(ev, AgentEvent::Error { .. }) {
+                                stream_errored_stdout
+                                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
                             let _ = events_for_stdout.send(ev);
                         }
                     }
@@ -289,6 +298,11 @@ impl AgentProvider for OpencodeProvider {
                 result: None,
                 cost_usd: None,
             });
+        } else if stream_errored.load(std::sync::atomic::Ordering::Relaxed) {
+            // The stdout stream already carried a specific `error` event
+            // (surfaced by `translate`). Don't emit a second, vaguer
+            // error from the stderr fallback — that would double-report
+            // the same failure in the chat.
         } else {
             // Collect the first meaningful line from stderr — ignore
             // Node.js / Bun stack traces and focus on the actual error.
@@ -362,10 +376,12 @@ impl AgentProvider for OpencodeProvider {
 ///   the same `part.id`. The CLI sends the cumulative text per part,
 ///   not deltas, so we diff against the last seen value.
 /// - `{ type: "reasoning", part: { text } }` -> `Thinking`.
-/// - `{ type: "tool", part: { id, tool, state: { input } } }`
-///   -> `ToolCall`.
-/// - `{ type: "tool", part: { id, tool, state: { status:"completed",
-///        output } } }` -> `ToolResult`.
+/// - `{ type: "tool_use", part: { callID, tool, state: { input } } }`
+///   -> `ToolCall`. (Older CLIs used `type: "tool"` and `part.id`;
+///   both spellings are accepted.)
+/// - `{ type: "tool_use", part: { callID, tool, state: {
+///        status:"completed", output } } }` -> `ToolResult`.
+/// - `{ type: "error", error: { data: { message } } }` -> `Error`.
 /// - `{ type: "step_finish" }` -> dropped (terminal `Done` is
 ///   synthesised in `spawn` on child exit).
 fn translate(
@@ -430,7 +446,24 @@ fn translate(
                 }]
             }
         }
-        "tool" => translate_tool(v),
+        // Current opencode CLIs (1.18+) tag tool events as `tool_use`;
+        // older builds used `tool`. Accept both so a CLI upgrade
+        // doesn't silently stop streaming tool activity to the chat.
+        "tool" | "tool_use" => translate_tool(v),
+        // opencode streams recoverable/fatal errors as a stdout event
+        // rather than only on stderr. Previously these fell through the
+        // `_` arm and vanished — the terminal showed the failure but the
+        // chat sat silent. Surface it as an Error so the UI can render it.
+        "error" => {
+            let msg = v
+                .pointer("/error/data/message")
+                .and_then(|x| x.as_str())
+                .or_else(|| v.pointer("/error/message").and_then(|x| x.as_str()))
+                .or_else(|| v.get("message").and_then(|x| x.as_str()))
+                .unwrap_or("opencode reported an error")
+                .to_string();
+            vec![AgentEvent::Error { message: msg }]
+        }
         _ => vec![],
     }
 }
@@ -445,7 +478,14 @@ fn translate_tool(v: &serde_json::Value) -> Vec<AgentEvent> {
         .and_then(|x| x.as_str())
         .unwrap_or("")
         .to_string();
-    let id = part.get("id").and_then(|x| x.as_str()).map(String::from);
+    // Current CLIs key the tool-use id as `callID`; older builds used
+    // `id`. Prefer `callID`, fall back to `id`, so ToolCall/ToolResult
+    // still pair up for matching in the UI across CLI versions.
+    let id = part
+        .get("callID")
+        .and_then(|x| x.as_str())
+        .or_else(|| part.get("id").and_then(|x| x.as_str()))
+        .map(String::from);
     let state = part.get("state");
     let status = state
         .and_then(|s| s.get("status"))
@@ -588,6 +628,69 @@ mod tests {
                 name: "Read".into(),
                 result: json!("fn main() {}"),
                 id: Some("tl_1".into())
+            }]
+        );
+    }
+
+    #[test]
+    fn tool_use_envelope_with_callid_becomes_tool_result() {
+        // Shape emitted by opencode 1.18+: outer type is `tool_use`,
+        // the id lives in `part.callID`, and a completed call carries
+        // `state.output`.
+        let (mut sess, mut parts) = fresh();
+        let line = json!({
+            "type": "tool_use",
+            "part": {
+                "type": "tool",
+                "tool": "bash",
+                "callID": "toolu_1",
+                "state": { "status": "completed", "input": { "command": "ls" }, "output": "a\nb\n" }
+            }
+        });
+        assert_eq!(
+            translate(&line, &mut sess, &mut parts),
+            vec![AgentEvent::ToolResult {
+                name: "bash".into(),
+                result: json!("a\nb\n"),
+                id: Some("toolu_1".into())
+            }]
+        );
+    }
+
+    #[test]
+    fn tool_use_running_becomes_tool_call() {
+        let (mut sess, mut parts) = fresh();
+        let line = json!({
+            "type": "tool_use",
+            "part": {
+                "type": "tool",
+                "tool": "bash",
+                "callID": "toolu_2",
+                "state": { "status": "running", "input": { "command": "ls" } }
+            }
+        });
+        assert_eq!(
+            translate(&line, &mut sess, &mut parts),
+            vec![AgentEvent::ToolCall {
+                name: "bash".into(),
+                args: json!({ "command": "ls" }),
+                id: Some("toolu_2".into())
+            }]
+        );
+    }
+
+    #[test]
+    fn error_event_becomes_error() {
+        let (mut sess, mut parts) = fresh();
+        let line = json!({
+            "type": "error",
+            "sessionID": "ses_1",
+            "error": { "name": "UnknownError", "data": { "message": "Unexpected server error." } }
+        });
+        assert_eq!(
+            translate(&line, &mut sess, &mut parts),
+            vec![AgentEvent::Error {
+                message: "Unexpected server error.".into()
             }]
         );
     }
