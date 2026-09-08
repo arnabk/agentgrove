@@ -1,7 +1,7 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { MergeView } from "@codemirror/merge";
 import { EditorView, lineNumbers } from "@codemirror/view";
-import { oneDark } from "@codemirror/theme-one-dark";
+import { editorTheme } from "../lib/codemirrorTheme";
 import { api, type GitStatusEntry } from "../api/client";
 import { changesScope, setChangesScope } from "../stores/app";
 import { confirm } from "./dialog";
@@ -123,7 +123,7 @@ export default function ChangesPanel() {
 
   function commonExts() {
     const exts = [
-      oneDark,
+      editorTheme,
       lineNumbers(),
       EditorView.editable.of(false),
       EditorView.theme({

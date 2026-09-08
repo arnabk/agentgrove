@@ -1,7 +1,7 @@
 import { Show, createSignal, onCleanup } from "solid-js";
 import { MergeView } from "@codemirror/merge";
 import { EditorView } from "@codemirror/view";
-import { oneDark } from "@codemirror/theme-one-dark";
+import { editorTheme } from "../lib/codemirrorTheme";
 import { api } from "../api/client";
 
 export default function DiffPane() {
@@ -20,8 +20,8 @@ export default function DiffPane() {
     host.innerHTML = "";
     view = new MergeView({
       parent: host,
-      a: { doc: d.head, extensions: [oneDark, EditorView.editable.of(false)] },
-      b: { doc: d.working, extensions: [oneDark, EditorView.editable.of(false)] },
+      a: { doc: d.head, extensions: [editorTheme, EditorView.editable.of(false)] },
+      b: { doc: d.working, extensions: [editorTheme, EditorView.editable.of(false)] },
     });
   }
 

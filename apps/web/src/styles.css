@@ -1424,3 +1424,129 @@ textarea::placeholder {
   color: #666c74 !important;
   font-style: italic !important;
 }
+
+/* ── Diff / MergeView visuals ──────────────────────────────────────────
+ * CodeMirror's @codemirror/merge ships almost no theming, so the raw view
+ * reads as a flat pair of editors with a faint change band. We give it
+ * proper VSCode-style red/green blocks, gutter tick marks, a clear centre
+ * divider, and a legible collapsed-region widget — all driven by the
+ * active theme's tokens so it works in dark, light, solarized, etc.
+ *
+ * Derived tint colors: we blend --ag-success / --ag-danger into the
+ * surface so the highlight is readable without drowning the syntax
+ * colors underneath. */
+:root {
+  --ag-diff-ins-bg: color-mix(in srgb, var(--ag-success) 16%, transparent);
+  --ag-diff-ins-gutter: color-mix(in srgb, var(--ag-success) 55%, transparent);
+  --ag-diff-ins-tok: color-mix(in srgb, var(--ag-success) 34%, transparent);
+  --ag-diff-del-bg: color-mix(in srgb, var(--ag-danger) 15%, transparent);
+  --ag-diff-del-gutter: color-mix(in srgb, var(--ag-danger) 55%, transparent);
+  --ag-diff-del-tok: color-mix(in srgb, var(--ag-danger) 32%, transparent);
+}
+
+/* The two editors sit side by side; give them a clear seam. */
+.cm-mergeView .cm-mergeViewEditors {
+  height: 100%;
+}
+.cm-mergeView .cm-editor {
+  background: var(--ag-bg-1);
+}
+/* Centre gap between the two panes: a real divider, not a blank strip. */
+.cm-mergeView .cm-merge-gap,
+.cm-mergeView .cm-mergeView-gap {
+  background: var(--ag-bg-2);
+  border-left: 1px solid var(--ag-border);
+  border-right: 1px solid var(--ag-border);
+}
+
+/* Changed-line backgrounds. `cm-changedLine` is applied to whole lines
+ * that differ; `cm-deletedChunk` marks removed content on the left. */
+.cm-mergeView .cm-changedLine {
+  background: var(--ag-diff-ins-bg);
+}
+.cm-mergeView .cm-deletedChunk,
+.cm-mergeView .cm-deletedLine {
+  background: var(--ag-diff-del-bg);
+}
+/* The left (a) editor is the OLD version → its changed lines are
+ * deletions; the right (b) editor is NEW → insertions. Target by the
+ * merge pane order so red/green land on the correct side. */
+.cm-mergeView .cm-merge-a .cm-changedLine {
+  background: var(--ag-diff-del-bg);
+}
+.cm-mergeView .cm-merge-b .cm-changedLine {
+  background: var(--ag-diff-ins-bg);
+}
+
+/* Intra-line token highlights (the exact changed spans) — a touch
+ * stronger than the line band so the eye lands on what actually
+ * changed. */
+.cm-mergeView .cm-merge-a .cm-changedText,
+.cm-mergeView .cm-deletedChunk .cm-deletedText {
+  background: var(--ag-diff-del-tok);
+  border-radius: 2px;
+}
+.cm-mergeView .cm-merge-b .cm-changedText {
+  background: var(--ag-diff-ins-tok);
+  border-radius: 2px;
+}
+
+/* Change gutter: a coloured tick in the line-number gutter so changed
+ * lines are scannable even when the row scrolls under the cursor. */
+.cm-mergeView .cm-changedLineGutter,
+.cm-mergeView .cm-merge-b .cm-changedLine .cm-gutterElement {
+  box-shadow: inset 2px 0 0 var(--ag-diff-ins-gutter);
+}
+.cm-mergeView .cm-merge-a .cm-changedLine .cm-gutterElement,
+.cm-mergeView .cm-deletedChunk .cm-gutterElement {
+  box-shadow: inset 2px 0 0 var(--ag-diff-del-gutter);
+}
+
+/* Line-number gutter: quieter so the code + highlights lead. */
+.cm-mergeView .cm-gutters {
+  background: var(--ag-bg-1);
+  color: var(--ag-fg-subtle);
+  border-right: 1px solid var(--ag-border);
+}
+
+/* Collapsed "N unchanged lines" widget: make it an obvious, clickable
+ * pill rather than a flat grey bar. */
+.cm-mergeView .cm-collapsedLines {
+  background: color-mix(in srgb, var(--ag-accent) 10%, var(--ag-bg-2));
+  color: var(--ag-fg-muted);
+  border-top: 1px solid var(--ag-border);
+  border-bottom: 1px solid var(--ag-border);
+  padding: 3px 10px;
+  font-size: 11px;
+  font-style: normal;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.cm-mergeView .cm-collapsedLines:hover {
+  background: color-mix(in srgb, var(--ag-accent) 20%, var(--ag-bg-2));
+  color: var(--ag-fg);
+}
+.cm-mergeView .cm-collapsedLines::before {
+  content: "⋯ ";
+  color: var(--ag-accent);
+}
+
+/* Change-connector chunk buttons ("accept"/revert arrows) sit in the
+ * gap; keep them subtle until hovered. */
+.cm-mergeView .cm-merge-revert {
+  background: var(--ag-bg-2);
+}
+.cm-mergeView .cm-merge-revert button {
+  color: var(--ag-fg-subtle);
+}
+.cm-mergeView .cm-merge-revert button:hover {
+  color: var(--ag-accent);
+}
+
+/* Active line inside a read-only diff shouldn't glare. */
+.cm-mergeView .cm-editor .cm-activeLine {
+  background: color-mix(in srgb, var(--ag-fg) 4%, transparent);
+}
+.cm-mergeView .cm-editor .cm-activeLineGutter {
+  background: transparent;
+}
