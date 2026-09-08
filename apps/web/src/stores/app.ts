@@ -513,6 +513,43 @@ export function setActiveChat(chatId: string) {
   setActiveTab(chatId);
 }
 
+/** Navigate to a chat that may live in a DIFFERENT scope than the one
+ *  currently shown (e.g. the background-finish toast's "Go to chat").
+ *
+ *  `setActiveChat` alone only flips the active tab within the current
+ *  scope — if the chat belongs to another project/worktree it activates
+ *  a tab that doesn't exist there, blanking the pane. This switches to
+ *  the chat's owning scope first, ensures its tab exists, activates it,
+ *  and updates the URL so routeSync stays consistent. `worktreeId` is
+ *  null for a project-root chat. */
+export function goToChat(
+  projectId: string,
+  worktreeId: string | null,
+  chatId: string,
+): void {
+  // Switch scope first so ensureChatTab/currentScope resolve against the
+  // chat's own project + worktree, not wherever the user happens to be.
+  selectWorktree(projectId, worktreeId);
+  ensureChatTab(chatId);
+  setActiveChat(chatId);
+  // Keep the URL in step with the scope + chat so a refresh (or the
+  // store->URL effect) doesn't bounce back to the previous scope.
+  const base = worktreeId ? `/p/${projectId}/w/${worktreeId}` : `/p/${projectId}`;
+  window.history.replaceState({}, "", `${base}?chat=${encodeURIComponent(chatId)}`);
+  // A first visit to the target scope may hydrate its persisted tabs/
+  // activeTab asynchronously (from the layout store), which would
+  // otherwise clobber our selection back to that scope's previously
+  // active chat. Re-assert the target on the next ticks so the chat the
+  // user clicked actually wins the race.
+  const reassert = () => {
+    if (currentScopeKey() !== makeKey(projectId, worktreeId)) return;
+    ensureChatTab(chatId);
+    setActiveChat(chatId);
+  };
+  queueMicrotask(reassert);
+  setTimeout(reassert, 150);
+}
+
 /** Ensure a chat tab exists for `chatId` in the current scope and
  *  activate it. If the chat isn't already open, a placeholder tab is
  *  added synchronously so routeSync can win the race against the

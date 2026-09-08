@@ -120,7 +120,7 @@ What you can do with it today.
 - **PR detection** — auto-detects GitHub PR URLs in agent output; shows a PR badge
 - **Auto-approve tools** — `--dangerously-skip-permissions` with per-chat override
 - **Stop button** — cancel in-flight agent turns; kills the CLI subprocess cleanly
-- **Background finish toast** — a toast appears when a chat you're not watching completes
+- **Background finish toast** — a toast appears when a chat you're not watching completes; "Go to chat" jumps to that chat's own project/worktree scope (not just the current one)
 - **Inline tab rename** — double-click any tab to edit its label
 - **Export chat** — download a full chat transcript as Markdown from the tab hover menu
 - **Busy indicator** — pulsing dot on chat tabs and worktree rows while the agent is working

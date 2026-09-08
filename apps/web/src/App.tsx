@@ -49,6 +49,7 @@ import {
   scheduleGlobalLayoutWrite,
   selectedChatId,
   setActiveChat,
+  goToChat,
   setActiveWork,
   setGalaxyHistory,
   setGalaxyMapOpen,
@@ -242,6 +243,10 @@ export default function App() {
   // still streaming. The BE's active set only drops a chat when its
   // turn genuinely ends, so a finish is a real finish.
   let prevActiveChatIds = new Set<string>();
+  // chatId -> owning scope, captured from the active-chats poll so the
+  // background-finish toast can navigate to the chat's real scope (it
+  // may live in a different project/worktree than the one on screen).
+  let activeChatScopes = new Map<string, { projectId: string; worktreeId: string | null }>();
   let firstActivePoll = true;
   onMount(() => {
     let stopped = false;
@@ -250,8 +255,13 @@ export default function App() {
         const rows = await api.activeChats();
         const scopeKeys = new Set<string>();
         const chatIds = new Set<string>();
+        const scopes = new Map<string, { projectId: string; worktreeId: string | null }>();
         for (const r of rows) {
           chatIds.add(r.chat_id);
+          scopes.set(r.chat_id, {
+            projectId: r.project_id,
+            worktreeId: r.worktree_id ?? null,
+          });
           // Exact scope key: `pid::wid` for a worktree chat, or the bare
           // `pid` for a project-root chat. We deliberately do NOT add a
           // bare `pid` for worktree rows — the parent project folder must
@@ -270,16 +280,27 @@ export default function App() {
           for (const id of prevActiveChatIds) {
             if (chatIds.has(id) || id === active) continue;
             const tab = findChatTab(id);
+            // Scope captured while the chat was still active (this poll's
+            // rows no longer include it). Needed so "Go to chat" can
+            // switch to the chat's own project/worktree.
+            const scope = activeChatScopes.get(id);
             playNotificationSound();
             pushToast({
               title: "Response ready",
               message: tab ? `${tab.title} has finished.` : "A background chat has finished.",
-              action: { label: "→ Go to chat", onClick: () => setActiveChat(id) },
+              action: {
+                label: "→ Go to chat",
+                onClick: () => {
+                  if (scope) goToChat(scope.projectId, scope.worktreeId, id);
+                  else setActiveChat(id);
+                },
+              },
               timeoutMs: 8000,
             });
           }
         }
         prevActiveChatIds = chatIds;
+        activeChatScopes = scopes;
         firstActivePoll = false;
       } catch {
         // Transient failure: leave the last known state in place.
