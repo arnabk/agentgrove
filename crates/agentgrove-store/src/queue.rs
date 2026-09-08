@@ -239,6 +239,122 @@ impl QueueRepo {
         Ok(res.rows_affected() == 1)
     }
 
+    /// Atomically pop a *specific* pending item and mark it Running.
+    /// Returns `None` when the item doesn't exist, isn't pending, or
+    /// belongs to a different chat. Used for out-of-order "Send now"
+    /// on any queue card, not just the head.
+    ///
+    /// Uses the same `BEGIN IMMEDIATE` + pinned-connection pattern as
+    /// [`Self::pop_next_pending`] so it can't race the drain loop.
+    pub async fn pop_specific_pending(
+        &self,
+        chat_id: &str,
+        item_id: &str,
+    ) -> Result<Option<QueueItemRow>, QueueError> {
+        let mut conn = self.pool.acquire().await?;
+        sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+        let result = async {
+            let row: Option<QueueRowTuple> = sqlx::query_as(
+                "SELECT id, chat_id, body, status, position, created_at, updated_at \
+                 FROM queue_items WHERE id = ?1 AND chat_id = ?2 AND status = 'pending' LIMIT 1",
+            )
+            .bind(item_id)
+            .bind(chat_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+            let Some(tuple) = row else {
+                return Ok::<Option<QueueItemRow>, QueueError>(None);
+            };
+            let now_ms = Utc::now().timestamp_millis();
+            sqlx::query("UPDATE queue_items SET status = 'running', updated_at = ?1 WHERE id = ?2")
+                .bind(now_ms)
+                .bind(item_id)
+                .execute(&mut *conn)
+                .await?;
+            let mut item = row_to_item(tuple);
+            item.status = QueueStatus::Running;
+            item.updated_at = ts_to_dt(now_ms);
+            Ok(Some(item))
+        }
+        .await;
+        match &result {
+            Ok(_) => {
+                sqlx::query("COMMIT").execute(&mut *conn).await?;
+            }
+            Err(_) => {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            }
+        }
+        result
+    }
+
+    /// Reorder the pending items of a chat to match `ordered_ids`
+    /// (first id = position 0, next = 1, ...). Ids not present in the
+    /// chat's pending set are ignored; pending items missing from
+    /// `ordered_ids` keep their relative order after the listed ones.
+    /// Running items are never touched. Returns the number of rows
+    /// whose position changed.
+    ///
+    /// Runs in a single `BEGIN IMMEDIATE` transaction so a concurrent
+    /// `pop_next_pending` sees a consistent ordering.
+    pub async fn reorder(&self, chat_id: &str, ordered_ids: &[String]) -> Result<u64, QueueError> {
+        let mut conn = self.pool.acquire().await?;
+        sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+        let result = async {
+            // Current pending ids, lowest position first.
+            let current: Vec<(String,)> = sqlx::query_as(
+                "SELECT id FROM queue_items WHERE chat_id = ?1 AND status = 'pending' \
+                 ORDER BY position ASC, created_at ASC",
+            )
+            .bind(chat_id)
+            .fetch_all(&mut *conn)
+            .await?;
+            let pending: std::collections::HashSet<String> =
+                current.iter().map(|(id,)| id.clone()).collect();
+
+            // Final order: the requested ids that are actually pending,
+            // then any remaining pending ids in their existing order.
+            let mut final_order: Vec<String> = Vec::with_capacity(current.len());
+            let mut seen = std::collections::HashSet::new();
+            for id in ordered_ids {
+                if pending.contains(id) && seen.insert(id.clone()) {
+                    final_order.push(id.clone());
+                }
+            }
+            for (id,) in &current {
+                if seen.insert(id.clone()) {
+                    final_order.push(id.clone());
+                }
+            }
+
+            let now_ms = Utc::now().timestamp_millis();
+            let mut changed = 0u64;
+            for (pos, id) in final_order.iter().enumerate() {
+                let res = sqlx::query(
+                    "UPDATE queue_items SET position = ?1, updated_at = ?2 \
+                     WHERE id = ?3 AND status = 'pending' AND position <> ?1",
+                )
+                .bind(pos as i64)
+                .bind(now_ms)
+                .bind(id)
+                .execute(&mut *conn)
+                .await?;
+                changed += res.rows_affected();
+            }
+            Ok::<u64, QueueError>(changed)
+        }
+        .await;
+        match &result {
+            Ok(_) => {
+                sqlx::query("COMMIT").execute(&mut *conn).await?;
+            }
+            Err(_) => {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            }
+        }
+        result
+    }
+
     /// Delete a Pending item — used by the FE's cancel button.
     pub async fn cancel(&self, item_id: &str) -> Result<bool, QueueError> {
         let res = sqlx::query("DELETE FROM queue_items WHERE id = ?1 AND status = 'pending'")
@@ -295,9 +411,9 @@ impl QueueRepo {
 
     // -------- queue mode -------------------------------------------------
 
-    /// Read the queue mode for a chat. Defaults to `Auto` when no
-    /// row exists yet (the FE flips to manual only when the user
-    /// explicitly toggles).
+    /// Read the queue mode for a chat. Defaults to `Manual` when no
+    /// row exists yet — auto-drain is opt-in, so a chat only ever
+    /// auto-sends after the user explicitly turns it on.
     pub async fn get_mode(&self, chat_id: &str) -> Result<QueueMode, QueueError> {
         let row: Option<(String,)> =
             sqlx::query_as("SELECT mode FROM chat_queue_mode WHERE chat_id = ?1")
@@ -306,7 +422,7 @@ impl QueueRepo {
                 .await?;
         Ok(row
             .map(|(m,)| QueueMode::parse(&m))
-            .unwrap_or(QueueMode::Auto))
+            .unwrap_or(QueueMode::Manual))
     }
 
     /// Upsert the queue mode for a chat.

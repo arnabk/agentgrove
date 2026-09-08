@@ -1365,23 +1365,7 @@ pub async fn stop_turn(State(state): State<AppState>, Path(id): Path<String>) ->
     // dispatching, the queue is in auto mode, and items remain pending,
     // kick a fresh drain so the next message goes out automatically —
     // which is exactly what users expect after hitting Stop.
-    {
-        let mut dispatching = state.dispatching.lock().await;
-        let is_dispatching = dispatching.contains(&id);
-        if !is_dispatching && crate::queue::is_auto(&state, &id).await {
-            let pending = crate::queue::read_state(&state, &id)
-                .await
-                .items
-                .iter()
-                .filter(|i| i.status == crate::queue::Status::Pending)
-                .count();
-            if pending > 0 {
-                dispatching.insert(id.clone());
-                drop(dispatching);
-                spawn_drain_task(state.clone(), id.clone());
-            }
-        }
-    }
+    kick_drain_if_idle(&state, &id).await;
 
     result
 }
@@ -1558,6 +1542,34 @@ pub(crate) fn spawn_drain_task(state: AppState, chat_id: String) {
         drain_until_idle(&state, &chat_id).await;
         drop(_guard);
     });
+}
+
+/// If the chat is idle, in auto mode, and has pending items, take the
+/// dispatching flag and kick a drain so the backlog goes out without
+/// waiting for the next turn. No-op if the chat is busy (the running
+/// turn's own post-turn drain will handle it) or nothing is pending.
+/// Called after enabling auto mode and after a Stop, so both share one
+/// race-safe path (the pending check runs under the dispatching lock).
+pub(crate) async fn kick_drain_if_idle(state: &AppState, chat_id: &str) {
+    let mut dispatching = state.dispatching.lock().await;
+    if dispatching.contains(chat_id) {
+        return;
+    }
+    if !crate::queue::is_auto(state, chat_id).await {
+        return;
+    }
+    let pending = crate::queue::read_state(state, chat_id)
+        .await
+        .items
+        .iter()
+        .filter(|i| i.status == crate::queue::Status::Pending)
+        .count();
+    if pending == 0 {
+        return;
+    }
+    dispatching.insert(chat_id.to_owned());
+    drop(dispatching);
+    spawn_drain_task(state.clone(), chat_id.to_owned());
 }
 
 /// Drain loop body with re-check: keeps draining + tries to clear

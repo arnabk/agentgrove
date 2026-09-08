@@ -282,6 +282,7 @@ export default function ChatPane() {
   // run_next with 409, so unlocking here is safe; at worst the click
   // no-ops and surfaces a transient error.
   const queueLocked = () => queueState()?.items.some((i) => i.status === "running") ?? false;
+  const queueMode = (): "auto" | "manual" => queueState()?.mode ?? "manual";
 
   async function refreshQueue() {
     const id = activeId();
@@ -355,6 +356,57 @@ export default function ChatPane() {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setQueueBusy(false);
+    }
+  }
+
+  // Dispatch a specific queued item now, out of order. Optimistically
+  // remove its card; the BE has popped + dispatched it into the timeline.
+  async function sendQueueItem(item: QueueItem) {
+    setQueueBusy(true);
+    setQueueState((prev) =>
+      prev ? { ...prev, items: prev.items.filter((i) => i.id !== item.id) } : prev,
+    );
+    try {
+      await api.dispatchQueueItem(activeId()!, item.id);
+      await refreshQueue();
+    } catch (e) {
+      await refreshQueue();
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setQueueBusy(false);
+    }
+  }
+
+  // Reorder the pending queue items. Optimistically apply the new order
+  // so the drag feels instant, then reconcile with the BE's response.
+  async function reorderQueue(orderedIds: string[]) {
+    const cur = queueState();
+    if (cur) {
+      const byId = new Map(cur.items.map((i) => [i.id, i]));
+      const reordered = orderedIds.map((id) => byId.get(id)).filter((i): i is QueueItem => !!i);
+      // Keep any running item (not in orderedIds) pinned at the top.
+      const running = cur.items.filter((i) => i.status === "running");
+      setQueueState({ ...cur, items: [...running, ...reordered] });
+    }
+    try {
+      const next = await api.reorderQueue(activeId()!, orderedIds);
+      setQueueState(next);
+    } catch (e) {
+      await refreshQueue();
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function setQueueModeHandler(mode: "auto" | "manual") {
+    const prev = queueState();
+    // Optimistic flip so the toggle feels instant.
+    if (prev) setQueueState({ ...prev, mode });
+    try {
+      await api.setQueueMode(activeId()!, mode);
+      await refreshQueue();
+    } catch (e) {
+      await refreshQueue();
+      setErr(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -1415,11 +1467,15 @@ export default function ChatPane() {
               items={queueItems()}
               busy={queueBusy()}
               locked={queueLocked()}
+              mode={queueMode()}
               expanded={queueExpanded()}
               onToggleExpanded={toggleQueueExpanded}
               onCancel={(item) => void cancelQueueItem(item)}
               onUpdate={(item, body) => void updateQueueItem(item, body)}
               onRunNext={() => void runNextQueue()}
+              onSendItem={(item) => void sendQueueItem(item)}
+              onReorder={(ids) => void reorderQueue(ids)}
+              onSetMode={(m) => void setQueueModeHandler(m)}
               onItemEditing={onQueueItemEditing}
             />
           </Show>

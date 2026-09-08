@@ -100,21 +100,27 @@ pub struct QueueState {
 
 /// True if the chat's queue should auto-drain.
 ///
-/// The queue is **manual-only** by product decision: messages sent
-/// while the agent is busy are parked, and the user explicitly
-/// dispatches the next one via "Run next". Nothing ever auto-sends,
-/// so this is a hard `false` — kept as a function (rather than
-/// deleting every call site) so the drain guards short-circuit and
-/// the concurrency invariants around the `dispatching` lock stay
-/// intact.
-pub async fn is_auto(_state: &AppState, _chat_id: &str) -> bool {
-    false
+/// Auto-drain is opt-in **per chat**. When on, messages sent while the
+/// agent is busy are parked and then dispatched automatically the
+/// instant the current turn finishes — no manual "Send next" click.
+/// When off (the default), pending items wait until the user runs
+/// them. The underlying CLIs are one-shot per turn, so auto-drain is
+/// sequential, not concurrent: it removes the manual click, it does
+/// not run two turns in parallel.
+pub async fn is_auto(state: &AppState, chat_id: &str) -> bool {
+    matches!(
+        state.queue_store.get_mode(chat_id).await,
+        Ok(agentgrove_store::QueueMode::Auto)
+    )
 }
 
 /// Read the full queue state for a chat (mode + items, lowest
-/// position first). Mode is always `Manual` — see [`is_auto`].
+/// position first).
 pub async fn read_state(state: &AppState, chat_id: &str) -> QueueState {
-    let mode = Mode::Manual;
+    let mode = match state.queue_store.get_mode(chat_id).await {
+        Ok(agentgrove_store::QueueMode::Auto) => Mode::Auto,
+        _ => Mode::Manual,
+    };
     // Only surface Pending + Running items to the FE. Done items have
     // already been dispatched into the chat timeline; leaving them in
     // the queue list made stale cards linger (and clicking ✕ on a Done
@@ -217,15 +223,28 @@ pub async fn enqueue(
         })
 }
 
-/// `PUT /api/chats/:chat_id/queue/mode` — retained for wire
-/// compatibility with older clients. The queue is manual-only now, so
-/// the requested mode is ignored: we never enable auto-drain. Returns
-/// 204 so an old FE toggle still succeeds silently.
+/// `PUT /api/chats/:chat_id/queue/mode` — set the per-chat auto/manual
+/// drain mode. `auto` makes pending items dispatch automatically as
+/// each turn finishes; `manual` (the default) parks them until the
+/// user runs them. If flipping to `auto` while the chat is idle and
+/// items are pending, kick off a drain so the toggle takes effect
+/// immediately rather than waiting for the next turn.
 pub async fn set_mode(
-    State(_state): State<AppState>,
-    Path(_chat_id): Path<String>,
-    Json(_body): Json<ModeBody>,
+    State(state): State<AppState>,
+    Path(chat_id): Path<String>,
+    Json(body): Json<ModeBody>,
 ) -> StatusCode {
+    let store_mode = match body.mode {
+        Mode::Auto => agentgrove_store::QueueMode::Auto,
+        Mode::Manual => agentgrove_store::QueueMode::Manual,
+    };
+    if let Err(e) = state.queue_store.set_mode(&chat_id, store_mode).await {
+        tracing::warn!(chat_id, error = %e, "queue set_mode failed");
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    if body.mode == Mode::Auto {
+        crate::chats::kick_drain_if_idle(&state, &chat_id).await;
+    }
     StatusCode::NO_CONTENT
 }
 
@@ -272,6 +291,84 @@ pub async fn run_next(
     // already been turned into a real prompt and will live on in
     // the timeline. The spawned task handles streaming + any
     // follow-up auto-drain.
+    if let Err(e) = mark_done(&state, &item.id).await {
+        tracing::warn!(item_id = %item.id, error = %e, "queue mark_done failed");
+    }
+    let topic = format!("chat:{chat_id}");
+    state.logbus.publish(
+        &topic,
+        serde_json::json!({ "queue_dispatched": item.id }).to_string(),
+    );
+
+    crate::chats::spawn_dispatch_task(state.clone(), chat_id, chat, prompt, item.body.clone());
+    Ok(Json(item))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReorderBody {
+    /// Pending item ids in the desired order (first = next to send).
+    pub ordered_ids: Vec<String>,
+}
+
+/// `POST /api/chats/:chat_id/queue/reorder` — reorder the pending
+/// items so the queue drains in the given order. Ids not pending are
+/// ignored; omitted pending items keep their relative order after the
+/// listed ones. Returns the reordered queue state.
+pub async fn reorder(
+    State(state): State<AppState>,
+    Path(chat_id): Path<String>,
+    Json(body): Json<ReorderBody>,
+) -> Result<Json<QueueState>, StatusCode> {
+    state
+        .queue_store
+        .reorder(&chat_id, &body.ordered_ids)
+        .await
+        .map_err(|e| {
+            tracing::warn!(chat_id, error = %e, "queue reorder failed");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    let topic = format!("chat:{chat_id}");
+    state
+        .logbus
+        .publish(&topic, serde_json::json!({ "queue_reordered": true }).to_string());
+    Ok(Json(read_state(&state, &chat_id).await))
+}
+
+/// `POST /api/chats/:chat_id/queue/:item_id/dispatch` — dispatch a
+/// *specific* pending item now, out of order. Same concurrency rules
+/// as [`run_next`] (serialised via the `dispatching` lock; 409 if the
+/// chat is already busy), but pops the chosen item rather than the
+/// head so the user can send any queued message immediately.
+pub async fn dispatch_item(
+    State(state): State<AppState>,
+    Path((chat_id, item_id)): Path<(String, String)>,
+) -> Result<Json<QueueItem>, StatusCode> {
+    let mut dispatching = state.dispatching.lock().await;
+    if dispatching.contains(&chat_id) {
+        return Err(StatusCode::CONFLICT);
+    }
+    let item = state
+        .queue_store
+        .pop_specific_pending(&chat_id, &item_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .map(QueueItem::from)
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let chat = {
+        let reg = state.chats.read().await;
+        match reg.get(&chat_id) {
+            Some(c) => c.clone(),
+            None => return Err(StatusCode::NOT_FOUND),
+        }
+    };
+    let prompt = match crate::chats::persist_add_prompt(&state, &chat_id, &item.body).await {
+        Ok(Some(p)) => p,
+        _ => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+    };
+    dispatching.insert(chat_id.clone());
+    drop(dispatching);
+
     if let Err(e) = mark_done(&state, &item.id).await {
         tracing::warn!(item_id = %item.id, error = %e, "queue mark_done failed");
     }

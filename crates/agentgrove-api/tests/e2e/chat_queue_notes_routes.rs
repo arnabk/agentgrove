@@ -523,10 +523,10 @@ async fn patch_chat_rejects_empty_model() {
 }
 
 #[tokio::test]
-async fn queue_is_manual_only_and_does_not_auto_drain() {
-    // The queue is manual-only: a normal send while items are queued
-    // must NEVER auto-drain them. Only the just-sent prompt dispatches;
-    // the pre-queued items stay pending until the user runs them.
+async fn queue_defaults_to_manual_and_does_not_auto_drain() {
+    // Auto-drain is opt-in: by default (no mode set) a normal send while
+    // items are queued must NEVER auto-drain them. Only the just-sent
+    // prompt dispatches; the pre-queued items stay pending until run.
     let h = BeHarness::start().await;
     let chat: Value = h
         .post_auth("/api/worktrees/wt-drain/chats")
@@ -551,7 +551,7 @@ async fn queue_is_manual_only_and_does_not_auto_drain() {
         assert_eq!(res.status(), 200);
     }
 
-    // The queue reports Manual mode regardless of what a client asks.
+    // A fresh chat defaults to manual mode (auto-drain is opt-in).
     let q0: Value = h
         .get_auth(&format!("/api/chats/{chat_id}/queue"))
         .send()
@@ -560,7 +560,7 @@ async fn queue_is_manual_only_and_does_not_auto_drain() {
         .json()
         .await
         .unwrap();
-    assert_eq!(q0["mode"], "manual", "queue must always be manual");
+    assert_eq!(q0["mode"], "manual", "fresh chat must default to manual");
 
     // Fire a normal prompt. It dispatches; the queued items must NOT
     // follow it into the timeline.
@@ -622,6 +622,172 @@ async fn queue_is_manual_only_and_does_not_auto_drain() {
         1,
         "run_next should remove exactly one item from the queue"
     );
+}
+
+#[tokio::test]
+async fn queue_auto_mode_drains_pending_items_after_send() {
+    // Opt-in auto mode: with mode=auto, a normal send while items are
+    // queued dispatches the sent prompt AND then auto-drains the backlog
+    // into the timeline without any manual run_next.
+    let h = BeHarness::start().await;
+    let chat: Value = h
+        .post_auth("/api/worktrees/wt-auto/chats")
+        .json(&json!({"title":"auto","provider":"fake","model":"echo"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let chat_id = chat["id"].as_str().unwrap().to_owned();
+
+    // Turn auto mode on.
+    let m = h
+        .post_auth(&format!("/api/chats/{chat_id}/queue/mode"))
+        .json(&json!({"mode":"auto"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(m.status(), 204);
+
+    // Pre-queue two items.
+    for body in ["alpha", "beta"] {
+        h.post_auth(&format!("/api/chats/{chat_id}/queue"))
+            .json(&json!({"body": body}))
+            .send()
+            .await
+            .unwrap();
+    }
+
+    // Fire a normal prompt; auto-drain should follow with the two items.
+    h.post_auth(&format!("/api/chats/{chat_id}/prompts"))
+        .json(&json!({"content":"first"}))
+        .send()
+        .await
+        .unwrap();
+
+    // Poll until the queue empties (auto-drain is async).
+    let mut drained = false;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let q: Value = h
+            .get_auth(&format!("/api/chats/{chat_id}/queue"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if q["items"].as_array().unwrap().is_empty() {
+            drained = true;
+            break;
+        }
+    }
+    assert!(drained, "auto mode should drain the queue after the send");
+}
+
+#[tokio::test]
+async fn queue_reorder_changes_head() {
+    let h = BeHarness::start().await;
+    let chat: Value = h
+        .post_auth("/api/worktrees/wt-reorder/chats")
+        .json(&json!({"title":"r","provider":"fake","model":"echo"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let chat_id = chat["id"].as_str().unwrap().to_owned();
+
+    let mut ids = vec![];
+    for body in ["a", "b", "c"] {
+        let e: Value = h
+            .post_auth(&format!("/api/chats/{chat_id}/queue"))
+            .json(&json!({"body": body}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        ids.push(e["id"].as_str().unwrap().to_owned());
+    }
+
+    // Reverse to c, b, a.
+    let reordered: Value = h
+        .post_auth(&format!("/api/chats/{chat_id}/queue/reorder"))
+        .json(&json!({"ordered_ids": [ids[2], ids[1], ids[0]]}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let got: Vec<&str> = reordered["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(got, vec![&ids[2], &ids[1], &ids[0]]);
+}
+
+#[tokio::test]
+async fn queue_dispatch_specific_item_out_of_order() {
+    let h = BeHarness::start().await;
+    let chat: Value = h
+        .post_auth("/api/worktrees/wt-disp/chats")
+        .json(&json!({"title":"d","provider":"fake","model":"echo"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let chat_id = chat["id"].as_str().unwrap().to_owned();
+
+    let mut ids = vec![];
+    for body in ["a", "b", "c"] {
+        let e: Value = h
+            .post_auth(&format!("/api/chats/{chat_id}/queue"))
+            .json(&json!({"body": body}))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        ids.push(e["id"].as_str().unwrap().to_owned());
+    }
+
+    // Dispatch the middle item (b) directly.
+    let d = h
+        .post_auth(&format!("/api/chats/{chat_id}/queue/{}/dispatch", ids[1]))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(d.status(), 200);
+
+    // a and c remain; b is gone from the queue.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let q: Value = h
+        .get_auth(&format!("/api/chats/{chat_id}/queue"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let remaining: Vec<&str> = q["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["id"].as_str().unwrap())
+        .collect();
+    assert!(!remaining.contains(&ids[1].as_str()), "b was dispatched");
+    assert!(remaining.contains(&ids[0].as_str()));
+    assert!(remaining.contains(&ids[2].as_str()));
 }
 
 // ---------------------------------------------------------------
@@ -1616,15 +1782,15 @@ async fn queue_item_patch_updates_body() {
     assert_eq!(updated["body"], "new text");
 }
 
-/// Flipping the queue mode is a no-op now: the queue is manual-only, so
-/// even a request to enable "auto" must NOT drain a pending backlog.
-/// This guards against a regression back to auto-send.
+/// Enabling auto mode while idle with a pending backlog kicks a drain:
+/// the queued items dispatch automatically without a manual run_next.
+/// This is the opt-in auto-drain behavior (default is still manual).
 #[tokio::test]
-async fn set_mode_auto_is_ignored_and_never_drains() {
+async fn set_mode_auto_drains_pending_backlog_when_idle() {
     let h = BeHarness::start().await;
     let chat_id = make_chat(&h, "flip-drain", "fake", "echo").await;
 
-    // Queue three items while idle — they must stay pending.
+    // Queue three items while idle + still manual (default).
     for i in 0..3 {
         h.post_auth(&format!("/api/chats/{chat_id}/queue"))
             .json(&json!({"body": format!("parked-{i}")}))
@@ -1633,8 +1799,8 @@ async fn set_mode_auto_is_ignored_and_never_drains() {
             .unwrap();
     }
 
-    // Ask for auto mode. The endpoint accepts it (204, wire compat) but
-    // the queue is manual-only, so nothing may drain.
+    // Enable auto mode. Because the chat is idle with pending items,
+    // set_mode kicks a drain so the backlog goes out immediately.
     let res = h
         .post_auth(&format!("/api/chats/{chat_id}/queue/mode"))
         .json(&json!({"mode": "auto"}))
@@ -1643,22 +1809,24 @@ async fn set_mode_auto_is_ignored_and_never_drains() {
         .unwrap();
     assert_eq!(res.status(), 204);
 
-    // Give any (incorrect) drain a chance to run, then assert it didn't.
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-
-    let view: Value = h
-        .get_auth(&format!("/api/chats/{chat_id}"))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(
-        view["prompts"].as_array().map(|a| a.len()).unwrap_or(0),
-        0,
-        "queue must not auto-drain even when auto mode is requested"
-    );
+    // Poll until the queue drains (async).
+    let mut drained = false;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let q: Value = h
+            .get_auth(&format!("/api/chats/{chat_id}/queue"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        if q["items"].as_array().unwrap().is_empty() {
+            drained = true;
+            break;
+        }
+    }
+    assert!(drained, "enabling auto while idle must drain the backlog");
 
     let q: Value = h
         .get_auth(&format!("/api/chats/{chat_id}/queue"))
@@ -1668,10 +1836,5 @@ async fn set_mode_auto_is_ignored_and_never_drains() {
         .json()
         .await
         .unwrap();
-    assert_eq!(q["mode"], "manual", "mode must always report manual");
-    assert_eq!(
-        q["items"].as_array().unwrap().len(),
-        3,
-        "all three items must still be parked"
-    );
+    assert_eq!(q["mode"], "auto", "mode should report auto after the flip");
 }

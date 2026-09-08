@@ -17,6 +17,12 @@ export function QueueCard(props: {
   onCancel: () => void;
   onUpdate: (body: string) => void;
   onSendNow: () => void;
+  /** When true, this item can be dispatched now (out of order). The
+   *  "Send now" control shows on every such item, not just the head. */
+  canSend?: boolean;
+  /** When true, show a grab cursor + drag handle hint (parent wires the
+   *  actual dragstart/drop on the wrapper). */
+  draggable?: boolean;
   /** When true, hide the per-row edit / remove / send-now controls
    *  (the agent is busy and the queue is locked). */
   locked?: boolean;
@@ -71,6 +77,17 @@ export function QueueCard(props: {
       data-testid={`queue-card-${props.item.id}`}
     >
       <header class="flex items-center gap-2 text-[11.5px]">
+        {/* Drag handle — reorder the queue (out-of-order sending). */}
+        <Show when={props.draggable}>
+          <span
+            class="cursor-grab active:cursor-grabbing text-fg-subtle hover:text-fg select-none -ml-0.5"
+            title="Drag to reorder"
+            aria-hidden="true"
+            data-testid={`queue-drag-handle-${props.item.id}`}
+          >
+            ⠿
+          </span>
+        </Show>
         {/* Position badge — makes the queue order explicit. */}
         <span
           class="inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full text-[10px] font-semibold"
@@ -98,15 +115,15 @@ export function QueueCard(props: {
               </span>
             }
           >
-            {/* Per-item "Send now" only on the next item (run_next sends
-                the head of the queue). One-click push into the chat. */}
-            <Show when={props.isNext}>
+            {/* Per-item "Send now" on ANY pending item — dispatches that
+                specific message out of order, not just the head. */}
+            <Show when={props.canSend ?? props.isNext}>
               <button
                 type="button"
                 class="ag-btn ag-btn-ghost ag-btn-sm !py-0.5 !px-1.5 !text-[11px] text-accent"
                 disabled={props.busy}
                 onClick={() => props.onSendNow()}
-                title="Send this message into the chat now"
+                title="Send this message into the chat now (out of order)"
                 data-testid={`queue-send-now-${props.item.id}`}
               >
                 ▸ Send now
