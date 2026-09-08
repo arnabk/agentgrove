@@ -7,7 +7,10 @@ interface Props {
   projectId: string;
   defaultBaseRef?: string | undefined;
   onCancel: () => void;
-  onCreated: () => void;
+  /** Called when the worktree row has been created on the BE. Carries
+   *  the new worktree id (when known) so the caller can auto-select it
+   *  as the active scope. */
+  onCreated: (worktreeId?: string) => void;
 }
 
 /** Create-worktree dialog. Branch is required; base ref defaults to the
@@ -38,6 +41,11 @@ export default function WorktreeDialog(props: Props) {
   };
 
   const [branch, setBranch] = createSignal("");
+  // Tracks whether the user has manually edited the branch field. Once
+  // true, the async history/git-branch re-seeds must not clobber their
+  // input. This is distinct from `!branch().trim()` because a seeded
+  // (non-empty) name should still be replaceable by a later re-seed.
+  const [userEdited, setUserEdited] = createSignal(false);
   const [baseRef, setBaseRef] = createSignal(props.defaultBaseRef ?? "main");
   const [preScript, setPreScript] = createSignal("");
   // Whether the per-worktree override block is expanded. Stays
@@ -98,6 +106,18 @@ export default function WorktreeDialog(props: Props) {
   let socket: WebSocket | null = null;
   let consoleHost: HTMLDivElement | null = null;
   let statusPoll: ReturnType<typeof setInterval> | null = null;
+  let branchInput: HTMLInputElement | null = null;
+
+  // Focus the branch input and select the whole seeded name so the
+  // user can accept it as-is or overwrite it with a single keystroke,
+  // without reaching for the Suggest button first.
+  function focusAndSelectBranch() {
+    queueMicrotask(() => {
+      if (!branchInput) return;
+      branchInput.focus();
+      branchInput.select();
+    });
+  }
 
   onCleanup(() => {
     try {
@@ -120,40 +140,46 @@ export default function WorktreeDialog(props: Props) {
     });
   }
 
-  // Seed a suggestion + load history on first open. History fetch is
-  // best-effort; if it fails we fall back to the live-only taken set.
+  // Load history + git branches on first open. Both fetches are
+  // best-effort; on failure we fall back to whatever taken set we have.
+  // The re-seeding is handled reactively below, not here — see the
+  // effect. This matters because the branch data arrives asynchronously
+  // and the initial synchronous seed necessarily runs against an empty
+  // taken set, so a name picked then could collide with an existing git
+  // branch (the "duplicate name" bug when Create was clicked quickly).
   onMount(() => {
     void api
       .listWorktreeHistory({ projectId: props.projectId })
-      .then((entries) => {
-        setHistoryBranches(new Set(entries.map((w) => w.branch)));
-        // Re-seed once history is in if the user hasn't typed yet.
-        if (!branch().trim()) {
-          setBranch(suggestBranchName(takenBranches()));
-        }
-      })
+      .then((entries) => setHistoryBranches(new Set(entries.map((w) => w.branch))))
       .catch(() => {
         // ignore — fall back to live-only suggestions
       });
     void api
       .listBranches(props.projectId)
-      .then((entries) => {
-        setGitBranches(new Set(entries.map((b) => b.name)));
-        // Re-seed once git branches are in if the user hasn't typed yet.
-        if (!branch().trim()) {
-          setBranch(suggestBranchName(takenBranches()));
-        }
-      })
+      .then((entries) => setGitBranches(new Set(entries.map((b) => b.name))))
       .catch(() => {
         // ignore — fall back to live+history suggestions
       });
-    if (!branch().trim()) {
-      setBranch(suggestBranchName(takenBranches()));
-    }
+  });
+
+  // Keep the seeded branch name collision-free as branch data streams in.
+  // Runs on mount (empty taken set) and again each time history/git
+  // branches resolve. We only (re)seed while the user hasn't typed and
+  // the current value is empty or now-taken, so an accepted suggestion
+  // stays put unless it turns out to collide.
+  createEffect(() => {
+    const taken = takenBranches();
+    if (userEdited()) return;
+    const cur = branch().trim();
+    if (cur && !taken.has(cur)) return;
+    setBranch(suggestBranchName(taken));
+    focusAndSelectBranch();
   });
 
   function reroll() {
+    setUserEdited(false);
     setBranch(suggestBranchName(takenBranches()));
+    focusAndSelectBranch();
   }
 
   async function submit(ev: SubmitEvent) {
@@ -285,6 +311,7 @@ export default function WorktreeDialog(props: Props) {
   }
 
   function finish() {
+    const newId = createdId() ?? undefined;
     setPhase("form");
     setConsoleLines([]);
     setCreatedId(null);
@@ -294,7 +321,7 @@ export default function WorktreeDialog(props: Props) {
       // ignore
     }
     socket = null;
-    props.onCreated();
+    props.onCreated(newId);
   }
 
   /** Color class for a single console row. Stage = accent, stderr =
@@ -437,12 +464,15 @@ export default function WorktreeDialog(props: Props) {
             </button>
           </div>
           <input
+            ref={(el) => (branchInput = el)}
             class="ag-input font-mono mb-4"
             placeholder="feature/my-change"
             value={branch()}
-            onInput={(e) => setBranch(e.currentTarget.value)}
+            onInput={(e) => {
+              setUserEdited(true);
+              setBranch(e.currentTarget.value);
+            }}
             data-testid="worktree-branch"
-            autofocus
           />
 
           <label class="block text-[12px] font-medium text-fg-muted mb-1.5">Base ref</label>
