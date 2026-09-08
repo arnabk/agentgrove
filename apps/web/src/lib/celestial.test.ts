@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ALL_CELESTIAL, extractVisits, suggestBranchName, visitsByKind } from "./celestial";
+import {
+  ALL_CELESTIAL,
+  countVisits,
+  extractVisits,
+  suggestBranchName,
+  visitsByKind,
+} from "./celestial";
 
 describe("celestial", () => {
   it("suggests unique feature/ names", () => {
@@ -42,5 +48,17 @@ describe("celestial", () => {
     expect(byKind.planet.map((v) => v.display)).toEqual(["Mars"]);
     expect(byKind.star.map((v) => v.display)).toEqual(["Sirius"]);
     expect(byKind.galaxy.map((v) => v.display)).toEqual(["Andromeda"]);
+  });
+
+  it("counts repeated visits per body", () => {
+    const counts = countVisits([
+      "feature/mars",
+      "feature/mars",
+      "feature/sirius",
+      "feature/unknown",
+    ]);
+    expect(counts.get("Mars")).toBe(2);
+    expect(counts.get("Sirius")).toBe(1);
+    expect(counts.has("unknown")).toBe(false);
   });
 });

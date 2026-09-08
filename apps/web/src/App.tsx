@@ -23,7 +23,7 @@ import { installRouteSync } from "./lib/routeSync";
 import { installCrossInstanceSync } from "./lib/crossInstanceSync";
 import { declareMemorySource, estimateJsonBytes, recordMemoryUsage } from "./lib/memory";
 import { startMemoryMonitor } from "./lib/memMonitor";
-import { extractVisits } from "./lib/celestial";
+import { countVisits, extractVisits } from "./lib/celestial";
 
 declareMemorySource("rail.projects", "Project + worktree state");
 import ChatPane from "./panes/ChatPane";
@@ -91,6 +91,19 @@ export default function App() {
       visited.add(body.display);
     }
     return visited;
+  });
+
+  // Visit counts keyed by celestial display name. Counts reflect how many
+  // times a body currently appears across live worktree branches. A body
+  // that is only in the persisted history (no longer live) counts as 1 —
+  // history was only ever a presence set, so past repeats can't be
+  // recovered, but "visited at least once" is still true.
+  const galaxyVisitCounts = createMemo(() => {
+    const counts = countVisits(allBranches());
+    for (const display of galaxyHistory()) {
+      if (!counts.has(display)) counts.set(display, 1);
+    }
+    return counts;
   });
 
   createEffect(() => {
@@ -239,11 +252,12 @@ export default function App() {
         const chatIds = new Set<string>();
         for (const r of rows) {
           chatIds.add(r.chat_id);
-          // Worktree (or root) scope key for an exact-row match.
+          // Exact scope key: `pid::wid` for a worktree chat, or the bare
+          // `pid` for a project-root chat. We deliberately do NOT add a
+          // bare `pid` for worktree rows — the parent project folder must
+          // only indicate its OWN root activity, not work happening inside
+          // a child worktree (each worktree row shows its own dot).
           scopeKeys.add(r.worktree_id ? `${r.project_id}::${r.worktree_id}` : r.project_id);
-          // Bare project id so the collapsed project row lights up
-          // when any of its worktrees/root is working.
-          scopeKeys.add(r.project_id);
         }
         setActiveWork(scopeKeys);
 
@@ -525,7 +539,11 @@ export default function App() {
       </Show>
       <SettingsModal />
       <Show when={galaxyMapOpen()}>
-        <GalaxyMapDialog visited={galaxyVisited} onClose={() => setGalaxyMapOpen(false)} />
+        <GalaxyMapDialog
+          visited={galaxyVisited}
+          counts={galaxyVisitCounts}
+          onClose={() => setGalaxyMapOpen(false)}
+        />
       </Show>
       <Show when={changesScope()}>
         <Suspense>

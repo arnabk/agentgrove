@@ -5,6 +5,10 @@ import { ALL_CELESTIAL, type CelestialKind } from "../lib/celestial";
 
 interface Props {
   visited: () => Set<string>;
+  /** Visit counts keyed by celestial display name. Bodies visited more
+   *  than once render a count badge. Optional so older callers still
+   *  work; a missing entry is treated as a single visit. */
+  counts?: () => Map<string, number>;
   onClose: () => void;
 }
 
@@ -55,6 +59,8 @@ function bodyPosition(name: string, width: number, height: number) {
 
 export default function GalaxyMapDialog(props: Props) {
   const visited = createMemo(() => props.visited());
+  const visitCounts = createMemo(() => props.counts?.() ?? new Map<string, number>());
+  const countFor = (display: string) => visitCounts().get(display) ?? 1;
 
   const counts = createMemo(() => {
     const v = visited();
@@ -283,14 +289,17 @@ export default function GalaxyMapDialog(props: Props) {
         ctx.fill();
       }
 
-      // Labels: always show galaxy names; show visited star/planet names
+      // Labels: always show galaxy names; show visited star/planet names.
+      // Append ×N when a body has been visited more than once.
       if (body.kind === "galaxy" || isVisited) {
         const labelColor = isVisited ? "rgba(255, 255, 255, 0.9)" : "rgba(255, 255, 255, 0.4)";
         ctx.fillStyle = labelColor;
         ctx.font =
           '10px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
         ctx.textAlign = "left";
-        ctx.fillText(body.display, pos.x + size + 5, pos.y + 3);
+        const n = isVisited ? countFor(body.display) : 0;
+        const label = n > 1 ? `${body.display} ×${n}` : body.display;
+        ctx.fillText(label, pos.x + size + 5, pos.y + 3);
       }
     }
 
@@ -464,14 +473,31 @@ export default function GalaxyMapDialog(props: Props) {
                             <For each={items()}>
                               {(body) => (
                                 <span
-                                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-mono border"
+                                  class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono border"
                                   style={{
                                     "border-color": `${KIND_COLOR[body.kind]}40`,
                                     "background-color": `${KIND_COLOR[body.kind]}15`,
                                     color: KIND_COLOR[body.kind],
                                   }}
+                                  title={
+                                    countFor(body.display) > 1
+                                      ? `Visited ${countFor(body.display)} times`
+                                      : "Visited once"
+                                  }
                                 >
                                   {body.display}
+                                  <Show when={countFor(body.display) > 1}>
+                                    <span
+                                      class="inline-flex items-center justify-center min-w-[15px] h-[15px] px-1 rounded-full text-[9px] font-semibold"
+                                      style={{
+                                        "background-color": `${KIND_COLOR[body.kind]}30`,
+                                        color: KIND_COLOR[body.kind],
+                                      }}
+                                      data-testid={`galaxy-count-${body.display}`}
+                                    >
+                                      ×{countFor(body.display)}
+                                    </span>
+                                  </Show>
                                 </span>
                               )}
                             </For>
