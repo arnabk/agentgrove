@@ -25,3 +25,7 @@ Single source of truth. Root [`README.md`](../README.md) only points here.
   - [ADR-0002 Frontend stack](./adr/0002-frontend-stack.md)
   - [ADR-0003 Cross-platform support](./adr/0003-cross-platform.md)
   - [ADR-0004 Use git binary for worktree mutations](./adr/0004-git-binary-for-worktrees.md)
+  - [ADR-0005 Agent providers: subprocess passthrough](./adr/0005-agent-providers-subprocess-passthrough.md)
+  - [ADR-0006 Performance budget and virtualization](./adr/0006-performance-budget-and-virtualization.md)
+  - [ADR-0007 Data persistence and migrations](./adr/0007-data-persistence-and-migrations.md)
+  - [ADR-0008 Documentation is required for behavior changes](./adr/0008-docs-required.md)

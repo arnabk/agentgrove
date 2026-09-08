@@ -8,11 +8,9 @@ AgentGrove is a local developer workspace that keeps your projects, git worktree
 
 ## Demo
 
-One screen recording of the main flows. Everything was captured inside the isolated Docker demo stack so the dev server on the host is untouched. Click the thumbnail to watch:
+A short screen recording of the main flows. Click the thumbnail to watch:
 
-[![AgentGrove demo — full walkthrough](./docs/demos/agentgrove-demo-thumb.jpg)](https://github.com/arnabk/agentgrove/raw/main/docs/demos/agentgrove-demo.mp4)
-
-The walkthrough covers, in order: workspace overview, AI chat with the rich composer and prompt queue, worktree sessions, PR badges, integrated terminal, database editor, file search, git diff, notes, team chat, settings, revert-with-AI, and layout toggles.
+[![AgentGrove demo](./docs/demos/agentgrove-demo-thumb.jpg)](https://github.com/arnabk/agentgrove/raw/main/docs/demos/agentgrove-demo.mp4)
 
 ## Quick Start
 
@@ -61,9 +59,12 @@ What you can do with it today.
 
 ### Git & Worktrees
 
-- **Worktree management** — create, rename, and delete worktrees from the left rail
+- **Worktree management** — create, rename, and delete worktrees from the left rail; a newly created worktree is auto-selected as the active scope
 - **Remote-only worktrees** — gated on projects with a git remote; pre-fetches latest first
-- **Celestial names** — worktrees get star/planet/galaxy names so you don't drown in branch names
+- **Pull latest from remote** — fast-forward the main repo's current branch (`git pull --ff-only`) from the project menu; never a surprise merge commit
+- **Change branch** — switch the main repo to another branch (or create one off HEAD) from the project menu
+- **Merge latest from base** — from a worktree's menu, fetch and merge `origin/<base_ref>` (the branch it was created from) into its branch; conflicts abort cleanly and are surfaced, never left half-merged
+- **Collision-free celestial names** — worktrees get star/planet/galaxy names so you don't drown in branch names; the new-worktree dialog pre-fills a unique name (focused + selected) and never reuses an existing branch, even as branch data loads
 - **Pre/post scripts** — run setup commands (e.g. `pnpm install`) with live console output
 - **Worktree history** — soft-deleted worktrees can be searched and restored, with chat recovery
 - **Branch switching** — switch branches from the UI with a branch picker
@@ -71,7 +72,7 @@ What you can do with it today.
 - **Remote drift badges** — ahead/behind/diverged counts on each worktree row; click behind to sync
 - **PR/MR badges** — see open PR/MR status, checks, review decision, and merge when ready
 - **Worktree status badges** — `creating`, `pre_script`, and `failed` states are visible inline
-- **Galaxy Map** — a zoomable map of every worktree you've visited, kept across removals
+- **Galaxy Map** — a zoomable map of every worktree you've visited, kept across removals; repeat visits to the same body show a ×N count, and the name pool spans 260+ real stars, planets, and galaxies so names rarely repeat
 - **VSCode-style git diff** — staged/unstaged groups with an inline CodeMirror merge view
 - **Diff toggles** — soft-wrap and collapse-unchanged-lines, remembered per user
 - **Per-file discard** — restore tracked files or delete untracked ones, with confirmation
@@ -107,7 +108,7 @@ What you can do with it today.
 - **Long message truncation** — long user messages and huge assistant replies collapse with show more/less
 - **Markdown rendering** — assistant output via `marked` + `DOMPurify`; syntax-highlighted code
 - **Thinking blocks** — extended-thinking events rendered as collapsible disclosures
-- **Tool activity rail** — tool calls shown as icon + name + command preview rows
+- **Tool activity rail** — every tool call + result the CLI emits is streamed to the chat as icon + name + command preview rows; provider stream errors surface inline instead of only in the terminal
 - **Live working indicator** — elapsed timer and a note when a model has no live token stream
 - **Chat forking** — fork a conversation from any point to explore a different direction
 - **Message retry** — re-trigger the latest user message or regenerate the last assistant turn
@@ -127,10 +128,11 @@ What you can do with it today.
 ### Prompt Queue
 
 - **Per-chat queue** — messages sent while AI is busy auto-enqueue
-- **Auto-drain / manual mode** — dispatch back-to-back, or hold until explicit "Run next"
+- **Auto-send / manual mode** — per-chat toggle; auto dispatches the next queued message the instant a turn ends (sequential, not parallel), or hold until you click "Send next"
+- **Send out of order** — "Send now" on any queued item dispatches it immediately, not just the head
+- **Drag to reorder** — drag queue items to change send order
 - **Inline editing** — double-click queue items to edit text; attachments preserved
-- **Reorder** — drag queue items up/down to change execution order
-- **Right-side dock** — always-visible, resizable queue panel inside the chat pane
+- **Inline dock** — queue lives at the bottom of the chat timeline, above the composer
 
 ### Database
 

@@ -137,6 +137,37 @@ When you add or remove an HTTP route, update both
 `crates/agentgrove-api/tests/e2e/coverage.txt`. The route-inventory test
 fails the build if they drift.
 
+## Docs are mandatory
+
+**Every PR that adds or changes user-visible behavior must add or update
+documentation in the same PR.** This is a hard requirement enforced by
+review, on the same footing as tests. See
+[ADR-0008](./adr/0008-docs-required.md) for the rationale.
+
+What "docs" means depends on the change:
+
+- **A user-visible feature** → update the feature list in the root
+  [`README.md`](../README.md). The README is the single source of truth
+  for the feature catalog (there is no `docs/features.md`). Add the
+  feature to the most fitting section (Git & Worktrees, AI Chat, etc.)
+  in the same one-line `**Name** — description` style as its neighbours.
+- **A new HTTP route or API shape** → update the relevant page under
+  `docs/architecture/` (e.g. `backend.md`) and the route inventory
+  (`crates/agentgrove-api/tests/e2e/route_inventory.rs` +
+  `coverage.txt`).
+- **A structural or hard-to-reverse decision** (new dependency, new
+  provider, storage/format change, cross-cutting pattern) → add an ADR
+  under `docs/adr/` (copy the format of an existing one) and link it
+  from `docs/README.md`.
+- **A new developer workflow or gotcha** → update the matching guide
+  under `docs/guides/` (or `docs/AGENTS.md` for agent-run workflows).
+
+Pure internal refactors, formatting, and renames with no behavior
+change are exempt — but if in doubt, write the doc.
+
+Reviewers: reject PRs that add or change behavior without a
+corresponding docs update, the same way you would for missing tests.
+
 ## TDD
 
 See [docs/testing/tdd-policy.md](./testing/tdd-policy.md). Short version:
@@ -161,7 +192,9 @@ write the failing test first, then the code. CI runs
    must fail on `main`.
 3. Implement the smallest change that makes them pass.
 4. Add more tests as edge cases surface.
-5. Update docs under `docs/`.
+5. **Update docs** — at minimum add the feature to the root README
+   feature list; add/adjust an ADR or architecture page if the change
+   is structural. See [Docs are mandatory](#docs-are-mandatory).
 6. Open a PR. Fill the template **including the Tests section**. Ensure
    all checks pass.
 
@@ -178,6 +211,9 @@ Checklist:
 4. Add a unit test for any non-trivial helper the handler calls.
 5. If user-visible: add a Playwright spec under `apps/web/e2e/`.
 6. Update OpenAPI annotations (when we generate clients, this matters).
+7. **Update docs** — note the new route/behavior in the relevant
+   `docs/architecture/` page, and the README feature list if
+   user-visible. See [Docs are mandatory](#docs-are-mandatory).
 
 ## Adding an agent provider
 
@@ -188,6 +224,11 @@ Checklist:
 4. Implement `AgentProvider` trait.
 5. **Add an integration test** using `FakeProvider` scripted from the
    fixture that exercises chat → prompt → streamed events.
+6. **Update docs** — add the provider to
+   [docs/guides/agent-providers.md](./guides/agent-providers.md) and the
+   README "Multi-provider" line. If the CLI's stream format is unusual,
+   record the event shapes you translate. See
+   [Docs are mandatory](#docs-are-mandatory).
 
 ## Windows notes
 

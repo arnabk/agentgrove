@@ -20,6 +20,36 @@ send") and [`POST /api/chats/:id/queue/next`] (manual drain).
 | 5    | Mode = manual                                               | Pending items wait until `POST /queue/next` is called.   |
 | 6    | Concurrent rapid-fire on the same chat                      | No message dropped or reordered.                          |
 
+### Mode is opt-in auto-drain (per chat)
+
+A chat's queue mode is **manual by default** and can be flipped to
+**auto** per chat via `POST /api/chats/:id/queue/mode`. Auto-drain is
+_sequential_, not concurrent: the provider CLIs run one turn to
+completion per subprocess (see ADR-0005), so auto mode only removes the
+manual "Send next" click — it dispatches the next queued message the
+instant the current turn ends. It never runs two turns in parallel.
+
+Enabling auto while the chat is idle with a pending backlog kicks a
+drain immediately (`kick_drain_if_idle`), rather than waiting for the
+next turn.
+
+### Reordering + out-of-order dispatch
+
+Users are not limited to FIFO:
+
+- `POST /api/chats/:id/queue/reorder` with `{ ordered_ids: [...] }`
+  rewrites the pending items' positions. Ids that aren't pending are
+  ignored; omitted pending items keep their relative order after the
+  listed ones. Running items are never touched.
+- `POST /api/chats/:chat_id/queue/:item_id/dispatch` pops a **specific**
+  pending item and dispatches it now, out of order. Same concurrency
+  guard as `run_next` (serialised on the `dispatching` lock; 409 if the
+  chat is already busy).
+
+Both are backed by `QueueRepo::reorder` / `QueueRepo::pop_specific_pending`,
+which use the same `BEGIN IMMEDIATE` + pinned-connection pattern as
+`pop_next_pending` so they can't race the drain loop.
+
 ## Implementation
 
 - **Dispatch lock**: `AppState::dispatching: Arc<Mutex<HashSet<ChatId>>>`.
