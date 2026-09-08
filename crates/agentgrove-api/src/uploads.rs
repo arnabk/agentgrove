@@ -203,7 +203,21 @@ pub async fn raw(
             .first_or_octet_stream()
             .to_string()
     });
-    Ok(([(header::CONTENT_TYPE, mime)], bytes))
+    // The dev UI is served with COEP=require-corp (see apps/web/vite.config.ts)
+    // and runs on a different origin (:5173) than this API (:4317). Without
+    // an explicit Cross-Origin-Resource-Policy, the browser blocks this
+    // image from being embedded as an <img> (ERR_BLOCKED_BY_RESPONSE),
+    // which is why pasted-image previews silently failed to load. Opting in
+    // with `cross-origin` lets the thumbnail render; the bytes are
+    // non-sensitive local upload previews served from loopback.
+    let corp = header::HeaderName::from_static("cross-origin-resource-policy");
+    Ok((
+        [
+            (header::CONTENT_TYPE, mime),
+            (corp, "cross-origin".to_string()),
+        ],
+        bytes,
+    ))
 }
 
 /// Strip path separators and force a portable filename. We keep the

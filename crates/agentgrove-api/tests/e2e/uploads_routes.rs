@@ -37,6 +37,13 @@ async fn upload_create_then_raw_roundtrip() {
         .unwrap();
     assert_eq!(raw.status(), 200);
     assert_eq!(raw.headers().get("content-type").unwrap(), "text/plain");
+    // The dev UI runs under COEP=require-corp on a different origin, so
+    // the raw bytes must opt in with Cross-Origin-Resource-Policy or the
+    // browser blocks the <img> preview (the pasted-image bug).
+    assert_eq!(
+        raw.headers().get("cross-origin-resource-policy").unwrap(),
+        "cross-origin"
+    );
     let body = raw.bytes().await.unwrap();
     assert_eq!(&body[..], bytes);
 }
