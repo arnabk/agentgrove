@@ -135,6 +135,23 @@ export interface ActiveChat {
   worktree_id: string | null;
 }
 
+/** One open PR/MR in the aggregate PR-center list. */
+export interface PrRow {
+  project_id: string;
+  project_name: string;
+  number: number;
+  title: string;
+  state: string;
+  url: string;
+  source: string;
+  branch: string;
+  author: string | null;
+  draft: boolean;
+  created_at: string | null;
+  checks_status: string | null;
+  review_decision: string | null;
+}
+
 /** Backfill page returned by `GET /api/chats/:id/prompts?before=`. */
 export interface PromptsBackfill {
   prompts: Prompt[];
@@ -312,6 +329,8 @@ export const api = {
     req<{ summary: string }>(`/api/projects/${encodeURIComponent(projectId)}/pull`, {
       method: "POST",
     }),
+  /** Aggregate open PRs/MRs across all projects (PR center). */
+  listAllPrs: () => req<PrRow[]>(`/api/prs`),
   openWorktreeFolder: (worktreeId: string) =>
     req<void>(`/api/worktrees/${encodeURIComponent(worktreeId)}/open`, { method: "POST" }),
   createWorktree: (

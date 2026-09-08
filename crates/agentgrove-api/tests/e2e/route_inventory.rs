@@ -74,6 +74,7 @@ fn expected_routes() -> BTreeSet<&'static str> {
         "GET /api/git/status",
         "POST /api/git/discard",
         "GET /api/diag/memory",
+        "GET /api/prs",
         "GET /api/themes",
         "POST /api/themes",
         "DELETE /api/themes/{id}",

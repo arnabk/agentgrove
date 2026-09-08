@@ -244,6 +244,178 @@ async fn try_glab(cwd: &Path, branch: &str) -> Option<PrInfo> {
     })
 }
 
+/// One open pull/merge request, for the aggregate "PR center" list.
+/// Richer than [`PrInfo`] (carries author, branch, timestamps, draft)
+/// so the FE can render + sort a cross-project queue.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PrListItem {
+    /// PR/MR number (GitHub `number`, GitLab `iid`).
+    pub number: u64,
+    /// Title.
+    pub title: String,
+    /// Lifecycle state, lowercased ("open"/"opened").
+    pub state: String,
+    /// Web URL.
+    pub url: String,
+    /// Providing CLI ("gh" or "glab").
+    pub source: String,
+    /// Head/source branch.
+    pub branch: String,
+    /// Author login/username, when known.
+    pub author: Option<String>,
+    /// Whether it's a draft/WIP.
+    pub draft: bool,
+    /// ISO 8601 creation timestamp, when known (for age).
+    pub created_at: Option<String>,
+    /// CI checks rollup: "success"/"pending"/"failure"/null.
+    pub checks_status: Option<String>,
+    /// Review decision: "approved"/"changes_requested"/"review_required"/null.
+    pub review_decision: Option<String>,
+}
+
+/// List all **open** PRs/MRs for the repo at `cwd`, forge-agnostic.
+/// Tries `gh` then `glab`; returns an empty vec when no CLI is
+/// available or the repo isn't hosted on a supported forge (so the
+/// aggregate view degrades gracefully rather than erroring).
+pub async fn list_open_prs(cwd: &Path) -> Vec<PrListItem> {
+    if let Some(list) = list_gh(cwd).await {
+        return list;
+    }
+    if let Some(list) = list_glab(cwd).await {
+        return list;
+    }
+    Vec::new()
+}
+
+async fn list_gh(cwd: &Path) -> Option<Vec<PrListItem>> {
+    let out = Command::new("gh")
+        .args([
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--json",
+            "number,title,state,url,headRefName,author,isDraft,createdAt,reviewDecision,statusCheckRollup",
+            "--limit",
+            "100",
+        ])
+        .current_dir(cwd)
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let prs: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).ok()?;
+    Some(
+        prs.into_iter()
+            .filter_map(|pr| {
+                let review_decision = pr
+                    .get("reviewDecision")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_lowercase());
+                let checks_status = pr
+                    .get("statusCheckRollup")
+                    .and_then(|v| v.as_array())
+                    .map(|c| rollup_status(c));
+                Some(PrListItem {
+                    number: pr.get("number")?.as_u64()?,
+                    title: pr.get("title")?.as_str()?.to_string(),
+                    state: pr
+                        .get("state")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("open")
+                        .to_lowercase(),
+                    url: pr.get("url")?.as_str()?.to_string(),
+                    source: "gh".into(),
+                    branch: pr
+                        .get("headRefName")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    author: pr
+                        .get("author")
+                        .and_then(|a| a.get("login"))
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    draft: pr.get("isDraft").and_then(|v| v.as_bool()).unwrap_or(false),
+                    created_at: pr.get("createdAt").and_then(|v| v.as_str()).map(String::from),
+                    checks_status,
+                    review_decision,
+                })
+            })
+            .collect(),
+    )
+}
+
+/// Reduce a GitHub `statusCheckRollup` array to a single status.
+fn rollup_status(checks: &[serde_json::Value]) -> String {
+    if checks.iter().any(|c| {
+        c.get("conclusion")
+            .and_then(|v| v.as_str())
+            .map(|s| s == "FAILURE" || s == "ERROR")
+            .unwrap_or(false)
+    }) {
+        "failure".to_string()
+    } else if checks
+        .iter()
+        .any(|c| c.get("conclusion").and_then(|v| v.as_str()).is_none())
+    {
+        "pending".to_string()
+    } else {
+        "success".to_string()
+    }
+}
+
+async fn list_glab(cwd: &Path) -> Option<Vec<PrListItem>> {
+    let out = Command::new("glab")
+        .args(["mr", "list", "-F", "json"])
+        .current_dir(cwd)
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let mrs: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).ok()?;
+    Some(
+        mrs.into_iter()
+            .filter_map(|mr| {
+                Some(PrListItem {
+                    number: mr.get("iid").or_else(|| mr.get("id"))?.as_u64()?,
+                    title: mr.get("title")?.as_str()?.to_string(),
+                    state: mr
+                        .get("state")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("opened")
+                        .to_lowercase(),
+                    url: mr.get("web_url")?.as_str()?.to_string(),
+                    source: "glab".into(),
+                    branch: mr
+                        .get("source_branch")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    author: mr
+                        .get("author")
+                        .and_then(|a| a.get("username"))
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    draft: mr
+                        .get("draft")
+                        .or_else(|| mr.get("work_in_progress"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                    created_at: mr.get("created_at").and_then(|v| v.as_str()).map(String::from),
+                    checks_status: None,
+                    review_decision: None,
+                })
+            })
+            .collect(),
+    )
+}
+
 /// Read the current branch name from a git worktree's HEAD.
 /// Returns `None` if the directory isn't a git repo or HEAD is detached.
 pub async fn get_current_branch(cwd: &Path) -> Option<String> {

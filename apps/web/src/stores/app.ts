@@ -149,6 +149,9 @@ export const [state, setState] = createStore<AppState>({
 export const [settingsOpen, setSettingsOpen] = createSignal(false);
 /** Visibility of the Galaxy Map dialog. */
 export const [galaxyMapOpen, setGalaxyMapOpen] = createSignal(false);
+
+/** Visibility of the PR Center dialog (all open PRs/MRs). */
+export const [prCenterOpen, setPrCenterOpen] = createSignal(false);
 /** Celestial bodies ever visited across all branches, persisted to the
  *  global layout so worktree removal doesn't erase galaxy history. */
 export const [galaxyHistory, setGalaxyHistory] = createSignal<Set<string>>(new Set());

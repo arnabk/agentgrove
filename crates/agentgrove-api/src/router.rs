@@ -3,7 +3,7 @@
 use crate::{
     backups, branches, chats, db, diag, editor, files, fs as fsapi, git as gitapi,
     health::{health, version},
-    layout, notes, open, projects, providers, queue, scratchpad, settings,
+    layout, notes, open, projects, prs, providers, queue, scratchpad, settings,
     state::AppState,
     team_chat, terminal, themes, uploads, worktrees, ws,
 };
@@ -46,6 +46,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/projects/:id/open", post(open::open_project))
         .route("/api/projects/:id/branch", post(branches::switch_handler))
         .route("/api/projects/:id/pull", post(branches::pull_handler))
+        // Aggregate open PRs/MRs across every project (PR center).
+        .route("/api/prs", get(prs::list_all))
         // Cmd+P fuzzy file finder. The index is lazy: the first
         // search call scans the project root with `ignore`
         // (parallel, gitignore-aware), subsequent calls reuse the

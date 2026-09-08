@@ -12,6 +12,7 @@ import {
 import CommandPalette from "./components/CommandPalette";
 import { DialogHost } from "./components/dialog";
 import GalaxyMapDialog from "./components/GalaxyMapDialog";
+import PrCenterDialog from "./components/PrCenterDialog";
 import LeftRail from "./components/LeftRail";
 import Logo from "./components/Logo";
 import MemoryIndicator from "./components/MemoryIndicator";
@@ -43,6 +44,8 @@ import {
   findChatTab,
   galaxyHistory,
   galaxyMapOpen,
+  prCenterOpen,
+  setPrCenterOpen,
   isSidebarOpen,
   latestVersion,
   routeError,
@@ -474,6 +477,16 @@ export default function App() {
                     <button
                       type="button"
                       class="ag-btn ag-btn-ghost ag-btn-icon"
+                      onClick={() => setPrCenterOpen(true)}
+                      title="Pull Requests"
+                      aria-label="Open pull requests"
+                      data-testid="open-pr-center"
+                    >
+                      <PrIcon />
+                    </button>
+                    <button
+                      type="button"
+                      class="ag-btn ag-btn-ghost ag-btn-icon"
                       onClick={toggleSidebar}
                       title={isSidebarOpen() ? "Hide sidebar" : "Show sidebar"}
                       data-testid="sidebar-toggle"
@@ -559,6 +572,10 @@ export default function App() {
         </div>
       </Show>
       <SettingsModal />
+      <Show when={prCenterOpen()}>
+        <PrCenterDialog onClose={() => setPrCenterOpen(false)} />
+      </Show>
+
       <Show when={galaxyMapOpen()}>
         <GalaxyMapDialog
           visited={galaxyVisited}
@@ -678,6 +695,30 @@ function GalaxyIcon() {
         stroke-linejoin="round"
       />
       <circle cx="12" cy="12" r="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** Lucide `git-pull-request` — used for the PR Center button. */
+function PrIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.7"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M6 9v6" />
+      <circle cx="18" cy="18" r="3" />
+      <path d="M13 6h3a2 2 0 0 1 2 2v7" />
+      <path d="M11 4 13 6l-2 2" />
     </svg>
   );
 }

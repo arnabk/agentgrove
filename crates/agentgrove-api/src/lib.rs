@@ -18,6 +18,7 @@ pub mod logbus;
 pub mod notes;
 pub mod open;
 pub mod projects;
+pub mod prs;
 pub mod providers;
 pub mod queue;
 pub mod router;
