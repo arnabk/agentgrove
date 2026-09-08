@@ -299,8 +299,19 @@ export const api = {
     req<{ name: string; current: boolean }[]>(
       `/api/projects/${encodeURIComponent(projectId)}/branches`,
     ),
+  /** Switch the project root to `branch`. Set `create` to make a new
+   *  branch off HEAD. Returns 204. */
+  switchBranch: (projectId: string, branch: string, create = false) =>
+    req<void>(`/api/projects/${encodeURIComponent(projectId)}/branch`, {
+      method: "POST",
+      body: JSON.stringify({ branch, create }),
+    }),
   openProjectFolder: (projectId: string) =>
     req<void>(`/api/projects/${encodeURIComponent(projectId)}/open`, { method: "POST" }),
+  pullProject: (projectId: string) =>
+    req<{ summary: string }>(`/api/projects/${encodeURIComponent(projectId)}/pull`, {
+      method: "POST",
+    }),
   openWorktreeFolder: (worktreeId: string) =>
     req<void>(`/api/worktrees/${encodeURIComponent(worktreeId)}/open`, { method: "POST" }),
   createWorktree: (
@@ -366,6 +377,12 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pr_number: prNumber, source }),
+    }),
+  /** Merge the latest remote state of the worktree's base ref (the
+   *  branch it was created from) into its current branch. */
+  mergeWorktreeBase: (worktreeId: string) =>
+    req<{ summary: string }>(`/api/worktrees/${encodeURIComponent(worktreeId)}/merge-base`, {
+      method: "POST",
     }),
   // Chats — worktree-scoped (legacy) + project-scoped (current).
   listChats: (worktreeId: string) =>
@@ -574,6 +591,19 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ body }),
     }),
+  /** Reorder the pending queue items. `orderedIds` is the desired
+   *  order (first = next to send). Returns the reordered state. */
+  reorderQueue: (chatId: string, orderedIds: string[]) =>
+    req<QueueState>(`/api/chats/${encodeURIComponent(chatId)}/queue/reorder`, {
+      method: "POST",
+      body: JSON.stringify({ ordered_ids: orderedIds }),
+    }),
+  /** Dispatch a specific pending item now, out of order. */
+  dispatchQueueItem: (chatId: string, itemId: string) =>
+    req<QueueItem>(
+      `/api/chats/${encodeURIComponent(chatId)}/queue/${encodeURIComponent(itemId)}/dispatch`,
+      { method: "POST" },
+    ),
   // Notes
   listNotes: (chatId: string) => req<Note[]>(`/api/chats/${encodeURIComponent(chatId)}/notes`),
   addNote: (chatId: string, body: string) =>

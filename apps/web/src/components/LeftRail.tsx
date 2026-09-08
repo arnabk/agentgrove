@@ -21,7 +21,6 @@ import {
   addTerminalTab,
   currentScopeKey,
   currentWorktreeId,
-  isProjectWorking,
   isScopeWorking,
   refreshProjects,
   refreshWorktreesForProject,
@@ -43,6 +42,7 @@ import WorktreeDialog from "./WorktreeDialog";
 import WorktreeHistoryDialog from "./WorktreeHistoryDialog";
 import ChatHistoryDialog from "./ChatHistoryDialog";
 import RenameWorktreeDialog from "./RenameWorktreeDialog";
+import SwitchBranchDialog from "./SwitchBranchDialog";
 import ProjectSettingsDialog from "./ProjectSettingsDialog";
 import DbSidebar from "./DbSidebar";
 import Logo from "./Logo";
@@ -102,6 +102,11 @@ export default function LeftRail() {
   const [err, setErr] = createSignal<string | null>(null);
   // Active project id we are creating a worktree for; null when dialog closed.
   const [wtFor, setWtFor] = createSignal<string | null>(null);
+  // Project id whose "Change branch" dialog is open; null when closed.
+  const [switchBranchFor, setSwitchBranchFor] = createSignal<string | null>(null);
+  // Project id currently being pulled from remote; null when idle. Used
+  // to disable the menu item and show a "Pulling…" label.
+  const [pullingProjectId, setPullingProjectId] = createSignal<string | null>(null);
   // Active project id whose history dialog is open; null when closed.
   const [historyFor, setHistoryFor] = createSignal<string | null>(null);
   const [chatHistoryFor, setChatHistoryFor] = createSignal<{
@@ -141,6 +146,58 @@ export default function LeftRail() {
   const treeRefreshKey = (root: string) => treeRefreshKeys()[root] ?? 0;
   const refreshTree = (root: string) =>
     setTreeRefreshKeys((prev) => ({ ...prev, [root]: (prev[root] ?? 0) + 1 }));
+
+  // Merge the latest remote state of a worktree's base ref (the branch
+  // it was created from) into its current branch. On a conflict the BE
+  // aborts the merge and returns 409; we surface that as a toast so the
+  // worktree is never left half-merged.
+  const [mergingBaseWt, setMergingBaseWt] = createSignal<string | null>(null);
+  async function mergeWorktreeBase(worktreeId: string, branch: string) {
+    if (mergingBaseWt()) return;
+    setMergingBaseWt(worktreeId);
+    try {
+      const res = await api.mergeWorktreeBase(worktreeId);
+      pushToast({ title: `${branch} — merged from base`, message: res.summary, level: "info" });
+      fetchDrift(worktreeId);
+    } catch (e) {
+      pushToast({
+        title: "Merge from base failed",
+        message: e instanceof Error ? e.message : String(e),
+        level: "error",
+      });
+    } finally {
+      setMergingBaseWt(null);
+    }
+  }
+
+  // Pull latest from remote on the MAIN repo (project root), not a
+  // worktree. The BE fast-forwards the current branch (`git pull
+  // --ff-only`) so this never creates surprise merge commits; a
+  // divergent branch surfaces as a clean error toast.
+  async function pullProject(projectId: string) {
+    if (pullingProjectId()) return;
+    const proj = state.projects.find((p) => p.id === projectId);
+    setPullingProjectId(projectId);
+    try {
+      const res = await api.pullProject(projectId);
+      pushToast({
+        title: `${proj?.name ?? "Project"} — pulled`,
+        message: res.summary,
+        level: "info",
+      });
+      // Local branch may have advanced; refresh the file tree so the
+      // editor picks up new/changed files.
+      if (proj?.root) refreshTree(proj.root);
+    } catch (e) {
+      pushToast({
+        title: "Pull failed",
+        message: e instanceof Error ? e.message : String(e),
+        level: "error",
+      });
+    } finally {
+      setPullingProjectId(null);
+    }
+  }
 
   onMount(() => {
     // Close the menu on a click that lands OUTSIDE the kebab button + its
@@ -622,16 +679,13 @@ export default function LeftRail() {
                         {isWorktree ? <WorktreeIcon /> : <FolderIcon />}
                         <span class="truncate min-w-0 flex-1">{p.name}</span>
 
-                        {/* "Working" dot. While collapsed it summarises ANY
-                          busy chat under the project (root or worktree). */}
-                        <Show when={open() ? isScopeWorking(p.id, null) : isProjectWorking(p.id)}>
-                          <WorkingDot
-                            title={
-                              open()
-                                ? "A chat in this project's root is working…"
-                                : "A chat in this project is working…"
-                            }
-                          />
+                        {/* "Working" dot reflects only THIS project's own
+                          root activity — never work happening inside its
+                          worktrees. Each worktree row shows its own dot, so
+                          the parent folder no longer lights up for a busy
+                          worktree (whether collapsed or expanded). */}
+                        <Show when={isScopeWorking(p.id, null)}>
+                          <WorkingDot title="A chat in this project's root is working…" />
                         </Show>
 
                         <div class="flex items-center gap-0.5 shrink-0 flex-nowrap">
@@ -725,6 +779,38 @@ export default function LeftRail() {
                                     data-testid={`changes-${p.id}`}
                                   >
                                     <DiffIcon /> View changes
+                                  </button>
+                                </Show>
+                                <Show when={p.has_remote}>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2 disabled:opacity-50"
+                                    disabled={pullingProjectId() === p.id}
+                                    onClick={() => {
+                                      setOpenMenuFor(null);
+                                      void pullProject(p.id);
+                                    }}
+                                    title="Fast-forward the main repo's current branch from its remote"
+                                    data-testid={`pull-remote-${p.id}`}
+                                  >
+                                    <RefreshIcon />{" "}
+                                    {pullingProjectId() === p.id ? "Pulling…" : "Pull latest"}
+                                  </button>
+                                </Show>
+                                <Show when={p.is_git}>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                    onClick={() => {
+                                      setOpenMenuFor(null);
+                                      setSwitchBranchFor(p.id);
+                                    }}
+                                    title="Switch the main repo to a different branch"
+                                    data-testid={`switch-branch-${p.id}`}
+                                  >
+                                    <BranchIcon /> Change branch
                                   </button>
                                 </Show>
                                 <Show when={p.has_remote}>
@@ -1192,6 +1278,23 @@ export default function LeftRail() {
                                     >
                                       <PencilIcon /> Rename branch
                                     </button>
+                                    <button
+                                      type="button"
+                                      role="menuitem"
+                                      class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2 disabled:opacity-50"
+                                      disabled={mergingBaseWt() === w.id}
+                                      onClick={() => {
+                                        setOpenMenuFor(null);
+                                        void mergeWorktreeBase(w.id, w.branch);
+                                      }}
+                                      title={`Fetch and merge origin/${w.base_ref} (the branch this worktree was created from) into ${w.branch}`}
+                                      data-testid={`merge-base-wt-${w.id}`}
+                                    >
+                                      <RefreshIcon />{" "}
+                                      {mergingBaseWt() === w.id
+                                        ? "Merging…"
+                                        : `Merge latest from ${w.base_ref}`}
+                                    </button>
 
                                     {/* ── Manage ── */}
                                     <div class="my-1 border-t border-border" />
@@ -1310,13 +1413,33 @@ export default function LeftRail() {
               projectId={pid}
               defaultBaseRef={defaultBaseRef}
               onCancel={() => setWtFor(null)}
-              onCreated={() => {
+              onCreated={(worktreeId) => {
                 setWtFor(null);
-                void refreshWorktreesForProject(pid);
+                void refreshWorktreesForProject(pid).then(() => {
+                  // Auto-select the freshly-created worktree so the user
+                  // lands in its scope without a manual click. Only on
+                  // success (a failed worktree passes no id).
+                  if (worktreeId) selectWorktree(pid, worktreeId);
+                });
               }}
             />
           );
         }}
+      </Show>
+
+      <Show when={switchBranchFor()} keyed>
+        {(pid) => (
+          <SwitchBranchDialog
+            projectId={pid}
+            onClose={() => setSwitchBranchFor(null)}
+            onSwitched={() => {
+              setSwitchBranchFor(null);
+              void refreshProjects();
+              const proj = state.projects.find((p) => p.id === pid);
+              if (proj?.root) refreshTree(proj.root);
+            }}
+          />
+        )}
       </Show>
 
       <Show when={historyFor()} keyed>
@@ -1608,6 +1731,28 @@ function BranchPlusIcon() {
       <path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
       <path d="M15 6h6" />
       <path d="M18 3v6" />
+    </svg>
+  );
+}
+
+function BranchIcon() {
+  return (
+    <svg
+      width="1em"
+      height="1em"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      class="shrink-0"
+      aria-hidden="true"
+    >
+      <path d="M6 3v12" />
+      <path d="M18 6a3 3 0 1 0-6 0 3 3 0 0 0 6 0Z" />
+      <path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+      <path d="M15 6a9 9 0 0 1-9 9" />
     </svg>
   );
 }

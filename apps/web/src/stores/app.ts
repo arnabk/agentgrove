@@ -165,30 +165,25 @@ export const [latestVersion, setLatestVersion] = createSignal<VersionInfo | null
  *  can see "something is happening" even when viewing a different tab. */
 export const [busyChats, setBusyChats] = createSignal<Set<string>>(new Set());
 
-/** Scopes (project or worktree) that currently have at least one chat
- *  with an in-flight agent turn — server truth, polled from
- *  `GET /api/chats/active`. Independent of which chat tab is open, so
- *  the left rail can show a "working" indicator on the project/worktree
- *  row even for background chats the user isn't viewing.
+/** Scopes that currently have at least one chat with an in-flight
+ *  agent turn — server truth, polled from `GET /api/chats/active`.
+ *  Independent of which chat tab is open, so the left rail can show a
+ *  "working" indicator even for background chats the user isn't viewing.
  *
- *  The set contains:
- *    - each busy worktree scope key (`pid::wid` or bare `pid` for root)
- *    - each busy project id (so a project row lights up if ANY of its
- *      worktrees — or its root — is working).
- *  Check a worktree row with its scope key; check a project row with
- *  its project id. */
+ *  The set contains exactly one key per busy scope:
+ *    - `pid::wid` for a busy worktree
+ *    - bare `pid` for a busy project ROOT (worktree_id null)
+ *
+ *  It deliberately does NOT add a bare `pid` for worktree activity, so a
+ *  project row only lights up for its own root — never for work in a
+ *  child worktree (each worktree row shows its own dot). Check any scope
+ *  with `isScopeWorking(pid, wid)`. */
 export const [activeWork, setActiveWork] = createSignal<Set<string>>(new Set());
 
 /** Is the given (project, worktree) scope actively working? Pass
  *  worktreeId=null for the project root. */
 export function isScopeWorking(projectId: string, worktreeId: string | null): boolean {
   return activeWork().has(makeKey(projectId, worktreeId));
-}
-
-/** Does ANY chat under this project (root or any worktree) have an
- *  in-flight turn? Used to light up the collapsed project row. */
-export function isProjectWorking(projectId: string): boolean {
-  return activeWork().has(projectId);
 }
 
 /** Transient, dismissable navigation error (e.g. the user used the
