@@ -8,6 +8,37 @@
 //    doesn't have a native WebSocket. We stub it as a no-op
 //    EventTarget.
 
+// 3. localStorage / sessionStorage — recent Node + jsdom under vitest
+//    don't expose Web Storage by default ("localStorage is not
+//    available"), which broke every test that touches it (e.g.
+//    App.test's beforeEach localStorage.clear()). Provide a minimal
+//    in-memory implementation.
+function makeStorage() {
+  const map = new Map<string, string>();
+  return {
+    get length() {
+      return map.size;
+    },
+    clear: () => map.clear(),
+    getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
+    key: (i: number) => Array.from(map.keys())[i] ?? null,
+    removeItem: (k: string) => void map.delete(k),
+    setItem: (k: string, v: string) => void map.set(k, String(v)),
+  };
+}
+if (typeof globalThis.localStorage === "undefined") {
+  Object.defineProperty(globalThis, "localStorage", {
+    value: makeStorage(),
+    configurable: true,
+  });
+}
+if (typeof globalThis.sessionStorage === "undefined") {
+  Object.defineProperty(globalThis, "sessionStorage", {
+    value: makeStorage(),
+    configurable: true,
+  });
+}
+
 if (typeof HTMLCanvasElement !== "undefined") {
   HTMLCanvasElement.prototype.getContext = (() => null) as never;
 }

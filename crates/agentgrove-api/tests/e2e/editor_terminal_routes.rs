@@ -189,9 +189,13 @@ async fn terminal_status_reports_exited_after_shell_exit() {
         .unwrap();
     assert_eq!(w.status(), 204);
 
-    // Poll status briefly.
+    // Poll status for the shell to report it exited. The budget is
+    // generous (up to ~8s) because under the full e2e suite's parallel
+    // load the PTY child can take a while to be reaped — a shorter
+    // window made this test flaky (passed in isolation, timed out under
+    // load). This is purely test timing, not a product concern.
     let mut exited = false;
-    for _ in 0..40 {
+    for _ in 0..80 {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let s = h
             .get_auth(&format!("/api/terminals/{id}/status"))
