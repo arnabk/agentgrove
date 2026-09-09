@@ -368,12 +368,7 @@ function FolderIcon() {
 function PlusIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M12 5v14M5 12h14"
-        stroke="currentColor"
-        stroke-width="1.8"
-        stroke-linecap="round"
-      />
+      <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
     </svg>
   );
 }

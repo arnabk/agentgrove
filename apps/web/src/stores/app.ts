@@ -528,11 +528,7 @@ export function setActiveChat(chatId: string) {
  *  the chat's owning scope first, ensures its tab exists, activates it,
  *  and updates the URL so routeSync stays consistent. `worktreeId` is
  *  null for a project-root chat. */
-export function goToChat(
-  projectId: string,
-  worktreeId: string | null,
-  chatId: string,
-): void {
+export function goToChat(projectId: string, worktreeId: string | null, chatId: string): void {
   // Switch scope first so ensureChatTab/currentScope resolve against the
   // chat's own project + worktree, not wherever the user happens to be.
   selectWorktree(projectId, worktreeId);
