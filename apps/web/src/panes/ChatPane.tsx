@@ -428,20 +428,45 @@ export default function ChatPane() {
   // Poll the queue while a chat is active. Cheap (small JSON); keeps
   // the inline cards in sync as a backstop for the optimistic removal
   // + WS reconcile. Also re-reads on every chat switch.
+  // Clear stale cards the instant the active chat changes so nothing
+  // from the previous chat's queue flashes during a switch. This is the
+  // ONLY reactive piece; the polling itself lives in a single onMount
+  // interval below so it can't be re-created (and stacked) every time
+  // an unrelated scope-store write re-runs a tracked effect — that
+  // stacking was fetching the queue several times a second.
   createEffect(() => {
-    const id = activeId();
-    if (!id) {
-      setQueueState(null);
-      return;
-    }
-    void refreshQueue();
-    const handle = setInterval(() => {
-      // Pause polling while a card is being edited so the refresh
-      // doesn't re-create the row and discard the in-progress edit.
+    void activeId();
+    setQueueState(null);
+  });
+
+  onMount(() => {
+    let lastPolled: string | null = null;
+    const poll = () => {
+      const id = activeId();
+      if (!id) return;
+      // Skip work that would be wasted or harmful:
+      //  - a background tab doesn't need a live queue (avoids a steady
+      //    fetch storm across many open tabs; also keeps the memory
+      //    trend flat while hidden), and
+      //  - pause while a card is being edited so the refresh doesn't
+      //    re-create the row and discard the in-progress edit.
+      if (document.visibilityState !== "visible") return;
       if (queueEditingIds().size > 0) return;
       void refreshQueue();
-    }, 1000);
-    onCleanup(() => clearInterval(handle));
+      lastPolled = id;
+    };
+    // Fetch promptly the first time a chat becomes active (short delay
+    // coalesces rapid A→B→C switches into one fetch on the chat you
+    // land on), then keep a single steady interval.
+    const kick = setInterval(() => {
+      const id = activeId();
+      if (id && id !== lastPolled && document.visibilityState === "visible") poll();
+    }, 150);
+    const handle = setInterval(poll, 1500);
+    onCleanup(() => {
+      clearInterval(kick);
+      clearInterval(handle);
+    });
   });
 
   /** Refresh the chat list for the active scope from the BE.
@@ -813,13 +838,18 @@ export default function ChatPane() {
       });
     }
 
-    connect();
+    // Debounce the socket open: on a fast A→B→C switch we'd otherwise
+    // open + immediately tear down a socket for every intermediate
+    // chat. A short delay means only the chat you settle on connects.
+    // Reconnect-after-drop still uses its own backoff timer below.
+    const connectTimer = setTimeout(connect, 120);
 
     onCleanup(() => {
       closed = true;
       // Flush any buffered deltas so a chat switch / unmount mid-turn
       // doesn't silently drop the tail of the stream.
       flushFrames();
+      clearTimeout(connectTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       try {
         socket?.close();
@@ -882,11 +912,14 @@ export default function ChatPane() {
   // expects to find it in.
   createEffect(() => {
     const id = activeId();
-    // Paint instantly from cache (if any) so the switch feels snappy,
-    // then refresh from the BE behind it. First view of a chat has no
-    // cache, so loadChat blanks + fetches as before.
+    // Paint instantly from cache (if any) so the switch feels snappy.
     const hadCache = id ? paintFromCache(id) : false;
-    void loadChat(hadCache);
+    // Avoid a redundant fetch on the hot switch path: when we painted
+    // from cache, the WS `subscribed` frame (fired right after the
+    // socket connects for this chat) already triggers reconcileChat(),
+    // which refreshes the view. Only fetch synchronously when we have
+    // nothing to show yet (first view of this chat).
+    if (!hadCache) void loadChat(false);
     setInput(id ? getChatDraft(id) : "");
   });
 
