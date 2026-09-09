@@ -2408,6 +2408,13 @@ function PromptRow(props: {
    *  show a placeholder assistant bubble (with a pulsing dots
    *  affordance) before the first token arrives. */
   function isPending(): boolean {
+    // Only the tail prompt can ever be in-flight: the queue drains one
+    // at a time in order, and once a newer prompt exists this one is
+    // immutable history. Gating the whole function on isLast fixes the
+    // report that sending several messages quickly left EARLIER bubbles
+    // stuck on "working…" — whether they had zero events (queued) or a
+    // missing terminal event (a lost `done`/`error` WS frame).
+    if (!props.isLast) return false;
     if (
       props.liveTokens[props.prompt.id] !== undefined ||
       props.liveThinking[props.prompt.id] !== undefined
