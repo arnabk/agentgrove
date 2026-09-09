@@ -1719,7 +1719,15 @@ pub(crate) fn spawn_dispatch_task(
         // full details before the next user message. This avoids
         // relying on the previous model's session tokens or a
         // separate summarization step.
-        let compacting = is_compact_command(&body) && chat.provider == "claude";
+        //
+        // Compaction is provider-agnostic: every real CLI provider
+        // (claude, opencode, kimi) resumes via a session id and takes a
+        // free-form prompt, so the summarize-in-session → clear-session →
+        // prepend-recent-context-next-turn flow works for all of them.
+        // We only require a resolved provider (excludes the test-only
+        // echo path, which ignores the prompt so there's nothing to
+        // summarize).
+        let compacting = is_compact_command(&body) && provider.is_some();
         let mut effective_body = if compacting {
             compact_prompt().to_string()
         } else {

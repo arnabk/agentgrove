@@ -116,7 +116,7 @@ What you can do with it today.
 - **Message retry** — re-trigger the latest user message or regenerate the last assistant turn
 - **Prompt revert** — ask AI to undo the file changes a specific prompt produced
 - **Delete from point** — truncate the conversation from any prompt onward
-- **`/compact`** — summarize the conversation and start a fresh provider session in place
+- **`/compact`** — summarize the conversation and start a fresh provider session in place; works across all CLI providers (Claude, opencode, Kimi)
 - **Session resume + recovery** — Claude `--resume`, opencode `--session` + `--dir`, Kimi `--session`; stale opencode sessions auto-recover and retry with recent context
 - **Slash commands** — `/` menu with provider commands + user-defined prompt templates
 - **PR detection** — auto-detects GitHub PR URLs in agent output; shows a PR badge
