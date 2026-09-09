@@ -34,6 +34,24 @@ There are three, from most interactive to most hands-off:
 around `start.sh`. Both `start` and `console` set `AGENTGROVE_PORT=4317`
 so the frontend can always find the backend (see the port gotcha below).
 
+### Which port do I open?
+
+Two ports are involved, and they are NOT the same app twice:
+
+- **`:5173`** — the Vite dev server (SolidJS UI with hot reload). **Open
+  this in dev.** It calls the backend on `:4317` (the `5173 → 4317`
+  mapping is hardcoded in `apps/web/src/api/client.ts`).
+- **`:4317`** — the Rust backend: the HTTP API + WebSockets. It serves
+  the built frontend *too*, but **only when `AGENTGROVE_STATIC_DIR` is
+  set** (packaged / service / Docker mode). In that mode `:4317` is the
+  single origin for both API and UI, and there is no `:5173`.
+
+Gotcha: if you launch the backend in dev **with** `AGENTGROVE_STATIC_DIR`
+pointing at `apps/web/dist`, `:4317` will also serve a UI — but from the
+last `pnpm -C apps/web build`, which may be **stale**. In dev, use
+`:5173` (the live one) and either don't set `AGENTGROVE_STATIC_DIR` or
+rebuild `dist` if you want `:4317` to reflect current FE code.
+
 ## Running as a service (auto-start on login, restart on crash)
 
 If you keep losing the app after a reboot, install it as a native OS
