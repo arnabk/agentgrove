@@ -26,6 +26,7 @@ import { confirm } from "../components/dialog";
 import Markdown from "../components/Markdown";
 
 import ChatComposer, { type ChatComposerHandle } from "../components/ChatComposer";
+import MicButton from "../components/MicButton";
 import { ToolRail } from "./chat/ToolRail";
 import { useSyncSubscription } from "../lib/crossInstanceSync";
 import {
@@ -1770,6 +1771,21 @@ export default function ChatPane() {
                       const files = Array.from(e.currentTarget.files ?? []);
                       e.currentTarget.value = "";
                       if (files.length > 0) void uploadFileList(files);
+                    }}
+                  />
+                  {/* Dictation (speech-to-text) via the browser's built-in
+                      Web Speech API — no server round-trip, no extra deps.
+                      Self-hidden when the browser doesn't support it. */}
+                  <MicButton
+                    disabled={!activeId()}
+                    onTranscript={(text, isFinal) => {
+                      if (isFinal) {
+                        const t = text.trim();
+                        if (t) {
+                          composer?.insertAtCursor(t.endsWith(" ") ? t : `${t} `);
+                          composer?.focus();
+                        }
+                      }
                     }}
                   />
                   <PromptsPicker
