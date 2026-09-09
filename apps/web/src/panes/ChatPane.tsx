@@ -1008,6 +1008,31 @@ export default function ChatPane() {
     }
   }
 
+  // Debounced draft persistence. setChatDraft writes to the scope
+  // store (byScope), which re-renders the left rail. On every keystroke
+  // that's harmless, but when the user clicks a rail item the blur +
+  // draft-persist happens synchronously, the store mutates, the rail
+  // re-renders, and the click target detaches — so the first click is
+  // swallowed. Debouncing the draft write keeps the input responsive
+  // (setInput is still immediate) but stops the store mutation from
+  // racing a concurrent navigation click.
+  let draftTimer: ReturnType<typeof setTimeout> | null = null;
+  function debouncedSetChatDraft(id: string, md: string) {
+    if (draftTimer) clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => {
+      draftTimer = null;
+      setChatDraft(id, md);
+    }, 400);
+  }
+  // Flush on unmount so a draft isn't lost.
+  onCleanup(() => {
+    if (draftTimer) {
+      clearTimeout(draftTimer);
+      const id = activeId();
+      if (id) setChatDraft(id, input());
+    }
+  });
+
   function removeUpload(id: string) {
     setUploads((cur) => cur.filter((u) => u.id !== id));
   }
@@ -1689,10 +1714,8 @@ export default function ChatPane() {
                   onChange={(md) => {
                     setInput(md);
                     updateSlashState(md);
-                    // Persist as a per-chat draft so switching scope /
-                    // reloading the page doesn't drop the unsent text.
                     const id = activeId();
-                    if (id) setChatDraft(id, md);
+                    if (id) debouncedSetChatDraft(id, md);
                   }}
                   onSubmit={() => {
                     // Find the surrounding form + submit it (preserves the
