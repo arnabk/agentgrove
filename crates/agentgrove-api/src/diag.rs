@@ -169,13 +169,21 @@ const MEM_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
 /// so FE + BE memory can be correlated on one timeline without a
 /// second round-trip.
 pub async fn mem_sample(State(state): State<AppState>, Json(s): Json<MemSample>) -> StatusCode {
-    // Cheap self-RSS read (single process, no child walk).
+    // Backend RSS + a summary of live PTY children, so a backend-side
+    // climb (terminals, leaked child processes) lands on the same
+    // timeline as the FE signals. We refresh only our own pids — no
+    // full process-table scan — so this stays cheap even with many
+    // terminals open.
     let self_pid = std::process::id();
+    let child_pids: Vec<(String, u32)> = state.terminals.child_pids();
+    let mut pids: Vec<Pid> = vec![Pid::from_u32(self_pid)];
+    pids.extend(child_pids.iter().map(|(_, p)| Pid::from_u32(*p)));
+
     let mut sys = System::new_with_specifics(
         RefreshKind::new().with_processes(ProcessRefreshKind::new().with_memory()),
     );
     sys.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[Pid::from_u32(self_pid)]),
+        ProcessesToUpdate::Some(&pids),
         true,
         ProcessRefreshKind::new().with_memory(),
     );
@@ -183,11 +191,19 @@ pub async fn mem_sample(State(state): State<AppState>, Json(s): Json<MemSample>)
         .process(Pid::from_u32(self_pid))
         .map(|p| p.memory())
         .unwrap_or(0);
+    let mut children_rss: u64 = 0;
+    for (_, pid) in &child_pids {
+        if let Some(p) = sys.process(Pid::from_u32(*pid)) {
+            children_rss = children_rss.saturating_add(p.memory());
+        }
+    }
 
     let line = serde_json::json!({
         "ts": chrono::Utc::now().to_rfc3339(),
         "reason": s.reason.as_deref().unwrap_or("heartbeat"),
         "be_rss_bytes": be_rss,
+        "child_count": child_pids.len(),
+        "children_rss_bytes": children_rss,
         "heap_mb": s.heap_mb,
         "heap_limit_mb": s.heap_limit_mb,
         "tab_bytes": s.tab_bytes,

@@ -107,6 +107,21 @@ const freshChatStore = (): ChatStore => ({
 
 export default function ChatPane() {
   const [chatStore, setChatStore] = createStore<ChatStore>(freshChatStore());
+  // Last-loaded view per chat id, so switching back to a recently-seen
+  // chat paints instantly instead of flashing the previous chat's
+  // timeline (or blank) until `getChat` resolves. Bounded so the cache
+  // can't itself leak: we keep the most-recently-used handful of chats.
+  const chatViewCache = new Map<string, { view: ChatView; prompts: Prompt[]; atStart: boolean }>();
+  const CHAT_CACHE_MAX = 12;
+  function cacheChatView(id: string, view: ChatView, prompts: Prompt[], atStart: boolean) {
+    chatViewCache.delete(id); // refresh LRU position
+    chatViewCache.set(id, { view, prompts, atStart });
+    while (chatViewCache.size > CHAT_CACHE_MAX) {
+      const oldest = chatViewCache.keys().next().value;
+      if (oldest === undefined) break;
+      chatViewCache.delete(oldest);
+    }
+  }
   const [input, setInput] = createSignal("");
   /** Imperative handle to the rich composer. Used by slash-menu
    *  apply, prompt-picker insert, file-paths append, and the
@@ -507,21 +522,49 @@ export default function ChatPane() {
     }
   }
 
-  /** Replace the in-memory chat from the windowed BE view. */
-  async function loadChat() {
+  /** Paint a chat's view into the store SYNCHRONOUSLY from cache, if we
+   *  have one. Returns whether a cache hit happened. Used on switch so
+   *  the pane repaints instantly instead of waiting on `getChat`. */
+  function paintFromCache(id: string): boolean {
+    const cached = chatViewCache.get(id);
+    if (!cached) return false;
+    setChatStore({
+      ...freshChatStore(),
+      view: cached.view,
+      prompts: cached.prompts,
+      atStart: cached.atStart,
+    });
+    return true;
+  }
+
+  /** Replace the in-memory chat from the windowed BE view. When
+   *  `hadCache` is true we're refreshing behind an already-painted
+   *  cached view, so we don't blank the store first (no flash). */
+  async function loadChat(hadCache = false) {
     const id = activeId();
     if (!id) {
       setChatStore(freshChatStore());
       return;
     }
+    // Only blank to fresh when we have nothing cached to show — avoids
+    // the "old chat lingers then swaps" stutter on switch.
+    if (!hadCache) setChatStore(freshChatStore());
     try {
       const view = await api.getChat(id);
+      // A fast switch may have moved on before this resolved; drop stale
+      // responses so we don't clobber the now-active chat.
+      if (activeId() !== id) {
+        cacheChatView(id, view, view.prompts, view.prompts.length >= view.prompts_total);
+        return;
+      }
+      const atStart = view.prompts.length >= view.prompts_total;
       setChatStore({
         ...freshChatStore(),
         view,
         prompts: view.prompts,
-        atStart: view.prompts.length >= view.prompts_total,
+        atStart,
       });
+      cacheChatView(id, view, view.prompts, atStart);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
@@ -590,6 +633,9 @@ export default function ChatPane() {
           }
         }),
       );
+      // Keep the switch cache warm so a later switch-back paints the
+      // freshest view instantly.
+      cacheChatView(id, view, chatStore.prompts, chatStore.atStart);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
@@ -836,7 +882,11 @@ export default function ChatPane() {
   // expects to find it in.
   createEffect(() => {
     const id = activeId();
-    void loadChat();
+    // Paint instantly from cache (if any) so the switch feels snappy,
+    // then refresh from the BE behind it. First view of a chat has no
+    // cache, so loadChat blanks + fetches as before.
+    const hadCache = id ? paintFromCache(id) : false;
+    void loadChat(hadCache);
     setInput(id ? getChatDraft(id) : "");
   });
 
