@@ -60,6 +60,85 @@ pub async fn list_local(cwd: &Path) -> Vec<BranchInfo> {
         .collect()
 }
 
+/// A local branch with enough metadata for a searchable branch list:
+/// last-commit time/subject and upstream tracking.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BranchDetail {
+    /// Short branch name.
+    pub name: String,
+    /// Whether it's the checked-out branch at `cwd`.
+    pub current: bool,
+    /// ISO 8601 timestamp of the branch tip's commit (author date).
+    pub committed_at: Option<String>,
+    /// Subject line of the tip commit.
+    pub subject: Option<String>,
+    /// Upstream ref (e.g. `origin/main`), when the branch tracks one.
+    pub upstream: Option<String>,
+}
+
+/// List local branches in `cwd` with commit metadata, newest-committed
+/// first. Empty vec when not a git repo. One `for-each-ref` call with a
+/// unit-separated format so subjects containing spaces parse cleanly.
+pub async fn list_detailed(cwd: &Path) -> Vec<BranchDetail> {
+    let current = match Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(cwd)
+        .output()
+        .await
+    {
+        Ok(o) if o.status.success() => {
+            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if s == "HEAD" {
+                String::new()
+            } else {
+                s
+            }
+        }
+        _ => String::new(),
+    };
+
+    // \x1f (unit separator) between fields, \x1e (record separator)
+    // between refs — neither appears in branch names or subjects.
+    let fmt = "%(refname:short)\x1f%(committerdate:iso-strict)\x1f%(upstream:short)\x1f%(contents:subject)\x1e";
+    let out = match Command::new("git")
+        .args([
+            "for-each-ref",
+            "--sort=-committerdate",
+            &format!("--format={fmt}"),
+            "refs/heads/",
+        ])
+        .current_dir(cwd)
+        .output()
+        .await
+    {
+        Ok(o) if o.status.success() => o.stdout,
+        _ => return Vec::new(),
+    };
+
+    String::from_utf8_lossy(&out)
+        .split('\x1e')
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .filter_map(|record| {
+            let mut f = record.split('\x1f');
+            let name = f.next()?.trim().to_string();
+            if name.is_empty() {
+                return None;
+            }
+            let committed_at = f.next().map(str::trim).filter(|s| !s.is_empty()).map(String::from);
+            let upstream = f.next().map(str::trim).filter(|s| !s.is_empty()).map(String::from);
+            let subject = f.next().map(str::trim).filter(|s| !s.is_empty()).map(String::from);
+            Some(BranchDetail {
+                current: !current.is_empty() && name == current,
+                name,
+                committed_at,
+                subject,
+                upstream,
+            })
+        })
+        .collect()
+}
+
 /// Switch `cwd` to `branch`. When `create` is true, creates the branch
 /// off HEAD with `git switch -c`. Refuses uncommitted changes by relying
 /// on git's own safety (returns non-zero with stderr forwarded).

@@ -13,6 +13,7 @@ import CommandPalette from "./components/CommandPalette";
 import { DialogHost } from "./components/dialog";
 import GalaxyMapDialog from "./components/GalaxyMapDialog";
 import PrCenterDialog from "./components/PrCenterDialog";
+import BranchCenterDialog from "./components/BranchCenterDialog";
 import LeftRail from "./components/LeftRail";
 import Logo from "./components/Logo";
 import MemoryIndicator from "./components/MemoryIndicator";
@@ -46,6 +47,8 @@ import {
   galaxyMapOpen,
   prCenterOpen,
   setPrCenterOpen,
+  branchCenterOpen,
+  setBranchCenterOpen,
   isSidebarOpen,
   latestVersion,
   routeError,
@@ -487,6 +490,16 @@ export default function App() {
                     <button
                       type="button"
                       class="ag-btn ag-btn-ghost ag-btn-icon"
+                      onClick={() => setBranchCenterOpen(true)}
+                      title="Branches"
+                      aria-label="Open branches"
+                      data-testid="open-branch-center"
+                    >
+                      <BranchNavIcon />
+                    </button>
+                    <button
+                      type="button"
+                      class="ag-btn ag-btn-ghost ag-btn-icon"
                       onClick={toggleSidebar}
                       title={isSidebarOpen() ? "Hide sidebar" : "Show sidebar"}
                       data-testid="sidebar-toggle"
@@ -574,6 +587,10 @@ export default function App() {
       <SettingsModal />
       <Show when={prCenterOpen()}>
         <PrCenterDialog onClose={() => setPrCenterOpen(false)} />
+      </Show>
+
+      <Show when={branchCenterOpen()}>
+        <BranchCenterDialog onClose={() => setBranchCenterOpen(false)} />
       </Show>
 
       <Show when={galaxyMapOpen()}>
@@ -719,6 +736,28 @@ function PrIcon() {
       <circle cx="18" cy="18" r="3" />
       <path d="M13 6h3a2 2 0 0 1 2 2v7" />
       <path d="M11 4 13 6l-2 2" />
+    </svg>
+  );
+}
+
+/** Lucide `git-branch` — used for the Branch Center button. */
+function BranchNavIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.7"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
     </svg>
   );
 }

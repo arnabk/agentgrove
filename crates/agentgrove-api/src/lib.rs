@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 pub mod backups;
+pub mod branch_center;
 pub mod branches;
 pub mod chats;
 pub mod db;

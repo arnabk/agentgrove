@@ -135,6 +135,17 @@ export interface ActiveChat {
   worktree_id: string | null;
 }
 
+/** One local branch in the aggregate branch-center list. */
+export interface BranchRow {
+  project_id: string;
+  project_name: string;
+  name: string;
+  current: boolean;
+  committed_at: string | null;
+  subject: string | null;
+  upstream: string | null;
+}
+
 /** One open PR/MR in the aggregate PR-center list. */
 export interface PrRow {
   project_id: string;
@@ -331,6 +342,8 @@ export const api = {
     }),
   /** Aggregate open PRs/MRs across all projects (PR center). */
   listAllPrs: () => req<PrRow[]>(`/api/prs`),
+  /** Aggregate local branches across all projects (branch center). */
+  listAllBranches: () => req<BranchRow[]>(`/api/branches`),
   openWorktreeFolder: (worktreeId: string) =>
     req<void>(`/api/worktrees/${encodeURIComponent(worktreeId)}/open`, { method: "POST" }),
   createWorktree: (
