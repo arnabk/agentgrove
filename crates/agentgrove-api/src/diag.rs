@@ -114,6 +114,113 @@ pub struct ClientLogEntry {
     pub context: Option<serde_json::Value>,
 }
 
+/// A periodic memory sample forwarded from the FE monitor. Kept
+/// deliberately flat + numeric so it appends cheaply and greps/plots
+/// easily. All fields optional so the FE can omit anything a given
+/// browser can't measure (e.g. JS heap on Firefox).
+#[derive(Debug, Deserialize)]
+pub struct MemSample {
+    /// JS heap used, MB (`performance.memory`), or null.
+    #[serde(default)]
+    pub heap_mb: Option<f64>,
+    /// JS heap limit, MB, or null.
+    #[serde(default)]
+    pub heap_limit_mb: Option<f64>,
+    /// Whole-tab bytes from measureUserAgentSpecificMemory(), or null.
+    #[serde(default)]
+    pub tab_bytes: Option<u64>,
+    /// Live DOM node count.
+    #[serde(default)]
+    pub dom: Option<u64>,
+    /// Live WebSocket count (FE-instrumented).
+    #[serde(default)]
+    pub ws: Option<u64>,
+    /// Detached-listener / event-target estimate, when available.
+    #[serde(default)]
+    pub listeners: Option<u64>,
+    /// AgentGrove self-attributed total bytes (memory accountant).
+    #[serde(default)]
+    pub ag_total_bytes: Option<u64>,
+    /// Seconds the tab has been open (uptime), for trend x-axis.
+    #[serde(default)]
+    pub tab_uptime_s: Option<u64>,
+    /// Whether the tab was visible at sample time (hidden tabs GC less).
+    #[serde(default)]
+    pub visible: Option<bool>,
+    /// Top attributed subsystems (id + bytes), already trimmed by the FE.
+    #[serde(default)]
+    pub breakdown: Option<serde_json::Value>,
+    /// "heartbeat" | "growth" | "load" | "unload" — why this sample fired.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// Cap for `mem.log` before it's rotated to `mem.log.1` (5 MB). One
+/// generation of history is plenty for a multi-day trend at the FE's
+/// low sample cadence, and it bounds disk so instrumentation can't
+/// itself become a leak.
+const MEM_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
+
+/// `POST /api/diag/mem-sample` — append one memory sample to
+/// `<state_dir>/logs/mem.log` (a dedicated file, separate from the
+/// toast-oriented client.log, so the trend is a clean machine-readable
+/// series). Best-effort + always 204: instrumentation must never break
+/// or slow the UI. We also enrich the line with the backend's own RSS
+/// so FE + BE memory can be correlated on one timeline without a
+/// second round-trip.
+pub async fn mem_sample(State(state): State<AppState>, Json(s): Json<MemSample>) -> StatusCode {
+    // Cheap self-RSS read (single process, no child walk).
+    let self_pid = std::process::id();
+    let mut sys = System::new_with_specifics(
+        RefreshKind::new().with_processes(ProcessRefreshKind::new().with_memory()),
+    );
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[Pid::from_u32(self_pid)]),
+        true,
+        ProcessRefreshKind::new().with_memory(),
+    );
+    let be_rss = sys
+        .process(Pid::from_u32(self_pid))
+        .map(|p| p.memory())
+        .unwrap_or(0);
+
+    let line = serde_json::json!({
+        "ts": chrono::Utc::now().to_rfc3339(),
+        "reason": s.reason.as_deref().unwrap_or("heartbeat"),
+        "be_rss_bytes": be_rss,
+        "heap_mb": s.heap_mb,
+        "heap_limit_mb": s.heap_limit_mb,
+        "tab_bytes": s.tab_bytes,
+        "dom": s.dom,
+        "ws": s.ws,
+        "listeners": s.listeners,
+        "ag_total_bytes": s.ag_total_bytes,
+        "tab_uptime_s": s.tab_uptime_s,
+        "visible": s.visible,
+        "breakdown": s.breakdown,
+    });
+
+    let logs_dir = state.state_dir.join("logs");
+    if std::fs::create_dir_all(&logs_dir).is_ok() {
+        let path = logs_dir.join("mem.log");
+        // Size-based rotation: keep one previous generation so the file
+        // can't grow without bound over a multi-day session.
+        if let Ok(meta) = std::fs::metadata(&path) {
+            if meta.len() >= MEM_LOG_MAX_BYTES {
+                let _ = std::fs::rename(&path, logs_dir.join("mem.log.1"));
+            }
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+    StatusCode::NO_CONTENT
+}
+
 /// `POST /api/diag/client-log` — persist a single FE log/toast line.
 ///
 /// Best-effort: a logging failure must never break the UI, so we

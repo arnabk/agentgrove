@@ -28,19 +28,29 @@
  * the moment of runaway is captured, not just the periodic heartbeat.
  */
 
-import { logClient } from "../api/client";
+import { logClient, sendMemSample } from "../api/client";
 import { memorySnapshot } from "./memory";
 
 const SAMPLE_MS = 15_000;
 const REPORT_MS = 5 * 60_000;
 /** Ring buffer of recent samples used to detect a sustained climb. */
 const RING = 8;
+/** When the monitor started — used for a tab-uptime x-axis in the log. */
+const START_MS = Date.now();
 
 interface Sample {
   t: number;
   heapMB: number;
+  /** JS heap ceiling (MB) so a rising heap can be read against its cap. */
+  heapLimitMB: number;
   dom: number;
   ws: number;
+  /** Whole-tab bytes (measureUserAgentSpecificMemory), -1 if unavailable. */
+  tabBytes: number;
+  /** Estimated live event listeners (leak-prone). */
+  listeners: number;
+  /** Whether the tab was visible at sample time. */
+  visible: boolean;
   /** Largest attributed subsystem at sample time (id + bytes). */
   top: string;
   topBytes: number;
@@ -74,8 +84,33 @@ function heapMB(): number {
   return m?.usedJSHeapSize ? Math.round(m.usedJSHeapSize / 1048576) : -1;
 }
 
+function heapLimitMB(): number {
+  const m = (performance as unknown as { memory?: { jsHeapSizeLimit?: number } }).memory;
+  return m?.jsHeapSizeLimit ? Math.round(m.jsHeapSizeLimit / 1048576) : -1;
+}
+
 function domCount(): number {
   return document.getElementsByTagName("*").length;
+}
+
+// ---- listener counting -----------------------------------------------------
+// Detached listeners are the classic invisible-heap leak (an 11 GB RSS
+// with a 15 MB heap). We can't read the browser's internal listener
+// table, but we CAN count our own add/removeEventListener calls by
+// wrapping EventTarget once. The delta over time is the leak signal.
+let liveListeners = 0;
+function instrumentListeners() {
+  const proto = EventTarget.prototype;
+  const add = proto.addEventListener;
+  const remove = proto.removeEventListener;
+  proto.addEventListener = function (this: EventTarget, ...args: Parameters<typeof add>) {
+    liveListeners++;
+    return add.apply(this, args);
+  };
+  proto.removeEventListener = function (this: EventTarget, ...args: Parameters<typeof remove>) {
+    liveListeners = Math.max(0, liveListeners - 1);
+    return remove.apply(this, args);
+  };
 }
 
 function topSubsystem(): { id: string; bytes: number } {
@@ -84,13 +119,41 @@ function topSubsystem(): { id: string; bytes: number } {
   return first ? { id: first.id, bytes: first.bytes } : { id: "none", bytes: 0 };
 }
 
+/** Most recent whole-tab measurement (bytes), refreshed opportunistically.
+ *  `measureUserAgentSpecificMemory` is heavily throttled by the browser
+ *  (can take seconds and resolves at GC boundaries), so we kick it off
+ *  async and just read the last resolved value into each sample — never
+ *  blocking the tick. */
+let lastTabBytes = -1;
+function refreshTabBytes() {
+  const fn = (
+    performance as unknown as {
+      measureUserAgentSpecificMemory?: () => Promise<{ bytes: number }>;
+    }
+  ).measureUserAgentSpecificMemory;
+  if (typeof fn !== "function") return;
+  try {
+    void fn()
+      .then((r) => {
+        if (r && typeof r.bytes === "number") lastTabBytes = r.bytes;
+      })
+      .catch(() => {});
+  } catch {
+    // ignore — API unavailable / not cross-origin isolated
+  }
+}
+
 function takeSample(): Sample {
   const top = topSubsystem();
   return {
     t: Date.now(),
     heapMB: heapMB(),
+    heapLimitMB: heapLimitMB(),
     dom: domCount(),
     ws: liveSockets,
+    tabBytes: lastTabBytes,
+    listeners: liveListeners,
+    visible: document.visibilityState === "visible",
     top: top.id,
     topBytes: top.bytes,
   };
@@ -110,22 +173,46 @@ function sustainedClimb(): boolean {
   return heapUp || domUp;
 }
 
+/** Push a structured sample to the dedicated mem.log trend (always),
+ *  and — only for warnings — also drop a human line in client.log so a
+ *  runaway is visible next to toasts. The mem.log series is the primary
+ *  debugging artifact; client.log stays low-noise. */
 function report(s: Sample, level: "info" | "warn", reason: string) {
   const snap = memorySnapshot();
-  logClient({
-    level,
-    title: `mem-monitor: ${reason}`,
-    message: `heap=${s.heapMB}MB dom=${s.dom} ws=${s.ws} top=${s.top}(${Math.round(s.topBytes / 1024)}KB) total=${Math.round(snap.total / 1024)}KB`,
-    context: {
-      heapMB: s.heapMB,
-      dom: s.dom,
-      ws: s.ws,
-      top: s.top,
-      topBytes: s.topBytes,
-      totalBytes: snap.total,
-      breakdown: snap.entries.slice(0, 6).map((e) => ({ id: e.id, bytes: e.bytes })),
-    },
+
+  sendMemSample({
+    reason,
+    heap_mb: s.heapMB >= 0 ? s.heapMB : null,
+    heap_limit_mb: s.heapLimitMB >= 0 ? s.heapLimitMB : null,
+    tab_bytes: s.tabBytes >= 0 ? s.tabBytes : null,
+    dom: s.dom,
+    ws: s.ws,
+    listeners: s.listeners,
+    ag_total_bytes: snap.total,
+    tab_uptime_s: Math.round((Date.now() - START_MS) / 1000),
+    visible: s.visible,
+    breakdown: snap.entries.slice(0, 8).map((e) => ({ id: e.id, bytes: e.bytes })),
   });
+
+  if (level === "warn") {
+    logClient({
+      level,
+      title: `mem-monitor: ${reason}`,
+      message: `heap=${s.heapMB}MB dom=${s.dom} ws=${s.ws} listeners=${s.listeners} top=${s.top}(${Math.round(s.topBytes / 1024)}KB) total=${Math.round(snap.total / 1024)}KB`,
+      context: {
+        heapMB: s.heapMB,
+        heapLimitMB: s.heapLimitMB,
+        dom: s.dom,
+        ws: s.ws,
+        listeners: s.listeners,
+        tabBytes: s.tabBytes,
+        top: s.top,
+        topBytes: s.topBytes,
+        totalBytes: snap.total,
+        breakdown: snap.entries.slice(0, 6).map((e) => ({ id: e.id, bytes: e.bytes })),
+      },
+    });
+  }
 }
 
 /**
@@ -135,16 +222,21 @@ export function startMemoryMonitor(): void {
   if (started) return;
   started = true;
   instrumentWebSocket();
+  instrumentListeners();
 
   let lastReport = 0;
   const tick = () => {
+    // Kick an async whole-tab measurement so the NEXT sample has a fresh
+    // value; reading is throttled by the browser and never blocks here.
+    refreshTabBytes();
+
     const s = takeSample();
     ring.push(s);
     if (ring.length > RING) ring.shift();
 
     const now = Date.now();
     if (sustainedClimb()) {
-      report(s, "warn", "sustained growth detected");
+      report(s, "warn", "growth");
       // Reset the ring so we don't re-fire on the same climb every tick;
       // the next RING samples establish a fresh baseline.
       ring.length = 0;
@@ -157,7 +249,19 @@ export function startMemoryMonitor(): void {
     }
   };
 
-  // First heartbeat soon after load so the baseline is captured.
-  setTimeout(tick, 10_000);
+  // Baseline sample shortly after load so the trend has a start point.
+  setTimeout(() => {
+    refreshTabBytes();
+    setTimeout(() => report(takeSample(), "info", "load"), 500);
+  }, 8_000);
+
+  // Periodic cheap sample (spike detection + heartbeat throttling).
   setInterval(tick, SAMPLE_MS);
+
+  // Final sample as the tab goes away — `keepalive` on the POST lets it
+  // land, capturing the peak just before a crash/close. `pagehide` is
+  // more reliable than `unload` on modern browsers.
+  window.addEventListener("pagehide", () => {
+    report(takeSample(), "info", "unload");
+  });
 }

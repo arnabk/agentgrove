@@ -1019,6 +1019,38 @@ export function logClient(entry: ClientLog): void {
   }
 }
 
+/** A single memory sample forwarded to `/api/diag/mem-sample`. All
+ *  fields optional so callers send only what the browser can measure. */
+export interface MemSample {
+  heap_mb?: number | null;
+  heap_limit_mb?: number | null;
+  tab_bytes?: number | null;
+  dom?: number | null;
+  ws?: number | null;
+  listeners?: number | null;
+  ag_total_bytes?: number | null;
+  tab_uptime_s?: number | null;
+  visible?: boolean | null;
+  breakdown?: unknown;
+  reason?: string;
+}
+
+/** Fire-and-forget memory sample → `<state_dir>/logs/mem.log`. Same
+ *  no-throw discipline as {@link logClient}; `keepalive` lets an
+ *  `unload`-time final sample still reach the BE as the tab closes. */
+export function sendMemSample(sample: MemSample): void {
+  try {
+    void fetch(`${baseUrl()}/api/diag/mem-sample`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(sample),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // never throw from an instrumentation path
+  }
+}
+
 export function openTerminalWs(id: string): WebSocket {
   const url = new URL(baseUrl() || window.location.origin);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";

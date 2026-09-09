@@ -190,7 +190,7 @@ What you can do with it today.
 
 - **Memory indicator** — top-right pill showing app-attributable, BE (Rust RSS), and JS+DOM breakdown
 - **Popover breakdown** — click the pill for the per-category numbers
-- **Client memory-growth monitor** — samples heap/DOM/WS every 15s; warns on sustained climb
+- **Client memory-growth monitor** — samples heap/heap-limit/DOM/WS/listeners/whole-tab bytes + per-subsystem breakdown every 15s, correlates with backend RSS, and appends a compact JSON trend to `<state_dir>/logs/mem.log` (size-rotated) for after-the-fact leak debugging; warns on sustained climb
 - **Bounded retention** — windowed chat store (600 prompts / 400 events per prompt) + virtualized timeline
 - **Delta terminal streaming** — WS output instead of HTTP poll loops
 
@@ -273,6 +273,7 @@ All detailed docs live under [`docs/`](./docs/):
 - [Agent providers](./docs/guides/agent-providers.md)
 - [Chat & queue routing](./docs/architecture/chat-queue-routing.md)
 - [Data safety & restore](./docs/operations/data-safety.md)
+- [Memory debugging (`mem.log`)](./docs/operations/memory-debugging.md)
 - [Comparison with other tools](./docs/comparison.md)
 - [ADRs](./docs/adr/)
 

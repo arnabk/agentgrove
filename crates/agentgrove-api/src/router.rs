@@ -181,6 +181,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/git/discard", post(gitapi::git_discard))
         // Diagnostics (memory)
         .route("/api/diag/memory", get(diag::memory))
+        .route("/api/diag/mem-sample", post(diag::mem_sample))
         .route("/api/diag/client-log", post(diag::client_log))
         // Backups (Settings -> Backups panel). The shell scripts
         // (`just backups` / `just restore-db`) remain the path
