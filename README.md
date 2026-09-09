@@ -107,7 +107,7 @@ What you can do with it today.
 - **Streaming responses** — real-time token streaming over WebSocket with coalescing
 - **Rich-text composer** — Tiptap input with markdown autoformat (lists, headings, bold, code blocks)
 - **Image and file paste** — paste screenshots or drag/drop files; paths are appended to the prompt and previews render even under the app's cross-origin-isolation headers
-- **Dictation (speech-to-text)** — a mic icon in the composer transcribes speech to text via the browser's built-in Web Speech API (no server round-trip, no keys); shown only where the browser supports it
+- **Voice dictation (STT)** — a mic icon in the composer transcribes speech to text using the browser's built-in Web Speech API (no server round-trip, no keys); shown only where the browser supports it
 - **Long message truncation** — long user messages and huge assistant replies collapse with show more/less
 - **Markdown rendering** — assistant output via `marked` + `DOMPurify`; syntax-highlighted code
 - **Thinking blocks** — extended-thinking events rendered as collapsible disclosures
