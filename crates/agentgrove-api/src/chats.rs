@@ -1916,6 +1916,12 @@ async fn dispatch_via_provider(
     const FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
     let mut pending_token = String::new();
     let mut pending_thinking = String::new();
+    // Whether the provider emitted a terminal event (`done`/`error`).
+    // If a turn completes cleanly WITHOUT one (an unexpected provider
+    // exit path), the prompt's last event stays `token` and the FE
+    // renders "working…" forever. We backfill a synthetic `done` after
+    // the loop in that case so the turn always terminates in the UI.
+    let mut saw_terminal = false;
 
     /// Kind of streaming-text buffer the coalescer is flushing. Lets a
     /// single `flush_pending` helper emit either AgentEvent variant.
@@ -2062,6 +2068,9 @@ async fn dispatch_via_provider(
                     if let AgentEvent::Error { message } = &other {
                         stale_session = message.contains("Session not found");
                     }
+                    if matches!(other, AgentEvent::Done { .. } | AgentEvent::Error { .. }) {
+                        saw_terminal = true;
+                    }
                     let payload = serde_json::json!({
                         "prompt_id": prompt.id,
                         "event": other,
@@ -2113,7 +2122,24 @@ async fn dispatch_via_provider(
             let mut reg = state.chats.write().await;
             reg.append_event(chat_id, &prompt.id, ev);
         }
-        Ok(Ok(())) => {}
+        Ok(Ok(())) => {
+            // Clean completion. If the provider never emitted a terminal
+            // event, synthesize a `done` so the prompt doesn't stay
+            // "working…" in the UI (and so any auto-drain can proceed).
+            if !saw_terminal {
+                let ev = AgentEvent::Done {
+                    result: None,
+                    cost_usd: None,
+                };
+                let payload = serde_json::json!({
+                    "prompt_id": prompt.id,
+                    "event": ev,
+                });
+                state.logbus.publish(topic, payload.to_string());
+                let mut reg = state.chats.write().await;
+                reg.append_event(chat_id, &prompt.id, ev);
+            }
+        }
         Ok(Err(e)) => {
             let ev = AgentEvent::Error {
                 message: e.to_string(),
