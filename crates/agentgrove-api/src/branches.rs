@@ -121,7 +121,11 @@ pub async fn pull_handler(
 /// entry. We prefer the recognizable status line and only fall back to
 /// the first non-empty line for unexpected output shapes.
 fn summarize_pull(out: &str) -> String {
-    let lines: Vec<&str> = out.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = out
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
     for l in &lines {
         if l.starts_with("Already up to date")
             || l.starts_with("Fast-forward")
@@ -143,7 +147,10 @@ mod tests {
 
     #[test]
     fn up_to_date() {
-        assert_eq!(summarize_pull("Already up to date.\n"), "Already up to date.");
+        assert_eq!(
+            summarize_pull("Already up to date.\n"),
+            "Already up to date."
+        );
     }
 
     #[test]

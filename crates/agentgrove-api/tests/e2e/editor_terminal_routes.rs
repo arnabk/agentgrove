@@ -96,7 +96,10 @@ async fn editor_delete_directory_requires_recursive() {
         .await
         .unwrap();
     assert_eq!(ok.status(), 204);
-    assert!(!sub.exists(), "directory should be gone after recursive delete");
+    assert!(
+        !sub.exists(),
+        "directory should be gone after recursive delete"
+    );
 }
 
 #[tokio::test]

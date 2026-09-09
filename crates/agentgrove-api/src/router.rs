@@ -3,7 +3,7 @@
 use crate::{
     backups, branch_center, branches, chats, db, diag, editor, files, fs as fsapi, git as gitapi,
     health::{health, version},
-    layout, notes, open, projects, prs, providers, queue, scratchpad, settings,
+    layout, notes, open, projects, providers, prs, queue, scratchpad, settings,
     state::AppState,
     team_chat, terminal, themes, uploads, worktrees, ws,
 };

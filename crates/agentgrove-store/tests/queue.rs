@@ -62,7 +62,13 @@ async fn reorder_changes_drain_order() {
         .await
         .unwrap();
 
-    let ids: Vec<String> = q.list(chat).await.unwrap().into_iter().map(|i| i.id).collect();
+    let ids: Vec<String> = q
+        .list(chat)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|i| i.id)
+        .collect();
     assert_eq!(ids, vec![c.id.clone(), b.id.clone(), a.id.clone()]);
 
     // The head now pops as c.
@@ -84,7 +90,13 @@ async fn reorder_ignores_unknown_ids_and_keeps_omitted_after() {
         .await
         .unwrap();
 
-    let ids: Vec<String> = q.list(chat).await.unwrap().into_iter().map(|i| i.id).collect();
+    let ids: Vec<String> = q
+        .list(chat)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|i| i.id)
+        .collect();
     assert_eq!(ids, vec![b.id.clone(), a.id.clone(), c.id.clone()]);
 }
 

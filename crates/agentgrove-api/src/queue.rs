@@ -328,9 +328,10 @@ pub async fn reorder(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     let topic = format!("chat:{chat_id}");
-    state
-        .logbus
-        .publish(&topic, serde_json::json!({ "queue_reordered": true }).to_string());
+    state.logbus.publish(
+        &topic,
+        serde_json::json!({ "queue_reordered": true }).to_string(),
+    );
     Ok(Json(read_state(&state, &chat_id).await))
 }
 

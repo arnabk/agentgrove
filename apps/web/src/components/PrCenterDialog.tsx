@@ -154,7 +154,10 @@ export default function PrCenterDialog(props: { onClose: () => void }) {
                           class="flex items-center gap-3 px-4 py-2.5 hover:bg-bg-2 transition-colors"
                           data-testid={`pr-row-${pr.project_id}-${pr.number}`}
                         >
-                          <span class="ag-chip ag-chip-accent shrink-0 max-w-[160px] truncate" title={pr.project_name}>
+                          <span
+                            class="ag-chip ag-chip-accent shrink-0 max-w-[160px] truncate"
+                            title={pr.project_name}
+                          >
                             {pr.project_name}
                           </span>
                           <span class="font-mono text-fg-subtle text-[12px] shrink-0">
@@ -181,7 +184,9 @@ export default function PrCenterDialog(props: { onClose: () => void }) {
                               {check!.g}
                             </span>
                           </Show>
-                          <span class={`text-[11.5px] font-mono shrink-0 w-12 text-right ${age.cls}`}>
+                          <span
+                            class={`text-[11.5px] font-mono shrink-0 w-12 text-right ${age.cls}`}
+                          >
                             {age.text}
                           </span>
                         </a>

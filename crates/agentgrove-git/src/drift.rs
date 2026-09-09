@@ -303,14 +303,11 @@ async fn glab_mr_detail(cwd: &Path, iid: u64) -> Option<GlabMrDetail> {
     // Approval state. `glab mr view` exposes `approved` (bool) on many
     // GitLab versions; fall back to `approvals_left == 0`. Map to the
     // same vocabulary GitHub uses so the FE gate + badge are shared.
-    let approved = mr
-        .get("approved")
-        .and_then(|v| v.as_bool())
-        .or_else(|| {
-            mr.get("approvals_left")
-                .and_then(|v| v.as_u64())
-                .map(|left| left == 0)
-        });
+    let approved = mr.get("approved").and_then(|v| v.as_bool()).or_else(|| {
+        mr.get("approvals_left")
+            .and_then(|v| v.as_u64())
+            .map(|left| left == 0)
+    });
     let review_decision = match approved {
         Some(true) => Some("approved".to_string()),
         Some(false) => Some("review_required".to_string()),
@@ -420,7 +417,10 @@ async fn list_gh(cwd: &Path) -> Option<Vec<PrListItem>> {
                         .and_then(|v| v.as_str())
                         .map(String::from),
                     draft: pr.get("isDraft").and_then(|v| v.as_bool()).unwrap_or(false),
-                    created_at: pr.get("createdAt").and_then(|v| v.as_str()).map(String::from),
+                    created_at: pr
+                        .get("createdAt")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
                     checks_status,
                     review_decision,
                 })
@@ -487,7 +487,10 @@ async fn list_glab(cwd: &Path) -> Option<Vec<PrListItem>> {
                         .or_else(|| mr.get("work_in_progress"))
                         .and_then(|v| v.as_bool())
                         .unwrap_or(false),
-                    created_at: mr.get("created_at").and_then(|v| v.as_str()).map(String::from),
+                    created_at: mr
+                        .get("created_at")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
                     checks_status: None,
                     review_decision: None,
                 })

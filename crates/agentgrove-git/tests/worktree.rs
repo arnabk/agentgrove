@@ -59,22 +59,40 @@ async fn git(args: &[&str], cwd: &std::path::Path) {
         .output()
         .await
         .unwrap();
-    assert!(out.status.success(), "git {args:?} failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 /// Build a bare "origin" with an initial main commit, clone it, and add
 /// a worktree on a feature branch off main. Returns (tmp, clone_path,
 /// worktree_path).
-async fn setup_origin_clone_worktree() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+async fn setup_origin_clone_worktree() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf)
+{
     let dir = tempdir().unwrap();
     let seed = dir.path().join("seed");
     init_repo(&seed).await.unwrap();
     // Make a bare origin from the seed.
     let origin = dir.path().join("origin.git");
-    git(&["clone", "--bare", seed.to_str().unwrap(), origin.to_str().unwrap()], dir.path()).await;
+    git(
+        &[
+            "clone",
+            "--bare",
+            seed.to_str().unwrap(),
+            origin.to_str().unwrap(),
+        ],
+        dir.path(),
+    )
+    .await;
     // Clone origin into a working repo.
     let clone = dir.path().join("clone");
-    git(&["clone", origin.to_str().unwrap(), clone.to_str().unwrap()], dir.path()).await;
+    git(
+        &["clone", origin.to_str().unwrap(), clone.to_str().unwrap()],
+        dir.path(),
+    )
+    .await;
     git(&["config", "user.email", "t@t"], &clone).await;
     git(&["config", "user.name", "t"], &clone).await;
     // Add a worktree on feature off main.
@@ -92,7 +110,11 @@ async fn merge_base_pulls_new_upstream_commit_into_worktree() {
 
     // Advance origin/main with a new file via a second clone.
     let pusher = dir.path().join("pusher");
-    git(&["clone", origin.to_str().unwrap(), pusher.to_str().unwrap()], dir.path()).await;
+    git(
+        &["clone", origin.to_str().unwrap(), pusher.to_str().unwrap()],
+        dir.path(),
+    )
+    .await;
     git(&["config", "user.email", "p@p"], &pusher).await;
     git(&["config", "user.name", "p"], &pusher).await;
     std::fs::write(pusher.join("upstream.txt"), "hi").unwrap();
@@ -104,7 +126,10 @@ async fn merge_base_pulls_new_upstream_commit_into_worktree() {
     let summary = merge_base_into_worktree(&wt, "main").await.unwrap();
     assert!(!summary.is_empty());
     // The upstream file must now exist in the worktree.
-    assert!(wt.join("upstream.txt").exists(), "merged file should be present");
+    assert!(
+        wt.join("upstream.txt").exists(),
+        "merged file should be present"
+    );
 
     let _ = clone; // keep clone alive
 }

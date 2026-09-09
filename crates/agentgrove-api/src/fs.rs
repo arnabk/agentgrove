@@ -137,7 +137,9 @@ pub struct MkdirResponse {
 /// `.`/`..`, no control chars) so a caller can't traverse out of the
 /// parent or create nested paths. Succeeds idempotently if the folder
 /// already exists.
-pub async fn mkdir(Json(body): Json<MkdirBody>) -> Result<Json<MkdirResponse>, (StatusCode, String)> {
+pub async fn mkdir(
+    Json(body): Json<MkdirBody>,
+) -> Result<Json<MkdirResponse>, (StatusCode, String)> {
     let parent = PathBuf::from(&body.parent);
     if !parent.is_absolute() {
         return Err((StatusCode::BAD_REQUEST, "parent must be absolute".into()));

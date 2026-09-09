@@ -125,9 +125,21 @@ pub async fn list_detailed(cwd: &Path) -> Vec<BranchDetail> {
             if name.is_empty() {
                 return None;
             }
-            let committed_at = f.next().map(str::trim).filter(|s| !s.is_empty()).map(String::from);
-            let upstream = f.next().map(str::trim).filter(|s| !s.is_empty()).map(String::from);
-            let subject = f.next().map(str::trim).filter(|s| !s.is_empty()).map(String::from);
+            let committed_at = f
+                .next()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from);
+            let upstream = f
+                .next()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from);
+            let subject = f
+                .next()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from);
             Some(BranchDetail {
                 current: !current.is_empty() && name == current,
                 name,
