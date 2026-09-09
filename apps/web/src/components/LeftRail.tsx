@@ -1997,20 +1997,99 @@ function FolderRow(props: {
   onChanged?: (() => void) | undefined;
 }) {
   const [open, setOpen] = createSignal(false);
+  const [menuOpen, setMenuOpen] = createSignal(false);
+  const [deleting, setDeleting] = createSignal(false);
+
+  async function doDelete() {
+    setMenuOpen(false);
+    const ok = await confirm({
+      title: "Delete folder",
+      body: (
+        <span>
+          Delete <span class="font-mono">{props.name}</span> and everything inside it? This removes
+          the folder recursively from disk and can't be undone here.
+        </span>
+      ),
+      confirmLabel: "Delete folder",
+      danger: true,
+      testId: "confirm-delete-folder",
+    });
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      await api.deleteFile(props.path, true);
+      pushToast({ title: "Folder deleted", message: props.name, level: "info" });
+      props.onChanged?.();
+    } catch (e) {
+      pushToast({
+        title: "Delete failed",
+        message: e instanceof Error ? e.message : String(e),
+        level: "error",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
-    <li>
+    <li class="relative group/folderrow">
       <button
         type="button"
         class="w-full flex items-center gap-1.5 px-2 py-[3px] rounded hover:bg-bg-2 text-fg-muted hover:text-fg cursor-pointer select-none text-left"
+        classList={{ "opacity-50": deleting() }}
         style={{ "padding-left": `${8 + props.depth * 12}px` }}
         onClick={() => setOpen(!open())}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenuOpen(true);
+        }}
         title={props.path}
         data-testid={`tree-folder-${props.path}`}
       >
         <Chevron open={open()} />
         <TreeFolderIcon />
-        <span class="truncate text-[0.83em]">{props.name}</span>
+        <span class="truncate text-[0.83em] flex-1">{props.name}</span>
+        <span
+          role="button"
+          tabindex="0"
+          class="shrink-0 opacity-0 group-hover/folderrow:opacity-100 p-0.5 rounded text-fg-subtle hover:text-fg hover:bg-bg-3"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpen((v) => !v);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              setMenuOpen((v) => !v);
+            }
+          }}
+          aria-label={`Actions for ${props.name}`}
+          data-testid={`tree-folder-menu-btn-${props.path}`}
+        >
+          <KebabIcon />
+        </span>
       </button>
+      <Show when={menuOpen()}>
+        <div class="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} />
+        <div
+          role="menu"
+          class="absolute right-1 top-full mt-0.5 z-30 min-w-[160px] py-1 rounded-lg border border-border bg-bg-1 shadow-xl text-[12.5px]"
+          onClick={(e) => e.stopPropagation()}
+          data-testid={`tree-folder-menu-${props.path}`}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2 text-danger disabled:opacity-50"
+            disabled={deleting()}
+            onClick={() => void doDelete()}
+            data-testid={`tree-folder-delete-${props.path}`}
+          >
+            <TrashIcon /> Delete folder
+          </button>
+        </div>
+      </Show>
       <Show when={open()}>
         <DirNode
           path={props.path}

@@ -66,13 +66,16 @@ async fn editor_delete_file_removes_it() {
 }
 
 #[tokio::test]
-async fn editor_delete_refuses_directory() {
+async fn editor_delete_directory_requires_recursive() {
     let h = BeHarness::start().await;
     let dir = tempfile::tempdir().unwrap();
     let sub = dir.path().join("subdir");
     std::fs::create_dir(&sub).unwrap();
+    std::fs::write(sub.join("inner.txt"), "x").unwrap();
 
-    let del = h
+    // Without recursive=true, a directory delete is refused (guards a
+    // plain file-delete from nuking a tree).
+    let refused = h
         .delete_auth(&format!(
             "/api/editor/file?path={}",
             urlencoding::encode(&sub.to_string_lossy())
@@ -80,8 +83,20 @@ async fn editor_delete_refuses_directory() {
         .send()
         .await
         .unwrap();
-    assert_eq!(del.status(), 400, "directories must not be deletable here");
+    assert_eq!(refused.status(), 400, "dir delete needs recursive=true");
     assert!(sub.exists(), "directory must be left intact");
+
+    // With recursive=true, the folder and its contents are removed.
+    let ok = h
+        .delete_auth(&format!(
+            "/api/editor/file?path={}&recursive=true",
+            urlencoding::encode(&sub.to_string_lossy())
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), 204);
+    assert!(!sub.exists(), "directory should be gone after recursive delete");
 }
 
 #[tokio::test]

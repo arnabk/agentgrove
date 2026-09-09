@@ -52,7 +52,7 @@ What you can do with it today.
 ### Project Management
 
 - **Folder-based projects** — add any folder; the name is derived from the path
-- **UI folder picker** — browse the filesystem inside the app instead of using the OS dialog; create a new folder inline while picking, then add it as a project
+- **UI folder picker** — browse the filesystem inside the app instead of using the OS dialog; create a new folder inline while picking; create a new folder inline while picking, then add it as a project
 - **Multiple projects open** — several projects at once, each with its own expand/collapse state
 - **Per-project settings** — pre-worktree scripts inherited by every new worktree
 - **Project-scoped state** — each project/worktree keeps its own tabs, editor state, and chat history
@@ -174,7 +174,7 @@ What you can do with it today.
 - **Gitignore-aware** — uses the `ignore` crate's parallel walker (same as ripgrep)
 - **Live index** — per-project file index with manual refresh
 - **Empty-query browse** — opens the first 50 indexed files before you type
-- **Delete files from the tree** — right-click (or the hover ⋮ menu) any file in the left-nav explorer to delete it, with a confirm prompt; directories are protected
+- **Delete files and folders from the tree** — right-click (or the hover ⋮ menu) any file or folder in the left-nav explorer to delete it, with a confirm prompt; folder deletes are recursive and gated behind an explicit confirmation
 
 ### Settings & Themes
 

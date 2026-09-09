@@ -23,6 +23,16 @@ pub struct ReadQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct DeleteQuery {
+    pub path: String,
+    /// Required to delete a directory (recursive). Keeps a plain
+    /// file-delete from ever removing a whole tree by accident; the FE
+    /// sets it only after a folder-specific confirmation.
+    #[serde(default)]
+    pub recursive: bool,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct TreeQuery {
     pub path: String,
     /// When true, include entries starting with `.` (e.g. `.git`).
@@ -103,7 +113,7 @@ pub async fn write_file(
 
 pub async fn delete_file(
     State(state): State<AppState>,
-    Query(q): Query<ReadQuery>,
+    Query(q): Query<DeleteQuery>,
 ) -> Result<StatusCode, (StatusCode, String)> {
     let path = PathBuf::from(&q.path);
     if !path.is_absolute() {
@@ -115,14 +125,29 @@ pub async fn delete_file(
             format!("cannot stat {}: {e}", path.display()),
         )
     })?;
-    // Only delete regular files. Directory removal is intentionally not
-    // supported here — it has a much larger blast radius and would need
-    // an explicit recursive confirmation flow.
     if md.is_dir() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "refusing to delete a directory; only files can be deleted".into(),
-        ));
+        // Directory removal is recursive and higher-blast-radius, so it
+        // requires an explicit `recursive=true` (the FE confirms first).
+        // Guard against nuking a filesystem root.
+        if !q.recursive {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "path is a directory; pass recursive=true to delete it".into(),
+            ));
+        }
+        if path.parent().is_none() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "refusing to delete a filesystem root".into(),
+            ));
+        }
+        fs::remove_dir_all(&path)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        // Drop any open-history entries under the removed tree.
+        let mut editor = state.editor.write().await;
+        editor.open_history.retain(|p| !p.starts_with(&path));
+        return Ok(StatusCode::NO_CONTENT);
     }
     fs::remove_file(&path)
         .await
