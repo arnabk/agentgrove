@@ -1036,9 +1036,17 @@ export default function LeftRail() {
                                 {(() => {
                                   const pr = remoteStatus[w.id]!.pr!;
                                   const label = pr.source === "glab" ? "MR" : "PR";
-                                  const checksOk = pr.checks_status === "success";
+                                  // GitHub reports "open"; GitLab "opened".
+                                  const isOpen = pr.state === "open" || pr.state === "opened";
+                                  // Checks are OK if the pipeline is green OR there's no
+                                  // pipeline at all (common on GitLab MRs) and the forge
+                                  // already reports the MR as mergeable. A failing/pending
+                                  // pipeline still blocks.
+                                  const checksOk =
+                                    pr.checks_status === "success" ||
+                                    (!pr.checks_status && pr.mergeable === true);
                                   const canMerge =
-                                    pr.state === "open" &&
+                                    isOpen &&
                                     checksOk &&
                                     (pr.review_decision === "approved" || !pr.review_decision);
                                   const isMerging = () => mergingWt() === w.id;

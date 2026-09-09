@@ -228,8 +228,15 @@ async fn try_glab(cwd: &Path, branch: &str) -> Option<PrInfo> {
     }
     let mrs: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).ok()?;
     let mr = mrs.into_iter().next()?;
+    let iid = mr.get("iid").or_else(|| mr.get("id"))?.as_u64()?;
+    // `mr list` is shallow — it doesn't carry pipeline status, approval
+    // state, or mergeability. Without those the FE's "Merge" button
+    // (gated on checks == success) never appears for GitLab. Fetch the
+    // MR detail so GitLab reaches parity with GitHub. Best-effort: if
+    // the detail call fails we still return the basic row.
+    let detail = glab_mr_detail(cwd, iid).await;
     Some(PrInfo {
-        number: mr.get("iid").or_else(|| mr.get("id"))?.as_u64()?,
+        number: iid,
         title: mr.get("title")?.as_str()?.to_string(),
         state: mr
             .get("state")
@@ -238,9 +245,82 @@ async fn try_glab(cwd: &Path, branch: &str) -> Option<PrInfo> {
             .to_lowercase(),
         url: mr.get("web_url")?.as_str()?.to_string(),
         source: "glab".into(),
-        review_decision: None,
-        checks_status: None,
-        mergeable: None,
+        review_decision: detail.as_ref().and_then(|d| d.review_decision.clone()),
+        checks_status: detail.as_ref().and_then(|d| d.checks_status.clone()),
+        mergeable: detail.as_ref().and_then(|d| d.mergeable),
+    })
+}
+
+/// Pipeline/approval/mergeability distilled from `glab mr view`.
+struct GlabMrDetail {
+    review_decision: Option<String>,
+    checks_status: Option<String>,
+    mergeable: Option<bool>,
+}
+
+/// Fetch a single MR's detail via `glab mr view <iid> -F json` and map
+/// GitLab's fields onto our forge-agnostic shape:
+///   - `pipeline.status` → checks_status (success/pending/failure)
+///   - `detailed_merge_status` / `merge_status` → mergeable
+///   - approvals (`approved` or `approvals_left == 0`) → review_decision
+async fn glab_mr_detail(cwd: &Path, iid: u64) -> Option<GlabMrDetail> {
+    let out = Command::new("glab")
+        .args(["mr", "view", &iid.to_string(), "-F", "json"])
+        .current_dir(cwd)
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let mr: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+
+    // Pipeline / CI status. GitLab statuses: success, failed, running,
+    // pending, canceled, skipped, manual, created. Normalize to our
+    // success/pending/failure trio the FE badge understands.
+    let checks_status = mr
+        .pointer("/pipeline/status")
+        .or_else(|| mr.pointer("/head_pipeline/status"))
+        .and_then(|v| v.as_str())
+        .map(|s| match s {
+            "success" | "passed" => "success".to_string(),
+            "failed" | "canceled" | "cancelled" => "failure".to_string(),
+            _ => "pending".to_string(),
+        });
+
+    // Mergeability. `detailed_merge_status == "mergeable"` (newer GitLab)
+    // or `merge_status == "can_be_merged"` (older).
+    let mergeable = mr
+        .get("detailed_merge_status")
+        .and_then(|v| v.as_str())
+        .map(|s| s == "mergeable")
+        .or_else(|| {
+            mr.get("merge_status")
+                .and_then(|v| v.as_str())
+                .map(|s| s == "can_be_merged")
+        });
+
+    // Approval state. `glab mr view` exposes `approved` (bool) on many
+    // GitLab versions; fall back to `approvals_left == 0`. Map to the
+    // same vocabulary GitHub uses so the FE gate + badge are shared.
+    let approved = mr
+        .get("approved")
+        .and_then(|v| v.as_bool())
+        .or_else(|| {
+            mr.get("approvals_left")
+                .and_then(|v| v.as_u64())
+                .map(|left| left == 0)
+        });
+    let review_decision = match approved {
+        Some(true) => Some("approved".to_string()),
+        Some(false) => Some("review_required".to_string()),
+        None => None,
+    };
+
+    Some(GlabMrDetail {
+        review_decision,
+        checks_status,
+        mergeable,
     })
 }
 
