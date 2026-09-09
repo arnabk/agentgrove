@@ -1622,6 +1622,19 @@ async fn drain_loop(state: &AppState, chat_id: &str) {
             }
         };
         let drain_topic = format!("chat:{chat_id}");
+        // Announce the dispatch + drop the queue card BEFORE we start the
+        // (possibly long) provider turn. This is what makes the drained
+        // message appear in the timeline immediately and stream live —
+        // matching run_next/dispatch_item. Previously we published
+        // queue_dispatched only AFTER the whole turn finished, so the new
+        // message didn't show until the turn ended (or a manual refresh).
+        if let Err(e) = crate::queue::mark_done(state, &item.id).await {
+            tracing::warn!(item_id = %item.id, error = %e, "queue mark_done failed");
+        }
+        state.logbus.publish(
+            &drain_topic,
+            serde_json::json!({ "queue_dispatched": item.id }).to_string(),
+        );
         let drain_cwd = resolve_cwd(state, &drain_chat).await;
         let drain_provider = crate::providers::resolve(state, &drain_chat.provider).await;
         if let Some(p) = drain_provider {
@@ -1641,13 +1654,6 @@ async fn drain_loop(state: &AppState, chat_id: &str) {
         } else {
             dispatch_echo(state, chat_id, &drain_prompt, &drain_topic, &item.body).await;
         }
-        if let Err(e) = crate::queue::mark_done(state, &item.id).await {
-            tracing::warn!(item_id = %item.id, error = %e, "queue mark_done failed");
-        }
-        state.logbus.publish(
-            &drain_topic,
-            serde_json::json!({ "queue_dispatched": item.id }).to_string(),
-        );
     }
 }
 
