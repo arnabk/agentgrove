@@ -176,6 +176,7 @@ pub fn build_router(state: AppState) -> Router {
         // Filesystem browser (for folder picker)
         .route("/api/fs/home", get(fsapi::home))
         .route("/api/fs/browse", get(fsapi::browse))
+        .route("/api/fs/mkdir", post(fsapi::mkdir))
         // Git inspection + per-file discard
         .route("/api/git/status", get(gitapi::git_status))
         .route("/api/git/discard", post(gitapi::git_discard))

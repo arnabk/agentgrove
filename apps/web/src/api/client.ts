@@ -713,6 +713,13 @@ export const api = {
   // Filesystem browser (folder picker)
   fsHome: () => req<FsHome>("/api/fs/home"),
   fsBrowse: (path: string) => req<FsBrowse>(`/api/fs/browse?path=${encodeURIComponent(path)}`),
+  /** Create a new folder `name` under an existing `parent` dir. Returns
+   *  the created directory's absolute path. */
+  fsMkdir: (parent: string, name: string) =>
+    req<{ path: string }>("/api/fs/mkdir", {
+      method: "POST",
+      body: JSON.stringify({ parent, name }),
+    }),
   // Themes
   listThemes: () => req<Theme[]>("/api/themes"),
   saveTheme: (t: Theme) => req<Theme>("/api/themes", { method: "POST", body: JSON.stringify(t) }),

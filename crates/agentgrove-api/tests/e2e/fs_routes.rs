@@ -43,6 +43,73 @@ async fn browse_lists_directories_only() {
 }
 
 #[tokio::test]
+async fn mkdir_creates_folder_under_parent() {
+    let h = BeHarness::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let res = h
+        .post("/api/fs/mkdir")
+        .json(&serde_json::json!({
+            "parent": dir.path().to_string_lossy(),
+            "name": "new-proj"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: Value = res.json().await.unwrap();
+    let created = body["path"].as_str().unwrap();
+    assert!(created.ends_with("new-proj"));
+    assert!(dir.path().join("new-proj").is_dir());
+
+    // Idempotent: creating the same folder again succeeds.
+    let again = h
+        .post("/api/fs/mkdir")
+        .json(&serde_json::json!({
+            "parent": dir.path().to_string_lossy(),
+            "name": "new-proj"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(again.status(), 200);
+}
+
+#[tokio::test]
+async fn mkdir_rejects_traversal_and_bad_names() {
+    let h = BeHarness::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    for bad in ["../escape", "a/b", "..", "."] {
+        let res = h
+            .post("/api/fs/mkdir")
+            .json(&serde_json::json!({
+                "parent": dir.path().to_string_lossy(),
+                "name": bad
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 400, "name {bad:?} must be rejected");
+    }
+    // Nothing should have been created outside the parent.
+    assert!(!dir.path().parent().unwrap().join("escape").exists());
+}
+
+#[tokio::test]
+async fn mkdir_404_for_missing_parent() {
+    let h = BeHarness::start().await;
+    let res = h
+        .post("/api/fs/mkdir")
+        .json(&serde_json::json!({
+            "parent": "/this/does/not/exist/agentgrove-test",
+            "name": "x"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 404);
+}
+
+#[tokio::test]
 async fn browse_rejects_non_absolute_path() {
     let h = BeHarness::start().await;
     let res = h.get("/api/fs/browse?path=relative").send().await.unwrap();

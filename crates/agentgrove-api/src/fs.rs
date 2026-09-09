@@ -114,6 +114,67 @@ pub async fn browse(
     }))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct MkdirBody {
+    /// Absolute path of the existing parent directory.
+    pub parent: String,
+    /// New folder name to create under `parent`. A single path segment —
+    /// no separators or `..`.
+    pub name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MkdirResponse {
+    /// Absolute path of the created (or already-existing) directory.
+    pub path: String,
+}
+
+/// `POST /api/fs/mkdir` — create a new folder under an existing parent.
+///
+/// Used by the folder picker's "New folder" affordance. Deliberately
+/// conservative: the parent must already exist and be a directory, and
+/// `name` must be a single, portable path segment (no separators, no
+/// `.`/`..`, no control chars) so a caller can't traverse out of the
+/// parent or create nested paths. Succeeds idempotently if the folder
+/// already exists.
+pub async fn mkdir(Json(body): Json<MkdirBody>) -> Result<Json<MkdirResponse>, (StatusCode, String)> {
+    let parent = PathBuf::from(&body.parent);
+    if !parent.is_absolute() {
+        return Err((StatusCode::BAD_REQUEST, "parent must be absolute".into()));
+    }
+    let name = body.name.trim();
+    if name.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "folder name is required".into()));
+    }
+    // Reject anything that isn't a single, portable segment.
+    if name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0')
+        || name.chars().any(|c| c.is_control())
+    {
+        return Err((StatusCode::BAD_REQUEST, "invalid folder name".into()));
+    }
+    let md = fs::metadata(&parent)
+        .await
+        .map_err(|e| (StatusCode::NOT_FOUND, format!("{}: {e}", parent.display())))?;
+    if !md.is_dir() {
+        return Err((StatusCode::BAD_REQUEST, "parent is not a directory".into()));
+    }
+    let target = parent.join(name);
+    // `create_dir` (not create_dir_all) so we only ever make ONE level
+    // under an existing parent. AlreadyExists is fine (idempotent).
+    match fs::create_dir(&target).await {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+    }
+    Ok(Json(MkdirResponse {
+        path: target.to_string_lossy().into_owned(),
+    }))
+}
+
 fn home_dir() -> PathBuf {
     #[cfg(unix)]
     {

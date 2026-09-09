@@ -20,6 +20,38 @@ export default function FolderPicker(props: FolderPickerProps) {
   const [err, setErr] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(false);
   const [roots, setRoots] = createSignal<string[]>([]);
+  // Inline "new folder" affordance state.
+  const [creating, setCreating] = createSignal(false);
+  const [newName, setNewName] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+  let newNameRef: HTMLInputElement | undefined;
+
+  function startCreate() {
+    setErr(null);
+    setNewName("");
+    setCreating(true);
+    queueMicrotask(() => newNameRef?.focus());
+  }
+
+  async function submitCreate() {
+    const v = view();
+    const name = newName().trim();
+    if (!v || !name || busy()) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await api.fsMkdir(v.path, name);
+      setCreating(false);
+      setNewName("");
+      // Navigate into the freshly-created folder so "Select this folder"
+      // picks it up immediately.
+      await navigate(res.path);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function navigate(path: string) {
     setLoading(true);
@@ -141,6 +173,61 @@ export default function FolderPicker(props: FolderPickerProps) {
 
         {/* Entries */}
         <div class="flex-1 overflow-y-auto px-3 py-2">
+          {/* New-folder affordance: a button that swaps into an inline
+              input, creating the folder under the current directory. */}
+          <Show
+            when={creating()}
+            fallback={
+              <button
+                type="button"
+                class="ag-list-item w-full text-accent"
+                onClick={startCreate}
+                disabled={!view()}
+                data-testid="folder-picker-new"
+              >
+                <PlusIcon />
+                <span>New folder…</span>
+              </button>
+            }
+          >
+            <div class="flex items-center gap-2 px-2 py-1.5">
+              <PlusIcon />
+              <input
+                ref={(el) => (newNameRef = el)}
+                class="ag-input !py-1 flex-1 font-mono text-[12.5px]"
+                placeholder="Folder name"
+                value={newName()}
+                onInput={(e) => setNewName(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void submitCreate();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setCreating(false);
+                  }
+                }}
+                data-testid="folder-picker-new-input"
+              />
+              <button
+                type="button"
+                class="ag-btn ag-btn-primary ag-btn-sm"
+                disabled={busy() || !newName().trim()}
+                onClick={() => void submitCreate()}
+                data-testid="folder-picker-new-create"
+              >
+                {busy() ? "…" : "Create"}
+              </button>
+              <button
+                type="button"
+                class="ag-btn ag-btn-ghost ag-btn-sm"
+                onClick={() => setCreating(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </Show>
+
           <Show when={view()?.parent}>
             <button
               type="button"
@@ -273,6 +360,19 @@ function FolderIcon() {
         stroke="currentColor"
         stroke-width="1.6"
         stroke-linejoin="round"
+      />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 5v14M5 12h14"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
       />
     </svg>
   );

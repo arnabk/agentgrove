@@ -52,7 +52,7 @@ What you can do with it today.
 ### Project Management
 
 - **Folder-based projects** — add any folder; the name is derived from the path
-- **UI folder picker** — browse the filesystem inside the app instead of using the OS dialog
+- **UI folder picker** — browse the filesystem inside the app instead of using the OS dialog; create a new folder inline while picking, then add it as a project
 - **Multiple projects open** — several projects at once, each with its own expand/collapse state
 - **Per-project settings** — pre-worktree scripts inherited by every new worktree
 - **Project-scoped state** — each project/worktree keeps its own tabs, editor state, and chat history

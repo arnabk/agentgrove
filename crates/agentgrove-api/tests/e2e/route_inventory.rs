@@ -66,6 +66,7 @@ fn expected_routes() -> BTreeSet<&'static str> {
         "GET /api/terminals/{id}/status",
         "GET /api/fs/home",
         "GET /api/fs/browse",
+        "POST /api/fs/mkdir",
         "GET /api/editor/file",
         "POST /api/editor/file",
         "DELETE /api/editor/file",
