@@ -1169,6 +1169,12 @@ export default function ChatPane() {
     const snapshot = { body, uploads: atts };
     setInput("");
     setUploads([]);
+    // Cancel any pending debounced draft write so the old keystroke's
+    // timer can't race the clear and re-persist stale text.
+    if (draftTimer) {
+      clearTimeout(draftTimer);
+      draftTimer = null;
+    }
     // Drop the persisted draft for this chat — the message is now
     // in flight, no point keeping it as recoverable text.
     const chatId = activeId();
