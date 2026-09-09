@@ -379,7 +379,7 @@ pub async fn create(
                     state_for_task.logbus.publish(
                         "sync",
                         serde_json::json!({
-                            "kind": "worktree_removed",
+                            "kind": "worktree_deleted",
                             "worktree_id": wt_id,
                             "project_id": project_id_for_task,
                         })
@@ -413,7 +413,7 @@ pub async fn create(
                     state_for_task.logbus.publish(
                         "sync",
                         serde_json::json!({
-                            "kind": "worktree_removed",
+                            "kind": "worktree_deleted",
                             "worktree_id": wt_id,
                             "project_id": project_id_for_task,
                         })
