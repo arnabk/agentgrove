@@ -234,13 +234,6 @@ export default function LeftRail() {
     );
     saveExpanded(expanded);
   }
-  function expand(id: string) {
-    if (!expanded[id]) {
-      setExpanded(id, true);
-      saveExpanded(expanded);
-    }
-  }
-
   // Use a SolidJS store (not a plain signal) so reads like
   // `remoteStatus[w.id]?.diverged` inside <For> bodies get
   // fine-grained reactivity — a createSignal<Record> doesn't
@@ -529,10 +522,10 @@ export default function LeftRail() {
   };
   onMount(() => {
     window.addEventListener("pointerup", onWindowUp);
-    // Auto-expand the currently selected project on first mount so users
-    // immediately see its file tree.
-    const sel = state.selectedProjectId;
-    if (sel) expand(sel);
+    // NOTE: we deliberately do NOT auto-expand the selected project on
+    // mount. Expansion state is persisted (see loadExpanded), so a
+    // refresh should restore exactly what the user left — auto-expanding
+    // fought a user who had intentionally collapsed the project.
   });
   onCleanup(() => window.removeEventListener("pointerup", onWindowUp));
 
