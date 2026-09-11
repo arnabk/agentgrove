@@ -613,7 +613,10 @@ export default function App() {
 
 function LoadingScreen() {
   return (
-    <div class="min-h-screen flex flex-col items-center justify-center bg-bg gap-6">
+    <div
+      class="fixed inset-0 flex flex-col items-center justify-center bg-bg gap-6"
+      style="z-index: 9999"
+    >
       {/* Animated logo */}
       <div class="relative w-24 h-24">
         <svg
