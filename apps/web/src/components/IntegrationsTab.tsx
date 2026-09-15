@@ -8,11 +8,12 @@ interface IntegrationDef {
   label: string;
   icon: () => import("solid-js").JSX.Element;
   connectable: boolean;
+  cli?: string;
 }
 
 const INTEGRATIONS: IntegrationDef[] = [
-  { provider: "github", label: "GitHub Issues", icon: GitHubIcon, connectable: true },
-  { provider: "gitlab", label: "GitLab Issues", icon: GitLabIcon, connectable: false },
+  { provider: "github", label: "GitHub Issues", icon: GitHubIcon, connectable: false, cli: "gh" },
+  { provider: "gitlab", label: "GitLab Issues", icon: GitLabIcon, connectable: false, cli: "glab" },
   { provider: "clickup", label: "ClickUp", icon: ClickUpIcon, connectable: true },
 ];
 
@@ -102,8 +103,8 @@ export default function IntegrationsTab() {
                   <Show
                     when={def.connectable}
                     fallback={
-                      <Show when={connected()} fallback="Not detected">
-                        via glab CLI
+                      <Show when={connected()} fallback={`${def.cli} CLI not detected`}>
+                        via {def.cli} CLI
                       </Show>
                     }
                   >

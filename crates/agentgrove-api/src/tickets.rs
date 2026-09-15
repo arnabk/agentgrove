@@ -1,10 +1,10 @@
 //! `/api/projects/:id/tickets` — aggregate ticket/issue view + "work on
 //! ticket" worktree bootstrap across GitHub / GitLab / ClickUp.
 //!
-//! GitHub and ClickUp are reached over their REST APIs using the OAuth
-//! token stored in [`agentgrove_store::IntegrationRepo`]. GitLab uses
-//! the already-authenticated `glab` CLI (no token stored), mirroring how
-//! `prs.rs` fans out to forge CLIs.
+//! GitHub and GitLab ride their already-authenticated `gh` / `glab`
+//! CLIs (no token stored), mirroring how `prs.rs` fans out to forge
+//! CLIs. ClickUp is reached over its REST API using the OAuth token
+//! stored in [`agentgrove_store::IntegrationRepo`].
 
 use crate::state::AppState;
 use crate::worktrees::{self, CreateWorktreeBody, WorktreeDto};
@@ -41,8 +41,6 @@ pub struct WorkOnTicketBody {
     pub base_ref: Option<String>,
 }
 
-const GH_UA: &str = "agentgrove";
-
 /// `GET /api/projects/:id/tickets` — list open tickets for a project's
 /// forge. Errors from the provider degrade to an empty list (logged) so
 /// one offline/unauthenticated repo can't sink the view.
@@ -60,26 +58,7 @@ pub async fn list_tickets(
 
     let forge = git::detect_forge(&project.root).await;
     let rows = match forge.forge.as_str() {
-        "github" => {
-            let Some(tok) = load_token(&state, "github").await else {
-                tracing::info!(
-                    project_id,
-                    "github not connected; returning empty ticket list"
-                );
-                return Ok(Json(Vec::new()));
-            };
-            match remote_url(&project.root)
-                .await
-                .as_deref()
-                .and_then(parse_github_remote)
-            {
-                Some((owner, repo)) => list_github_issues(&owner, &repo, &tok).await,
-                None => {
-                    tracing::warn!(project_id, "could not parse github remote");
-                    Vec::new()
-                }
-            }
-        }
+        "github" => list_github_issues_cli(&project.root).await,
         "gitlab" => list_gitlab_issues(&project.root).await,
         "clickup" => {
             let Some(tok) = load_token(&state, "clickup").await else {
@@ -161,15 +140,7 @@ pub async fn work_on_ticket(
     // "In Progress". Failures are logged, never fatal.
     match forge.forge.as_str() {
         "github" => {
-            if let Some(tok) = load_token(&state, "github").await {
-                if let Some((owner, repo)) = remote_url(&project.root)
-                    .await
-                    .as_deref()
-                    .and_then(parse_github_remote)
-                {
-                    github_assign_self(&owner, &repo, &ticket_id, &tok).await;
-                }
-            }
+            github_start_issue(&project.root, &ticket_id).await;
         }
         "gitlab" => {
             gitlab_start_issue(&project.root, &ticket_id).await;
@@ -198,79 +169,44 @@ async fn load_token(state: &AppState, provider: &str) -> Option<String> {
     }
 }
 
-// ---- GitHub --------------------------------------------------------------
+// ---- GitHub (gh CLI) -----------------------------------------------------
 
-/// Parse `https://github.com/owner/repo(.git)` or
-/// `git@github.com:owner/repo.git` into `(owner, repo)`.
-fn parse_github_remote(url: &str) -> Option<(String, String)> {
-    let url = url.trim();
-    let path = [
-        "git@github.com:",
-        "https://github.com/",
-        "http://github.com/",
-        "ssh://git@github.com/",
-    ]
-    .iter()
-    .find_map(|prefix| url.strip_prefix(prefix))?;
-    let path = path.strip_suffix(".git").unwrap_or(path);
-    let mut parts = path.splitn(2, '/');
-    let owner = parts.next()?.trim();
-    let repo = parts.next()?.trim().trim_end_matches('/');
-    if owner.is_empty() || repo.is_empty() {
-        return None;
-    }
-    Some((owner.to_owned(), repo.to_owned()))
-}
-
-async fn remote_url(cwd: &FsPath) -> Option<String> {
-    let out = tokio::process::Command::new("git")
-        .args(["remote", "get-url", "origin"])
+/// List open GitHub issues via `gh issue list --json ...` in the
+/// project's root dir. The `gh` CLI resolves the repo automatically from
+/// the git remote.
+async fn list_github_issues_cli(cwd: &FsPath) -> Vec<TicketRow> {
+    let out = tokio::process::Command::new("gh")
+        .args([
+            "issue",
+            "list",
+            "--state",
+            "open",
+            "--json",
+            "number,title,state,url,labels,assignees,author,createdAt,updatedAt",
+            "--limit",
+            "100",
+        ])
         .current_dir(cwd)
         .output()
-        .await
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let url = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if url.is_empty() {
-        None
-    } else {
-        Some(url)
-    }
-}
-
-async fn list_github_issues(owner: &str, repo: &str, token: &str) -> Vec<TicketRow> {
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/issues?state=open&per_page=100");
-    let client = reqwest::Client::new();
-    let resp = client
-        .get(&url)
-        .header(reqwest::header::USER_AGENT, GH_UA)
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .bearer_auth(token)
-        .send()
         .await;
-    let items: Vec<serde_json::Value> = match resp {
-        Ok(r) if r.status().is_success() => r.json().await.unwrap_or_default(),
-        Ok(r) => {
-            tracing::warn!(status = %r.status(), "github issues list returned non-success");
+    let stdout = match out {
+        Ok(o) if o.status.success() => o.stdout,
+        Ok(o) => {
+            tracing::warn!(
+                stderr = %String::from_utf8_lossy(&o.stderr),
+                "gh issue list failed"
+            );
             return Vec::new();
         }
         Err(e) => {
-            tracing::warn!(error = %e, "github issues list request failed");
+            tracing::warn!(error = %e, "gh not runnable");
             return Vec::new();
         }
     };
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&stdout).unwrap_or_default();
     items
         .into_iter()
-        // GitHub returns PRs in the issues endpoint; filter them out.
-        .filter(|it| it.get("pull_request").is_none())
         .map(|it| {
-            let number = it
-                .get("number")
-                .and_then(serde_json::Value::as_u64)
-                .map(|n| n.to_string())
-                .unwrap_or_default();
             let labels = it
                 .get("labels")
                 .and_then(|v| v.as_array())
@@ -282,7 +218,11 @@ async fn list_github_issues(owner: &str, repo: &str, token: &str) -> Vec<TicketR
                 .unwrap_or_default();
             TicketRow {
                 provider: "github".into(),
-                id: number,
+                id: it
+                    .get("number")
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|n| n.to_string())
+                    .unwrap_or_default(),
                 title: it
                     .get("title")
                     .and_then(|v| v.as_str())
@@ -291,30 +231,32 @@ async fn list_github_issues(owner: &str, repo: &str, token: &str) -> Vec<TicketR
                 status: it
                     .get("state")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("open")
+                    .unwrap_or("OPEN")
                     .to_string(),
                 url: it
-                    .get("html_url")
+                    .get("url")
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string(),
                 labels,
                 assignee: it
-                    .get("assignee")
+                    .get("assignees")
+                    .and_then(|a| a.as_array())
+                    .and_then(|arr| arr.first())
                     .and_then(|a| a.get("login"))
                     .and_then(|v| v.as_str())
                     .map(String::from),
                 author: it
-                    .get("user")
-                    .and_then(|u| u.get("login"))
+                    .get("author")
+                    .and_then(|a| a.get("login"))
                     .and_then(|v| v.as_str())
                     .map(String::from),
                 created_at: it
-                    .get("created_at")
+                    .get("createdAt")
                     .and_then(|v| v.as_str())
                     .map(String::from),
                 updated_at: it
-                    .get("updated_at")
+                    .get("updatedAt")
                     .and_then(|v| v.as_str())
                     .map(String::from),
                 priority: None,
@@ -323,51 +265,35 @@ async fn list_github_issues(owner: &str, repo: &str, token: &str) -> Vec<TicketR
         .collect()
 }
 
-async fn github_assign_self(owner: &str, repo: &str, issue: &str, token: &str) {
-    let client = reqwest::Client::new();
-    // Resolve the token's own login so we can self-assign.
-    let login = match client
-        .get("https://api.github.com/user")
-        .header(reqwest::header::USER_AGENT, GH_UA)
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .bearer_auth(token)
-        .send()
-        .await
-    {
-        Ok(r) if r.status().is_success() => r
-            .json::<serde_json::Value>()
-            .await
-            .ok()
-            .and_then(|v| v.get("login").and_then(|l| l.as_str()).map(String::from)),
-        _ => None,
-    };
-    let Some(login) = login else {
-        tracing::warn!("github: could not resolve current user for self-assign");
-        return;
-    };
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/issues/{issue}/assignees");
-    let res = client
-        .post(&url)
-        .header(reqwest::header::USER_AGENT, GH_UA)
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .bearer_auth(token)
-        .json(&serde_json::json!({ "assignees": [login] }))
-        .send()
+async fn github_start_issue(cwd: &FsPath, number: &str) {
+    // Self-assign + move to an "in progress" label (best-effort). GitHub
+    // issues have no native "In Progress" state; a label is the standard
+    // convention.
+    let out = tokio::process::Command::new("gh")
+        .args([
+            "issue",
+            "edit",
+            number,
+            "--add-assignee",
+            "@me",
+            "--add-label",
+            "in progress",
+        ])
+        .current_dir(cwd)
+        .output()
         .await;
-    if let Err(e) = res {
-        tracing::warn!(error = %e, "github: assign self failed");
+    match out {
+        Ok(o) if o.status.success() => {}
+        Ok(o) => {
+            tracing::warn!(
+                stderr = %String::from_utf8_lossy(&o.stderr),
+                "gh issue edit failed"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "gh not runnable for issue edit");
+        }
     }
-    // GitHub issues have no native "In Progress" state; the standard
-    // convention is a label. Add an "in progress" label best-effort.
-    let label_url = format!("https://api.github.com/repos/{owner}/{repo}/issues/{issue}/labels");
-    let _ = client
-        .post(&label_url)
-        .header(reqwest::header::USER_AGENT, GH_UA)
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .bearer_auth(token)
-        .json(&serde_json::json!({ "labels": ["in progress"] }))
-        .send()
-        .await;
 }
 
 // ---- GitLab (glab CLI) ---------------------------------------------------
@@ -641,36 +567,6 @@ fn slugify(title: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_https_github_remote() {
-        assert_eq!(
-            parse_github_remote("https://github.com/owner/repo"),
-            Some(("owner".into(), "repo".into()))
-        );
-        assert_eq!(
-            parse_github_remote("https://github.com/owner/repo.git"),
-            Some(("owner".into(), "repo".into()))
-        );
-    }
-
-    #[test]
-    fn parse_ssh_github_remote() {
-        assert_eq!(
-            parse_github_remote("git@github.com:owner/repo.git"),
-            Some(("owner".into(), "repo".into()))
-        );
-        assert_eq!(
-            parse_github_remote("ssh://git@github.com/owner/repo.git"),
-            Some(("owner".into(), "repo".into()))
-        );
-    }
-
-    #[test]
-    fn parse_non_github_remote_is_none() {
-        assert_eq!(parse_github_remote("https://gitlab.com/o/r.git"), None);
-        assert_eq!(parse_github_remote("not a url"), None);
-    }
 
     #[test]
     fn slugify_makes_branch_safe() {
