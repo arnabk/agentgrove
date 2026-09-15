@@ -71,8 +71,9 @@ What you can do with it today.
 - **Branch rename** — rename a worktree's git branch without leaving the app
 - **Remote drift badges** — ahead/behind/diverged counts on each worktree row; click behind to sync
 - **PR/MR badges** — see open PR/MR status, checks, review decision, and merge when ready
-- **PR Center** — a top-bar overlay listing every open PR/MR across all projects, searchable by title/repo/branch/author/number, with color-coded age, review, and check status; rows open on GitHub/GitLab (via the local `gh`/`glab` CLIs)
-- **Branch Center** — a top-bar overlay listing local branches across all projects, searchable by branch/repo/commit subject/upstream, showing current branch, upstream tracking, last-commit subject, and age
+- **PR Center** — per-project overlay listing open PRs/MRs, searchable by title/branch/author/number, with color-coded age, review, and check status; rows open on GitHub/GitLab
+- **Branch Center** — per-project overlay listing local branches, searchable by branch/commit subject/upstream, showing current branch, upstream tracking, and age
+- **Ticket integration** — per-project ticket view aggregating GitHub Issues, GitLab Issues (via `glab`), and ClickUp tasks; OAuth connect in Settings → Integrations; search, copy link/ID, open in browser, and "Work on this" creates a worktree from the ticket, assigns it, and moves it to In Progress
 - **Worktree status badges** — `creating` and `pre_script` states are visible inline; a worktree whose pre-script fails is removed automatically (git worktree + branch + record) so no invalid worktrees linger
 - **Galaxy Map** — a zoomable map of every worktree you've visited, kept across removals; repeat visits to the same body show a ×N count, and the name pool spans 260+ real stars, planets, and galaxies so names rarely repeat
 - **VSCode-style git diff** — staged/unstaged groups with an inline CodeMirror merge view
