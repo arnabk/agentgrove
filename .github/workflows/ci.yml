@@ -90,4 +90,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo install --locked cargo-audit
-      - run: cargo audit --config .audit-context/audit.toml
+      - run: cargo audit
