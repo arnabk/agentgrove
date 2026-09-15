@@ -7,13 +7,20 @@ import { api, type PrRow } from "../api/client";
  * the forge CLIs (gh/glab) per project. Read-only v1: search + open in
  * the browser. Merge/checkout live on the worktree rail already.
  */
-export default function PrCenterDialog(props: { onClose: () => void }) {
+export default function PrCenterDialog(props: {
+  onClose: () => void;
+  /** When set, show only PRs for this project. */
+  projectId?: string;
+  projectName?: string;
+}) {
   const [query, setQuery] = createSignal("");
   const [prs, { refetch }] = createResource<PrRow[]>(() => api.listAllPrs());
 
   const filtered = createMemo(() => {
     const q = query().trim().toLowerCase();
-    const list = prs() ?? [];
+    let list = prs() ?? [];
+    // Scope to a single project when opened from its menu.
+    if (props.projectId) list = list.filter((p) => p.project_id === props.projectId);
     if (!q) return list;
     return list.filter((p) =>
       [p.title, p.project_name, p.branch, p.author ?? "", `#${p.number}`, p.source]
@@ -88,7 +95,9 @@ export default function PrCenterDialog(props: { onClose: () => void }) {
       >
         <header class="min-h-12 shrink-0 px-4 py-2 flex items-center gap-3 border-b border-border">
           <span class="text-lg">⇄</span>
-          <h2 class="text-[14px] font-semibold tracking-tight shrink-0">Pull Requests</h2>
+          <h2 class="text-[14px] font-semibold tracking-tight shrink-0">
+            Pull Requests{props.projectName ? ` — ${props.projectName}` : ""}
+          </h2>
           <input
             class="ag-input flex-1 min-w-0 !py-1.5"
             placeholder="Search by title, repo, branch, author, #number…"

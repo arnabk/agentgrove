@@ -43,6 +43,8 @@ import WorktreeHistoryDialog from "./WorktreeHistoryDialog";
 import ChatHistoryDialog from "./ChatHistoryDialog";
 import RenameWorktreeDialog from "./RenameWorktreeDialog";
 import SwitchBranchDialog from "./SwitchBranchDialog";
+import PrCenterDialog from "./PrCenterDialog";
+import BranchCenterDialog from "./BranchCenterDialog";
 import ProjectSettingsDialog from "./ProjectSettingsDialog";
 import DbSidebar from "./DbSidebar";
 import Logo from "./Logo";
@@ -104,6 +106,9 @@ export default function LeftRail() {
   const [wtFor, setWtFor] = createSignal<string | null>(null);
   // Project id whose "Change branch" dialog is open; null when closed.
   const [switchBranchFor, setSwitchBranchFor] = createSignal<string | null>(null);
+  // Project whose PR/Branch center dialog is open; null when closed.
+  const [prsFor, setPrsFor] = createSignal<{ id: string; name: string } | null>(null);
+  const [branchesFor, setBranchesFor] = createSignal<{ id: string; name: string } | null>(null);
   // Project id currently being pulled from remote; null when idle. Used
   // to disable the menu item and show a "Pulling…" label.
   const [pullingProjectId, setPullingProjectId] = createSignal<string | null>(null);
@@ -813,6 +818,36 @@ export default function LeftRail() {
                                     class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
                                     onClick={() => {
                                       setOpenMenuFor(null);
+                                      setPrsFor({ id: p.id, name: p.name });
+                                    }}
+                                    title="View open PRs/MRs for this project"
+                                    data-testid={`view-prs-${p.id}`}
+                                  >
+                                    <DiffIcon /> View PRs
+                                  </button>
+                                </Show>
+                                <Show when={p.is_git}>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                    onClick={() => {
+                                      setOpenMenuFor(null);
+                                      setBranchesFor({ id: p.id, name: p.name });
+                                    }}
+                                    title="View local branches for this project"
+                                    data-testid={`view-branches-${p.id}`}
+                                  >
+                                    <BranchIcon /> View branches
+                                  </button>
+                                </Show>
+                                <Show when={p.has_remote}>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                    onClick={() => {
+                                      setOpenMenuFor(null);
                                       setWtFor(p.id);
                                     }}
                                     data-testid={`new-worktree-${p.id}`}
@@ -1441,6 +1476,26 @@ export default function LeftRail() {
               const proj = state.projects.find((p) => p.id === pid);
               if (proj?.root) refreshTree(proj.root);
             }}
+          />
+        )}
+      </Show>
+
+      <Show when={prsFor()}>
+        {(ctx) => (
+          <PrCenterDialog
+            projectId={ctx().id}
+            projectName={ctx().name}
+            onClose={() => setPrsFor(null)}
+          />
+        )}
+      </Show>
+
+      <Show when={branchesFor()}>
+        {(ctx) => (
+          <BranchCenterDialog
+            projectId={ctx().id}
+            projectName={ctx().name}
+            onClose={() => setBranchesFor(null)}
           />
         )}
       </Show>

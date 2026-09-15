@@ -7,13 +7,19 @@ import { api, type BranchRow } from "../api/client";
  * search + scan. Checkout/switch stays on the project menu's
  * "Change branch" flow (which is per-repo and needs a clean tree).
  */
-export default function BranchCenterDialog(props: { onClose: () => void }) {
+export default function BranchCenterDialog(props: {
+  onClose: () => void;
+  /** When set, show only branches for this project. */
+  projectId?: string;
+  projectName?: string;
+}) {
   const [query, setQuery] = createSignal("");
   const [branches, { refetch }] = createResource<BranchRow[]>(() => api.listAllBranches());
 
   const filtered = createMemo(() => {
     const q = query().trim().toLowerCase();
-    const list = branches() ?? [];
+    let list = branches() ?? [];
+    if (props.projectId) list = list.filter((b) => b.project_id === props.projectId);
     if (!q) return list;
     return list.filter((b) =>
       [b.name, b.project_name, b.subject ?? "", b.upstream ?? ""]
@@ -61,7 +67,9 @@ export default function BranchCenterDialog(props: { onClose: () => void }) {
       >
         <header class="min-h-12 shrink-0 px-4 py-2 flex items-center gap-3 border-b border-border">
           <span class="text-lg">⑂</span>
-          <h2 class="text-[14px] font-semibold tracking-tight shrink-0">Branches</h2>
+          <h2 class="text-[14px] font-semibold tracking-tight shrink-0">
+            Branches{props.projectName ? ` — ${props.projectName}` : ""}
+          </h2>
           <input
             class="ag-input flex-1 min-w-0 !py-1.5"
             placeholder="Search by branch, repo, commit subject, upstream…"
