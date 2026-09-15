@@ -3,22 +3,16 @@
 
 [advisories]
 ignore = [
-    # `serial` is unmaintained, but it is pulled in by `portable-pty` which we use.
-    # There is no direct replacement for `portable-pty` yet.
     "RUSTSEC-2017-0008",
-    # `rsa` crate Marvin Attack. No fixed upgrade available yet.
     "RUSTSEC-2023-0071",
-    # Another issue, probably `gix` or something similar related
     "RUSTSEC-2025-0021",
-    # gix-date issue
     "RUSTSEC-2025-0140",
-    # memmap2 unchecked pointer offset (pinned by gix 0.66)
     "RUSTSEC-2026-0185",
     "RUSTSEC-2026-0186",
-    # crossbeam-epoch invalid pointer dereference in fmt::Pointer (transitive dep)
     "RUSTSEC-2026-0204",
-    # anyhow unsoundness in Error::downcast_mut() (transitive dep, no fix available)
     "RUSTSEC-2026-0190",
-    # event-listener !Send tag crossing thread boundaries (transitive dep)
     "RUSTSEC-2026-0221"
 ]
+
+[yanked]
+enabled = false
