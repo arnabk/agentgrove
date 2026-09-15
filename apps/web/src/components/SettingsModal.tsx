@@ -16,6 +16,7 @@ import {
 } from "../stores/app";
 import Select from "./Select";
 import Slider from "./Slider";
+import IntegrationsTab from "./IntegrationsTab";
 
 /**
  * Tabbed global settings modal.
@@ -29,13 +30,14 @@ import Slider from "./Slider";
  * `Tab` entry below.
  */
 
-type TabId = "appearance" | "prompts" | "providers" | "agents" | "backups";
+type TabId = "appearance" | "prompts" | "providers" | "agents" | "backups" | "integrations";
 const TABS: { id: TabId; label: string }[] = [
   { id: "appearance", label: "Appearance" },
   { id: "agents", label: "Agents" },
   { id: "prompts", label: "Prompts" },
   { id: "providers", label: "Providers" },
   { id: "backups", label: "Backups" },
+  { id: "integrations", label: "Integrations" },
 ];
 
 export default function SettingsModal() {
@@ -104,6 +106,9 @@ export default function SettingsModal() {
             </Show>
             <Show when={tab() === "backups"}>
               <BackupsTab />
+            </Show>
+            <Show when={tab() === "integrations"}>
+              <IntegrationsTab />
             </Show>
           </div>
 

@@ -45,6 +45,7 @@ import RenameWorktreeDialog from "./RenameWorktreeDialog";
 import SwitchBranchDialog from "./SwitchBranchDialog";
 import PrCenterDialog from "./PrCenterDialog";
 import BranchCenterDialog from "./BranchCenterDialog";
+import TicketListDialog from "./TicketListDialog";
 import ProjectSettingsDialog from "./ProjectSettingsDialog";
 import DbSidebar from "./DbSidebar";
 import Logo from "./Logo";
@@ -109,6 +110,7 @@ export default function LeftRail() {
   // Project whose PR/Branch center dialog is open; null when closed.
   const [prsFor, setPrsFor] = createSignal<{ id: string; name: string } | null>(null);
   const [branchesFor, setBranchesFor] = createSignal<{ id: string; name: string } | null>(null);
+  const [ticketsFor, setTicketsFor] = createSignal<{ id: string; name: string } | null>(null);
   // Project id currently being pulled from remote; null when idle. Used
   // to disable the menu item and show a "Pulling…" label.
   const [pullingProjectId, setPullingProjectId] = createSignal<string | null>(null);
@@ -841,6 +843,21 @@ export default function LeftRail() {
                                     <BranchIcon /> View branches
                                   </button>
                                 </Show>
+                                <Show when={p.is_git}>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    class="w-full text-left px-3 py-1.5 flex items-center gap-2 hover:bg-bg-2"
+                                    onClick={() => {
+                                      setOpenMenuFor(null);
+                                      setTicketsFor({ id: p.id, name: p.name });
+                                    }}
+                                    title="Browse tickets for this project"
+                                    data-testid={`view-tickets-${p.id}`}
+                                  >
+                                    <TicketIcon /> Tickets
+                                  </button>
+                                </Show>
                                 <Show when={p.has_remote}>
                                   <button
                                     type="button"
@@ -1500,6 +1517,16 @@ export default function LeftRail() {
         )}
       </Show>
 
+      <Show when={ticketsFor()}>
+        {(ctx) => (
+          <TicketListDialog
+            projectId={ctx().id}
+            projectName={ctx().name}
+            onClose={() => setTicketsFor(null)}
+          />
+        )}
+      </Show>
+
       <Show when={historyFor()} keyed>
         {(pid) => (
           <WorktreeHistoryDialog
@@ -1948,6 +1975,26 @@ function TerminalPlusIcon() {
       <path d="M10.5 14h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
       {/* `+` glyph in the corner */}
       <path d="M19 13v6M16 16h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+    </svg>
+  );
+}
+
+function TicketIcon() {
+  return (
+    <svg
+      width="1em"
+      height="1em"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      class="shrink-0"
+      aria-hidden="true"
+    >
+      <path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4V8Z" />
+      <path d="M13 6v12" stroke-dasharray="2 3" />
     </svg>
   );
 }

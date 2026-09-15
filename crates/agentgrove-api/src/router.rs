@@ -3,9 +3,9 @@
 use crate::{
     backups, branch_center, branches, chats, db, diag, editor, files, fs as fsapi, git as gitapi,
     health::{health, version},
-    layout, notes, open, projects, providers, prs, queue, scratchpad, settings,
+    integrations, layout, notes, open, projects, providers, prs, queue, scratchpad, settings,
     state::AppState,
-    team_chat, terminal, themes, uploads, worktrees, ws,
+    team_chat, terminal, themes, tickets, uploads, worktrees, ws,
 };
 use axum::{
     http::Method,
@@ -48,6 +48,26 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/projects/:id/pull", post(branches::pull_handler))
         // Aggregate open PRs/MRs across every project (PR center).
         .route("/api/prs", get(prs::list_all))
+        // Ticket-integration OAuth (GitHub / ClickUp) + GitLab CLI probe.
+        .route("/api/integrations", get(integrations::list_connections))
+        .route(
+            "/api/integrations/:provider/auth",
+            get(integrations::auth_redirect),
+        )
+        .route(
+            "/api/integrations/:provider/callback",
+            get(integrations::auth_callback),
+        )
+        .route(
+            "/api/integrations/:provider",
+            delete(integrations::disconnect),
+        )
+        // Per-project aggregated tickets + "work on ticket" worktree.
+        .route("/api/projects/:id/tickets", get(tickets::list_tickets))
+        .route(
+            "/api/projects/:id/tickets/:ticket_id/work",
+            post(tickets::work_on_ticket),
+        )
         // Aggregate local branches across every project (branch center).
         .route("/api/branches", get(branch_center::list_all))
         // Cmd+P fuzzy file finder. The index is lazy: the first

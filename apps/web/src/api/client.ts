@@ -163,6 +163,27 @@ export interface PrRow {
   review_decision: string | null;
 }
 
+export interface IntegrationSummary {
+  provider: string;
+  user_name: string | null;
+  user_id: string | null;
+  connected: boolean;
+}
+
+export interface TicketRow {
+  provider: string;
+  id: string;
+  title: string;
+  status: string;
+  url: string;
+  labels: string[];
+  assignee: string | null;
+  author: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  priority: string | null;
+}
+
 /** Backfill page returned by `GET /api/chats/:id/prompts?before=`. */
 export interface PromptsBackfill {
   prompts: Prompt[];
@@ -344,6 +365,21 @@ export const api = {
   listAllPrs: () => req<PrRow[]>(`/api/prs`),
   /** Aggregate local branches across all projects (branch center). */
   listAllBranches: () => req<BranchRow[]>(`/api/branches`),
+  // Integrations
+  listIntegrations: () => req<IntegrationSummary[]>("/api/integrations"),
+  disconnectIntegration: (provider: string) =>
+    req<void>(`/api/integrations/${encodeURIComponent(provider)}`, { method: "DELETE" }),
+  // Tickets (per-project)
+  listTickets: (projectId: string) =>
+    req<TicketRow[]>(`/api/projects/${encodeURIComponent(projectId)}/tickets`),
+  workOnTicket: (projectId: string, ticketId: string, provider: string) =>
+    req<unknown>(
+      `/api/projects/${encodeURIComponent(projectId)}/tickets/${encodeURIComponent(ticketId)}/work`,
+      {
+        method: "POST",
+        body: JSON.stringify({ provider }),
+      },
+    ),
   openWorktreeFolder: (worktreeId: string) =>
     req<void>(`/api/worktrees/${encodeURIComponent(worktreeId)}/open`, { method: "POST" }),
   createWorktree: (

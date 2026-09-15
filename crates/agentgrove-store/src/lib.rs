@@ -8,6 +8,7 @@
 pub mod blob;
 pub mod chat;
 pub mod db;
+pub mod integration;
 pub mod layout;
 pub mod project;
 pub mod provider_secret;
@@ -22,6 +23,7 @@ pub use db::{
     open_pool, run_migrations, run_migrations_safely, snapshot_db_to_backups,
     snapshot_db_to_backups_tagged, DbPool, MigrationError, MAX_DB_BACKUPS,
 };
+pub use integration::{IntegrationError, IntegrationRepo, IntegrationSummary, IntegrationToken};
 pub use layout::{LayoutError, LayoutRepo};
 pub use project::{NewProject, ProjectError, ProjectRecord, ProjectRepo};
 pub use provider_secret::{

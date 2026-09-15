@@ -2,8 +2,8 @@
 
 use crate::logbus::LogBus;
 use agentgrove_store::{
-    ChatRepo, DbPool, LayoutRepo, ProjectRepo, ProviderSecretRepo, QueueRepo, SecretKeyring,
-    WorktreeRepo,
+    ChatRepo, DbPool, IntegrationRepo, LayoutRepo, ProjectRepo, ProviderSecretRepo, QueueRepo,
+    SecretKeyring, WorktreeRepo,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -38,6 +38,10 @@ pub struct AppState {
     /// aggregators). The store decrypts via a machine-bound key at
     /// `<state_dir>/secrets.key`.
     pub provider_secrets: ProviderSecretRepo,
+    /// Encrypted ticket-integration OAuth/CLI tokens (GitHub / GitLab /
+    /// ClickUp). Shares the same machine-bound keyring as
+    /// `provider_secrets`.
+    pub integration_store: Arc<IntegrationRepo>,
     /// Log broadcast bus for streaming script / terminal / chat output.
     pub logbus: Arc<LogBus>,
     /// In-memory chat aggregate registry.
@@ -95,7 +99,8 @@ impl AppState {
         // file so they can fix it (e.g. delete a corrupt key file
         // and let us regenerate).
         let keyring = SecretKeyring::open(&state_dir).expect("open secrets keyring");
-        let provider_secrets = ProviderSecretRepo::new(db.clone(), keyring);
+        let provider_secrets = ProviderSecretRepo::new(db.clone(), keyring.clone());
+        let integration_store = Arc::new(IntegrationRepo::new(db.clone(), keyring));
         Self {
             state_dir: Arc::new(state_dir),
             db,
@@ -105,6 +110,7 @@ impl AppState {
             queue_store,
             layouts,
             provider_secrets,
+            integration_store,
             logbus: Arc::new(LogBus::default()),
             chats: Arc::new(RwLock::new(crate::chats::ChatRegistry::default())),
             notes: Arc::new(RwLock::new(crate::notes::NoteRegistry::default())),
