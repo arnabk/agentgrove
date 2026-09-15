@@ -151,7 +151,19 @@ export default function TicketListDialog(props: {
           <Show
             when={!tickets.loading}
             fallback={
-              <p class="text-center text-[12.5px] text-fg-subtle py-10">Loading tickets…</p>
+              <Show
+                when={!tickets.error}
+                fallback={
+                  <p class="text-center text-[12.5px] text-danger py-10">
+                    Failed to load tickets:{" "}
+                    {tickets.error instanceof Error
+                      ? tickets.error.message
+                      : String(tickets.error)}
+                  </p>
+                }
+              >
+                <p class="text-center text-[12.5px] text-fg-subtle py-10">Loading tickets…</p>
+              </Show>
             }
           >
             <Show

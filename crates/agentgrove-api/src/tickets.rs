@@ -175,32 +175,41 @@ async fn load_token(state: &AppState, provider: &str) -> Option<String> {
 /// project's root dir. The `gh` CLI resolves the repo automatically from
 /// the git remote.
 async fn list_github_issues_cli(cwd: &FsPath) -> Vec<TicketRow> {
-    let out = tokio::process::Command::new("gh")
-        .args([
-            "issue",
-            "list",
-            "--state",
-            "open",
-            "--json",
-            "number,title,state,url,labels,assignees,author,createdAt,updatedAt",
-            "--limit",
-            "100",
-        ])
-        .current_dir(cwd)
-        .output()
-        .await;
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        tokio::process::Command::new("gh")
+            .args([
+                "issue",
+                "list",
+                "--state",
+                "open",
+                "--json",
+                "number,title,state,url,labels,assignees,author,createdAt,updatedAt",
+                "--limit",
+                "100",
+            ])
+            .current_dir(cwd)
+            .output(),
+    )
+    .await;
     let stdout = match out {
-        Ok(o) if o.status.success() => o.stdout,
-        Ok(o) => {
+        Ok(Ok(o)) if o.status.success() => o.stdout,
+        Ok(Ok(o)) => {
             tracing::warn!(
                 stderr = %String::from_utf8_lossy(&o.stderr),
                 "gh issue list failed"
             );
             return Vec::new();
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             tracing::warn!(error = %e, "gh not runnable");
             return Vec::new();
+        }
+        Err(_) => {
+            tracing::warn!("gh issue list timed out after 15s");
+            return Vec::new();
+        }
+    };
         }
     };
     let items: Vec<serde_json::Value> = serde_json::from_slice(&stdout).unwrap_or_default();
@@ -301,22 +310,29 @@ async fn github_start_issue(cwd: &FsPath, number: &str) {
 /// List open GitLab issues via `glab issue list -F json` in the
 /// project's root dir.
 async fn list_gitlab_issues(cwd: &FsPath) -> Vec<TicketRow> {
-    let out = tokio::process::Command::new("glab")
-        .args(["issue", "list", "-F", "json"])
-        .current_dir(cwd)
-        .output()
-        .await;
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        tokio::process::Command::new("glab")
+            .args(["issue", "list", "-F", "json"])
+            .current_dir(cwd)
+            .output(),
+    )
+    .await;
     let stdout = match out {
-        Ok(o) if o.status.success() => o.stdout,
-        Ok(o) => {
+        Ok(Ok(o)) if o.status.success() => o.stdout,
+        Ok(Ok(o)) => {
             tracing::warn!(
                 stderr = %String::from_utf8_lossy(&o.stderr),
                 "glab issue list failed"
             );
             return Vec::new();
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             tracing::warn!(error = %e, "glab not runnable");
+            return Vec::new();
+        }
+        Err(_) => {
+            tracing::warn!("glab issue list timed out after 15s");
             return Vec::new();
         }
     };
