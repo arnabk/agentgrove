@@ -16,5 +16,9 @@ ignore = [
     "RUSTSEC-2026-0185",
     "RUSTSEC-2026-0186",
     # crossbeam-epoch invalid pointer dereference in fmt::Pointer (transitive dep)
-    "RUSTSEC-2026-0204"
+    "RUSTSEC-2026-0204",
+    # anyhow unsoundness in Error::downcast_mut() (transitive dep, no fix available)
+    "RUSTSEC-2026-0190",
+    # event-listener !Send tag crossing thread boundaries (transitive dep)
+    "RUSTSEC-2026-0221"
 ]
