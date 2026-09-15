@@ -210,8 +210,6 @@ async fn list_github_issues_cli(cwd: &FsPath) -> Vec<TicketRow> {
             return Vec::new();
         }
     };
-        }
-    };
     let items: Vec<serde_json::Value> = serde_json::from_slice(&stdout).unwrap_or_default();
     items
         .into_iter()
