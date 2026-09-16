@@ -7,7 +7,10 @@
 //! `create: true`) to the requested branch.
 
 use crate::state::AppState;
-use agentgrove_git::{list_local, pull_current, switch_branch, GitError};
+use agentgrove_git::{
+    delete_branch as git_delete_branch, get_current_branch, list_local, pull_current,
+    switch_branch, GitError,
+};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -73,6 +76,44 @@ pub async fn switch_handler(
         Err(GitError::NonZero { code, stderr }) => Err((
             StatusCode::BAD_REQUEST,
             format!("git switch failed (exit {code}): {stderr}"),
+        )),
+        Err(GitError::Io(e)) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("io: {e}"))),
+    }
+}
+
+/// `DELETE /api/projects/:id/branches/:branch` — force-delete a local
+/// branch in the project root (`git branch -D`). Refuses to delete the
+/// currently checked-out branch.
+pub async fn delete_branch(
+    State(state): State<AppState>,
+    Path((project_id, branch_name)): Path<(String, String)>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let branch = branch_name.trim();
+    if branch.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "branch name is required".into()));
+    }
+    let project = state
+        .projects
+        .get(&project_id)
+        .await
+        .map_err(|_| (StatusCode::NOT_FOUND, "project not found".into()))?;
+
+    if get_current_branch(&project.root).await.as_deref() == Some(branch) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "cannot delete the current branch".into(),
+        ));
+    }
+
+    match git_delete_branch(&project.root, branch).await {
+        Ok(()) => Ok(StatusCode::NO_CONTENT),
+        Err(GitError::GitNotFound) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "git binary not found on PATH".into(),
+        )),
+        Err(GitError::NonZero { code, stderr }) => Err((
+            StatusCode::BAD_REQUEST,
+            format!("git branch -D failed (exit {code}): {stderr}"),
         )),
         Err(GitError::Io(e)) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("io: {e}"))),
     }

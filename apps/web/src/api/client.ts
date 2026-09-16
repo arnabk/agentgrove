@@ -365,6 +365,21 @@ export const api = {
   listAllPrs: () => req<PrRow[]>(`/api/prs`),
   /** Aggregate local branches across all projects (branch center). */
   listAllBranches: () => req<BranchRow[]>(`/api/branches`),
+  /** Force-delete a local branch from the project root. Returns 204. */
+  deleteBranch: (projectId: string, branch: string) =>
+    req<void>(
+      `/api/projects/${encodeURIComponent(projectId)}/branches/${encodeURIComponent(branch)}`,
+      { method: "DELETE" },
+    ),
+  /** Close an open PR/MR via the matching forge CLI. Returns 204. */
+  closePr: (projectId: string, prNumber: number, source: string) =>
+    req<void>(
+      `/api/projects/${encodeURIComponent(projectId)}/prs/${encodeURIComponent(String(prNumber))}/close`,
+      {
+        method: "POST",
+        body: JSON.stringify({ source }),
+      },
+    ),
   // Integrations
   listIntegrations: () => req<IntegrationSummary[]>("/api/integrations"),
   disconnectIntegration: (provider: string) =>

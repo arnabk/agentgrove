@@ -43,11 +43,16 @@ pub fn build_router(state: AppState) -> Router {
         )
         // Project branches (list + switch)
         .route("/api/projects/:id/branches", get(branches::list_branches))
+        .route(
+            "/api/projects/:id/branches/:branch",
+            delete(branches::delete_branch),
+        )
         .route("/api/projects/:id/open", post(open::open_project))
         .route("/api/projects/:id/branch", post(branches::switch_handler))
         .route("/api/projects/:id/pull", post(branches::pull_handler))
         // Aggregate open PRs/MRs across every project (PR center).
         .route("/api/prs", get(prs::list_all))
+        .route("/api/projects/:id/prs/:number/close", post(prs::close_pr))
         // Ticket-integration OAuth (GitHub / ClickUp) + GitLab CLI probe.
         .route("/api/integrations", get(integrations::list_connections))
         .route(

@@ -1,5 +1,7 @@
 import { For, Show, createMemo, createResource, createSignal, onMount } from "solid-js";
 import { api, type PrRow } from "../api/client";
+import { confirm } from "./dialog";
+import { pushToast } from "./Toast";
 
 /**
  * PR Center — an overlay listing every open PR/MR across all projects,
@@ -15,6 +17,34 @@ export default function PrCenterDialog(props: {
 }) {
   const [query, setQuery] = createSignal("");
   const [prs, { refetch }] = createResource<PrRow[]>(() => api.listAllPrs());
+  const [closing, setClosing] = createSignal<string | null>(null);
+
+  async function onClose(pr: PrRow, e: MouseEvent) {
+    e.stopPropagation();
+    e.preventDefault();
+    const ok = await confirm({
+      title: "Close PR/MR",
+      body: `Close #${pr.number} "${pr.title}"? This cannot be undone from here.`,
+      confirmLabel: "Close",
+      danger: true,
+    });
+    if (!ok) return;
+    const key = `${pr.project_id}-${pr.number}`;
+    setClosing(key);
+    try {
+      await api.closePr(pr.project_id, pr.number, pr.source);
+      pushToast({ title: "PR closed", message: `#${pr.number} "${pr.title}" was closed.` });
+      await refetch();
+    } catch (err) {
+      pushToast({
+        title: "Failed to close PR",
+        message: err instanceof Error ? err.message : String(err),
+        level: "error",
+      });
+    } finally {
+      setClosing(null);
+    }
+  }
 
   const filtered = createMemo(() => {
     const q = query().trim().toLowerCase();
@@ -198,6 +228,16 @@ export default function PrCenterDialog(props: {
                           >
                             {age.text}
                           </span>
+                          <button
+                            type="button"
+                            class="ag-btn ag-btn-ghost ag-btn-sm text-danger shrink-0"
+                            onClick={(e) => void onClose(pr, e)}
+                            disabled={closing() === `${pr.project_id}-${pr.number}`}
+                            title="Close this PR/MR"
+                            data-testid={`pr-close-${pr.project_id}-${pr.number}`}
+                          >
+                            {closing() === `${pr.project_id}-${pr.number}` ? "…" : "✕ Close"}
+                          </button>
                         </a>
                       </li>
                     );

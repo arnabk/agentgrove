@@ -1,5 +1,7 @@
 import { For, Show, createMemo, createResource, createSignal, onMount } from "solid-js";
 import { api, type BranchRow } from "../api/client";
+import { confirm } from "./dialog";
+import { pushToast } from "./Toast";
 
 /**
  * Branch Center — an overlay listing local branches across all
@@ -15,6 +17,33 @@ export default function BranchCenterDialog(props: {
 }) {
   const [query, setQuery] = createSignal("");
   const [branches, { refetch }] = createResource<BranchRow[]>(() => api.listAllBranches());
+  const [deleting, setDeleting] = createSignal<string | null>(null);
+
+  async function onDelete(b: BranchRow, e: MouseEvent) {
+    e.stopPropagation();
+    const ok = await confirm({
+      title: "Delete branch",
+      body: `Delete branch "${b.name}" from ${b.project_name}? This removes the local branch and cannot be undone.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
+    const key = `${b.project_id}-${b.name}`;
+    setDeleting(key);
+    try {
+      await api.deleteBranch(b.project_id, b.name);
+      pushToast({ title: "Branch deleted", message: `Deleted branch "${b.name}".` });
+      await refetch();
+    } catch (err) {
+      pushToast({
+        title: "Failed to delete branch",
+        message: err instanceof Error ? err.message : String(err),
+        level: "error",
+      });
+    } finally {
+      setDeleting(null);
+    }
+  }
 
   const filtered = createMemo(() => {
     const q = query().trim().toLowerCase();
@@ -165,6 +194,18 @@ export default function BranchCenterDialog(props: {
                         >
                           {age.text}
                         </span>
+                        <Show when={!b.current}>
+                          <button
+                            type="button"
+                            class="ag-btn ag-btn-ghost ag-btn-sm text-danger shrink-0"
+                            onClick={(e) => void onDelete(b, e)}
+                            disabled={deleting() === `${b.project_id}-${b.name}`}
+                            title="Delete this local branch"
+                            data-testid={`branch-delete-${b.project_id}-${b.name}`}
+                          >
+                            {deleting() === `${b.project_id}-${b.name}` ? "…" : "🗑 Delete"}
+                          </button>
+                        </Show>
                       </li>
                     );
                   }}
