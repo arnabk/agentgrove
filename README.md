@@ -52,7 +52,7 @@ What you can do with it today.
 ### Project Management
 
 - **Folder-based projects** — add any folder; the name is derived from the path
-- **UI folder picker** — browse the filesystem inside the app instead of using the OS dialog; create a new folder inline while picking; create a new folder inline while picking, then add it as a project
+- **UI folder picker** — browse the filesystem inside the app instead of using the OS dialog; create a new folder inline while picking
 - **Multiple projects open** — several projects at once, each with its own expand/collapse state
 - **Per-project settings** — pre-worktree scripts inherited by every new worktree
 - **Project-scoped state** — each project/worktree keeps its own tabs, editor state, and chat history
@@ -76,10 +76,11 @@ What you can do with it today.
 - **Ticket integration** — per-project ticket view aggregating GitHub Issues, GitLab Issues (via `glab`), and ClickUp tasks; OAuth connect in Settings → Integrations; search, copy link/ID, open in browser, and "Work on this" creates a worktree from the ticket, assigns it, and moves it to In Progress
 - **Worktree status badges** — `creating` and `pre_script` states are visible inline; a worktree whose pre-script fails is removed automatically (git worktree + branch + record) so no invalid worktrees linger
 - **Galaxy Map** — a zoomable map of every worktree you've visited, kept across removals; repeat visits to the same body show a ×N count, and the name pool spans 260+ real stars, planets, and galaxies so names rarely repeat
-- **VSCode-style git diff** — staged/unstaged groups with an inline CodeMirror merge view
+- **VSCode-style git diff** — staged/unstaged groups with an inline CodeMirror merge view; theme-aware red/green change highlights, gutter ticks, intra-line token marks, and accent-tinted collapsed-lines pills
 - **Diff toggles** — soft-wrap and collapse-unchanged-lines, remembered per user
 - **Per-file discard** — restore tracked files or delete untracked ones, with confirmation
 - **Reviewed markers** — mark changed files as reviewed; progress clears automatically on new edits
+- **GitLab MR parity** — review/check status badges and the Merge button work for GitLab MRs (via `glab mr view`), not just GitHub
 
 ### Editor
 
@@ -107,13 +108,13 @@ What you can do with it today.
 - **Default provider/model** — choose the agent and model that new chats start with
 - **Streaming responses** — real-time token streaming over WebSocket with coalescing
 - **Rich-text composer** — Tiptap input with markdown autoformat (lists, headings, bold, code blocks)
-- **Image and file paste** — paste screenshots or drag/drop files; paths are appended to the prompt and previews render even under the app's cross-origin-isolation headers
+- **Image and file paste** — paste screenshots or drag/drop files; paths are appended to the prompt and previews render correctly under cross-origin isolation (CORP header on upload previews)
 - **Voice dictation (STT)** — a mic icon in the composer transcribes speech to text using the browser's built-in Web Speech API (no server round-trip, no keys); shown only where the browser supports it
 - **Long message truncation** — long user messages and huge assistant replies collapse with show more/less
 - **Markdown rendering** — assistant output via `marked` + `DOMPurify`; syntax-highlighted code
 - **Thinking blocks** — extended-thinking events rendered as collapsible disclosures
-- **Tool activity rail** — every tool call + result the CLI emits is streamed to the chat as icon + name + command preview rows; provider stream errors surface inline instead of only in the terminal
-- **Live working indicator** — elapsed timer and a note when a model has no live token stream
+- **Tool activity rail** — every tool call + result the CLI emits (including opencode's `tool_use` events and stream errors) is streamed to the chat as icon + name + command preview rows
+- **Live working indicator** — elapsed timer and a note when a model has no live token stream; only the actively-running prompt shows "working" so earlier messages don't get stuck
 - **Chat forking** — fork a conversation from any point to explore a different direction
 - **Message retry** — re-trigger the latest user message or regenerate the last assistant turn
 - **Prompt revert** — ask AI to undo the file changes a specific prompt produced
@@ -177,10 +178,11 @@ What you can do with it today.
 - **Live index** — per-project file index with manual refresh
 - **Empty-query browse** — opens the first 50 indexed files before you type
 - **Delete files and folders from the tree** — right-click (or the hover ⋮ menu) any file or folder in the left-nav explorer to delete it, with a confirm prompt; folder deletes are recursive and gated behind an explicit confirmation
+- **Create new folder** — the Add-project folder picker lets you create a new folder inline while browsing
 
 ### Settings & Themes
 
-- **Tabbed modal** — Appearance, Prompts, Providers, Agents, Backups
+- **Tabbed modal** — Appearance, Prompts, Providers, Agents, Integrations, Backups
 - **Built-in themes** — Dark, Light, Solarized, Tokyo Night, plus a Material Dark design system
 - **Custom themes** — create and persist personal color themes, applied live across the app
 - **Fonts & size** — 10+ Google Font presets for UI/mono; global 12–28px size control
@@ -192,9 +194,10 @@ What you can do with it today.
 
 - **Memory indicator** — top-right pill showing app-attributable, BE (Rust RSS), and JS+DOM breakdown
 - **Popover breakdown** — click the pill for the per-category numbers
-- **Client memory-growth monitor** — samples heap/heap-limit/DOM/WS/listeners/whole-tab bytes + per-subsystem breakdown every 15s, correlates with backend RSS, and appends a compact JSON trend to `<state_dir>/logs/mem.log` (size-rotated) for after-the-fact leak debugging; warns on sustained climb
+- **Client memory-growth monitor** — samples heap/heap-limit/DOM/WS/listeners/whole-tab bytes + per-subsystem breakdown every 15s, correlates with backend RSS + child process RSS, and appends a compact JSON trend to `<state_dir>/logs/mem.log` (size-rotated) for after-the-fact leak debugging; warns on sustained climb
 - **Bounded retention** — windowed chat store (600 prompts / 400 events per prompt) + virtualized timeline
 - **Delta terminal streaming** — WS output instead of HTTP poll loops
+- **Instant chat switch** — switching chats paints from a per-chat view cache (no blank flash); the WS reconnect and queue poll are debounced so rapid switching doesn't storm
 
 ### Cross-Instance Sync
 

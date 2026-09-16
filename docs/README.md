@@ -9,6 +9,10 @@ Single source of truth. Root [`README.md`](../README.md) only points here.
   - [Backend modules](./architecture/backend.md)
   - [Frontend modules](./architecture/frontend.md)
   - [Cross-platform notes](./architecture/cross-platform.md)
+  - [Chat & queue routing](./architecture/chat-queue-routing.md)
+- Operations
+  - [Data safety & restore](./operations/data-safety.md)
+  - [Memory debugging (`mem.log`)](./operations/memory-debugging.md)
 - Testing
   - [Strategy](./testing/strategy.md)
   - [TDD policy](./testing/tdd-policy.md)
