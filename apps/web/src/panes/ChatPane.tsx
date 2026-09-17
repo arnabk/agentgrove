@@ -2596,6 +2596,12 @@ function PromptRow(props: {
   const NONSTREAM_AFTER = 3;
   const looksNonStreaming = () => waiting() && elapsed() >= NONSTREAM_AFTER;
 
+  const retryMessage = () => {
+    const evs = props.prompt.events;
+    const last = evs[evs.length - 1] as { type: string; message?: string } | undefined;
+    return last?.type === "retry" ? (last.message ?? "Retrying…") : null;
+  };
+
   // Format prompt creation time as a compact date+time string.
   const formatTime = (dateString: string) => {
     const d = new Date(dateString);
@@ -2775,7 +2781,9 @@ function PromptRow(props: {
                         style="animation-delay:320ms"
                       />
                     </span>
-                    <em class="ag-shimmer not-italic font-medium">{phrase()}…</em>
+                    <em class="ag-shimmer not-italic font-medium">
+                      {retryMessage() ?? `${phrase()}…`}
+                    </em>
                     <Show when={elapsed() >= 1}>
                       <span class="text-[11px] tabular-nums opacity-70">{elapsed()}s</span>
                     </Show>
@@ -3224,6 +3232,15 @@ function applyWsFrame(s: ChatStore, frame: WsFrame): void {
     // back to the events array (canonical, persisted text).
     delete s.liveTokens[promptId];
     delete s.liveThinking[promptId];
+  }
+  // Auto-retry: the BE detected a stale session, cleared it, and is
+  // re-dispatching with fresh context. Reset this prompt so the UI
+  // goes back to "working" and the retry's tokens stream in cleanly.
+  const evAny = ev as { type: string; message?: string };
+  if (evAny.type === "retry") {
+    delete s.liveTokens[promptId];
+    delete s.liveThinking[promptId];
+    prompt.events = [ev];
   }
 }
 

@@ -99,6 +99,7 @@ export type AgentEvent =
   | { type: "tool_result"; name: string; result: unknown; id?: string | null }
   | { type: "done"; result: string | null; cost_usd: number | null }
   | { type: "error"; message: string }
+  | { type: "retry"; message: string }
   | { type: "truncated"; dropped: number };
 
 /** Tagged response from the smart-send endpoint. `dispatched` means

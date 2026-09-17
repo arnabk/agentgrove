@@ -1766,6 +1766,17 @@ pub(crate) fn spawn_dispatch_task(
             .await;
             if stale_session && chat.session_id.is_some() {
                 clear_provider_session(&state, &chat_id).await;
+                // Notify the FE that we're auto-retrying so the UI can
+                // show feedback ("Retrying…") instead of going silent
+                // between the error and the fresh tokens arriving.
+                state.logbus.publish(
+                    &topic,
+                    serde_json::json!({
+                        "prompt_id": prompt.id,
+                        "event": { "type": "retry", "message": "Session expired — retrying with fresh context…" }
+                    })
+                    .to_string(),
+                );
                 let retry_prompt = {
                     let mut reg = state.chats.write().await;
                     reg.retry_prompt(&chat_id)
