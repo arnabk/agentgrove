@@ -3,7 +3,7 @@
 //!
 //! GitHub and GitLab ride their already-authenticated `gh` / `glab`
 //! CLIs (no token stored), mirroring how `prs.rs` fans out to forge
-//! CLIs. ClickUp is reached over its REST API using the OAuth token
+//! CLIs. ClickUp is reached over its REST API using the stored API key
 //! stored in [`agentgrove_store::IntegrationRepo`].
 
 use crate::state::AppState;
