@@ -21,6 +21,7 @@ export default function IntegrationsTab() {
   const [summaries, setSummaries] = createSignal<IntegrationSummary[]>([]);
   const [loading, setLoading] = createSignal(true);
   const [busy, setBusy] = createSignal<string | null>(null);
+  const [clickUpKey, setClickUpKey] = createSignal("");
 
   async function refresh() {
     try {
@@ -36,25 +37,24 @@ export default function IntegrationsTab() {
 
   const summaryFor = (provider: string) => summaries().find((s) => s.provider === provider);
 
-  function connect(provider: string) {
-    const url = `${api.baseUrl}/api/integrations/${encodeURIComponent(provider)}/auth`;
-    const popup = window.open(url, `ag-oauth-${provider}`, "width=800,height=600");
-    if (!popup) {
+  async function saveClickUpKey() {
+    const key = clickUpKey().trim();
+    if (!key) return;
+    setBusy("clickup");
+    try {
+      await api.saveClickUpKey(key);
+      setClickUpKey("");
+      pushToast({ title: "ClickUp connected", message: "", level: "info" });
+      await refresh();
+    } catch (e) {
       pushToast({
-        title: "Popup blocked",
-        message: "Allow popups for this site to connect the integration.",
+        title: "Connect failed",
+        message: e instanceof Error ? e.message : String(e),
         level: "error",
       });
-      return;
+    } finally {
+      setBusy(null);
     }
-    setBusy(provider);
-    const timer = setInterval(() => {
-      if (popup.closed) {
-        clearInterval(timer);
-        setBusy(null);
-        void refresh();
-      }
-    }, 500);
   }
 
   async function disconnect(provider: string, label: string) {
@@ -126,15 +126,31 @@ export default function IntegrationsTab() {
                 <Show
                   when={connected()}
                   fallback={
-                    <button
-                      type="button"
-                      class="ag-btn ag-btn-primary ag-btn-sm shrink-0"
-                      disabled={loading() || busy() === def.provider}
-                      onClick={() => connect(def.provider)}
-                      data-testid={`integration-connect-${def.provider}`}
+                    <form
+                      class="flex items-center gap-2 shrink-0"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void saveClickUpKey();
+                      }}
                     >
-                      {busy() === def.provider ? "…" : "Connect"}
-                    </button>
+                      <input
+                        type="password"
+                        class="ag-input w-44 !py-1.5"
+                        placeholder="Paste API key"
+                        value={clickUpKey()}
+                        onInput={(e) => setClickUpKey(e.currentTarget.value)}
+                        disabled={busy() === def.provider}
+                        data-testid={`integration-key-input-${def.provider}`}
+                      />
+                      <button
+                        type="submit"
+                        class="ag-btn ag-btn-primary ag-btn-sm shrink-0"
+                        disabled={loading() || busy() === def.provider || !clickUpKey().trim()}
+                        data-testid={`integration-connect-${def.provider}`}
+                      >
+                        {busy() === def.provider ? "…" : "Save"}
+                      </button>
+                    </form>
                   }
                 >
                   <button

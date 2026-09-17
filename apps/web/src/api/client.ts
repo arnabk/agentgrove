@@ -382,6 +382,11 @@ export const api = {
     ),
   // Integrations
   listIntegrations: () => req<IntegrationSummary[]>("/api/integrations"),
+  saveClickUpKey: (apiKey: string) =>
+    req<void>("/api/integrations/clickup/key", {
+      method: "POST",
+      body: JSON.stringify({ api_key: apiKey }),
+    }),
   disconnectIntegration: (provider: string) =>
     req<void>(`/api/integrations/${encodeURIComponent(provider)}`, { method: "DELETE" }),
   // Tickets (per-project)

@@ -53,15 +53,11 @@ pub fn build_router(state: AppState) -> Router {
         // Aggregate open PRs/MRs across every project (PR center).
         .route("/api/prs", get(prs::list_all))
         .route("/api/projects/:id/prs/:number/close", post(prs::close_pr))
-        // Ticket-integration OAuth (GitHub / ClickUp) + GitLab CLI probe.
+        // Ticket integrations: ClickUp API key store + GitHub/GitLab CLI probes.
         .route("/api/integrations", get(integrations::list_connections))
         .route(
-            "/api/integrations/:provider/auth",
-            get(integrations::auth_redirect),
-        )
-        .route(
-            "/api/integrations/:provider/callback",
-            get(integrations::auth_callback),
+            "/api/integrations/clickup/key",
+            post(integrations::save_clickup_key),
         )
         .route(
             "/api/integrations/:provider",
