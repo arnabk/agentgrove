@@ -1972,7 +1972,24 @@ function VirtualizedTimeline(props: {
       return props.prompts.length;
     },
     getScrollElement: () => scrollRef,
-    estimateSize: () => 120,
+    // Content-aware initial estimate. A flat 120px badly under-estimates
+    // assistant replies (often much taller), so the scroll thumb would
+    // shrink/grow as rows measured one by one on chat switch. Estimating
+    // from the streamed token length up front keeps getTotalSize() close
+    // to the final value, so the scroll bar stays stable during settling.
+    estimateSize: (i) => {
+      const p = props.prompts[i];
+      if (!p) return 120;
+      const events = p.events;
+      const hasAssistant = events.some((e) => e.type === "token" || e.type === "done");
+      const textLen = events
+        .filter((e) => e.type === "token")
+        .reduce((n, e) => n + (e.text?.length ?? 0), 0);
+      if (textLen > 4000) return 600;
+      if (textLen > 1000) return 400;
+      if (hasAssistant) return 250;
+      return 120;
+    },
     overscan: 6,
     // Use prompt id as the key when in bounds; the virtualizer may
     // call this with a stale index briefly after a refresh shrinks
@@ -2361,6 +2378,13 @@ function VirtualizedTimeline(props: {
        * Top/bottom padding spacers fake the height of the
        * un-rendered prefix / suffix so the scrollbar stays
        * proportional. */}
+      <div
+        class="sticky top-0 z-10 text-center py-0.5 text-[10px] text-fg-subtle bg-bg-1/80 backdrop-blur-sm"
+        data-testid="virtualization-indicator"
+      >
+        {virtualItems().length} / {props.prompts.length} rows rendered ·{" "}
+        {virtualizer.getTotalSize()}px total
+      </div>
       <div ref={(el) => (contentRef = el)} style={{ width: "100%" }}>
         <div style={{ height: `${topSpacer()}px` }} aria-hidden="true" />
         <For each={virtualItems()}>
@@ -2495,26 +2519,12 @@ function PromptRow(props: {
     text.length > 4000 || text.split("\n").length > 60;
   const [assistantExpanded, setAssistantExpanded] = createSignal(false);
 
-  // Ref to the assistant bubble element so we can keep its INNER scroll
-  // pinned to the bottom while it's in capped (`overflow-y-auto`) mode.
-  // A capped bubble otherwise shows the TOP of the reply; the user wants
-  // the newest content (the end of the answer) visible first, matching
-  // how the outer timeline sticks to the latest turn.
-  let assistantBubbleEl: HTMLDivElement | undefined;
+  // Whether a finished, over-long reply is collapsed to its capped window.
+  // The bubble hard-truncates with a gradient fade (no internal scroll);
+  // a toggle expands it. Never capped while streaming (isPending) — the
+  // user is watching it grow — nor once the user has expanded it.
   const isAssistantCapped = () =>
     !isPending() && assistantLenHeuristic(assistantText()) && !assistantExpanded();
-  createEffect(() => {
-    // Re-run whenever the capped state flips or the reply text grows
-    // (streaming reconcile), so a freshly-capped bubble lands at the end.
-    const capped = isAssistantCapped();
-    void assistantText();
-    if (!capped || !assistantBubbleEl) return;
-    const el = assistantBubbleEl;
-    // Defer to after layout so scrollHeight reflects the rendered markdown.
-    queueMicrotask(() => {
-      el.scrollTop = el.scrollHeight;
-    });
-  });
 
   // ---- "working…" liveliness while we wait for output ----
   // While a prompt is pending and no assistant text has streamed yet,
@@ -2610,16 +2620,20 @@ function PromptRow(props: {
       <div class="flex justify-end">
         <div class="relative group/bubble max-w-[80%]">
           <div
-            class="rounded-2xl rounded-br-md bg-accent text-[var(--ag-accent-fg)] px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] shadow-sm overflow-y-auto"
+            class="relative rounded-2xl rounded-br-md bg-accent text-[var(--ag-accent-fg)] px-4 py-2.5 text-[13.5px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] shadow-sm"
             classList={{
               // Cap the height of long messages so a pasted transcript
-              // can't take over the whole timeline; the bubble scrolls
-              // internally and a toggle expands it.
-              "max-h-[16rem]": userIsLong() && !userExpanded(),
+              // can't take over the whole timeline. The bubble hard-truncates
+              // (overflow-hidden) with a gradient fade — it never scrolls
+              // internally — and a toggle expands it.
+              "max-h-[16rem] overflow-hidden": userIsLong() && !userExpanded(),
             }}
             data-testid={`user-bubble-${props.prompt.id}`}
           >
             {props.prompt.content}
+            <Show when={userIsLong() && !userExpanded()}>
+              <div class="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-[var(--ag-accent)] to-transparent pointer-events-none rounded-b-2xl" />
+            </Show>
           </div>
           <div class="text-right mt-1 text-[10px] text-fg-subtle">
             {formatTime(props.prompt.created_at)}
@@ -2693,14 +2707,14 @@ function PromptRow(props: {
         <div class="flex justify-start">
           <div class="relative group/bubble w-full">
             <div
-              ref={(el) => (assistantBubbleEl = el)}
-              class="rounded-2xl rounded-bl-md bg-bg-1 border border-border text-[13.5px] leading-relaxed px-5 py-4 [overflow-wrap:anywhere]"
+              class="relative rounded-2xl rounded-bl-md bg-bg-1 border border-border text-[13.5px] leading-relaxed px-5 py-4 [overflow-wrap:anywhere]"
               classList={{
                 // Collapse very long finished replies to a capped,
-                // internally-scrolling window. Never while streaming
-                // (isPending) — the user is watching it grow — and never
-                // once the user has expanded it.
-                "max-h-[32rem] overflow-y-auto": isAssistantCapped(),
+                // hard-truncated window with a gradient fade. Never while
+                // streaming (isPending) — the user is watching it grow — and
+                // never once the user has expanded it. The bubble does not
+                // scroll internally; a toggle expands it.
+                "max-h-[32rem] overflow-hidden": isAssistantCapped(),
               }}
               data-testid={`assistant-bubble-${props.prompt.id}`}
             >
@@ -2775,6 +2789,9 @@ function PromptRow(props: {
                     This model returns the full reply at once — generating it now.
                   </span>
                 </div>
+              </Show>
+              <Show when={isAssistantCapped()}>
+                <div class="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-[var(--ag-bg-1)] to-transparent pointer-events-none rounded-b-2xl" />
               </Show>
             </div>
             <Show when={!isPending() && assistantLenHeuristic(assistantText())}>
