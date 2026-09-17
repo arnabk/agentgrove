@@ -38,7 +38,7 @@ pub struct AppState {
     /// aggregators). The store decrypts via a machine-bound key at
     /// `<state_dir>/secrets.key`.
     pub provider_secrets: ProviderSecretRepo,
-    /// Encrypted ticket-integration OAuth/CLI tokens (GitHub / GitLab /
+    /// Encrypted ticket-integration CLI/API-key tokens (GitHub / GitLab /
     /// ClickUp). Shares the same machine-bound keyring as
     /// `provider_secrets`.
     pub integration_store: Arc<IntegrationRepo>,
