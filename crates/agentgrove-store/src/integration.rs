@@ -1,4 +1,4 @@
-//! Ticket-integration OAuth/CLI token store.
+//! Ticket-integration CLI/API-key token store.
 //!
 //! Wraps the `integration_tokens` table and the [`SecretKeyring`] so
 //! handlers can read/write typed [`IntegrationToken`]s without touching
@@ -25,11 +25,11 @@ use thiserror::Error;
 pub struct IntegrationToken {
     /// Provider id (`"github"`, `"gitlab"`, `"clickup"`).
     pub provider: String,
-    /// Plaintext OAuth access token.
+    /// Plaintext access token (CLI session or API key).
     pub access_token: String,
     /// Plaintext refresh token, when the provider issues one.
     pub refresh_token: Option<String>,
-    /// OAuth token type (defaults to `"Bearer"`).
+    /// Token type (defaults to `"Bearer"`).
     pub token_type: Option<String>,
     /// Granted scope string.
     pub scope: Option<String>,
