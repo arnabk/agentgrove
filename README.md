@@ -71,9 +71,10 @@ What you can do with it today.
 - **Branch rename** — rename a worktree's git branch without leaving the app
 - **Remote drift badges** — ahead/behind/diverged counts on each worktree row; click behind to sync
 - **PR/MR badges** — see open PR/MR status, checks, review decision, and merge when ready
-- **PR Center** — per-project overlay listing open PRs/MRs, searchable by title/branch/author/number, with color-coded age, review, and check status; rows open on GitHub/GitLab
-- **Branch Center** — per-project overlay listing local branches, searchable by branch/commit subject/upstream, showing current branch, upstream tracking, and age
-- **Ticket integration** — per-project ticket view aggregating GitHub Issues, GitLab Issues (via `glab`), and ClickUp tasks; OAuth connect in Settings → Integrations; search, copy link/ID, open in browser, and "Work on this" creates a worktree from the ticket, assigns it, and moves it to In Progress
+- **PR Center** — per-project overlay listing open PRs/MRs, searchable by title/branch/author/number, with color-coded age, review, and check status; rows open on GitHub/GitLab; close PRs/MRs directly from the list with a confirmation prompt
+- **Branch Center** — per-project overlay listing local branches, searchable by branch/commit subject/upstream, showing current branch, upstream tracking, and age; delete branches directly from the list (with confirmation, current branch protected)
+- **Ticket integration** — per-project ticket view showing GitHub Issues and GitLab Issues (auto-detected from the git remote); search, copy link/ID, open in browser, and "Work on this" creates a worktree from the ticket, assigns it, and moves it to In Progress
+- **ClickUp panel** — a dedicated left-rail tab (alongside Projects / Database) showing all your ClickUp tasks globally; search, status/priority/label chips, and "Work on this" with a project picker to create a worktree in any repo; connect via API key in Settings → Integrations
 - **Worktree status badges** — `creating` and `pre_script` states are visible inline; a worktree whose pre-script fails is removed automatically (git worktree + branch + record) so no invalid worktrees linger
 - **Galaxy Map** — a zoomable map of every worktree you've visited, kept across removals; repeat visits to the same body show a ×N count, and the name pool spans 260+ real stars, planets, and galaxies so names rarely repeat
 - **VSCode-style git diff** — staged/unstaged groups with an inline CodeMirror merge view; theme-aware red/green change highlights, gutter ticks, intra-line token marks, and accent-tinted collapsed-lines pills
@@ -120,7 +121,7 @@ What you can do with it today.
 - **Prompt revert** — ask AI to undo the file changes a specific prompt produced
 - **Delete from point** — truncate the conversation from any prompt onward
 - **`/compact`** — summarize the conversation and start a fresh provider session in place; works across all CLI providers (Claude, opencode, Kimi)
-- **Session resume + recovery** — Claude `--resume`, opencode `--session` + `--dir`, Kimi `--session`; stale opencode sessions auto-recover and retry with recent context
+- **Session resume + recovery** — Claude `--resume`, opencode `--session` + `--dir`, Kimi `--session`; stale opencode sessions auto-recover and retry with recent context; the UI shows "Retrying with fresh context…" during auto-recovery instead of going silent
 - **Slash commands** — `/` menu with provider commands + user-defined prompt templates
 - **PR detection** — auto-detects GitHub PR URLs in agent output; shows a PR badge
 - **Auto-approve tools** — `--dangerously-skip-permissions` with per-chat override
@@ -195,7 +196,7 @@ What you can do with it today.
 - **Memory indicator** — top-right pill showing app-attributable, BE (Rust RSS), and JS+DOM breakdown
 - **Popover breakdown** — click the pill for the per-category numbers
 - **Client memory-growth monitor** — samples heap/heap-limit/DOM/WS/listeners/whole-tab bytes + per-subsystem breakdown every 15s, correlates with backend RSS + child process RSS, and appends a compact JSON trend to `<state_dir>/logs/mem.log` (size-rotated) for after-the-fact leak debugging; warns on sustained climb
-- **Bounded retention** — windowed chat store (600 prompts / 400 events per prompt) + virtualized timeline
+- **Bounded retention** — windowed chat store (600 prompts / 400 events per prompt) + virtualized timeline with a live indicator proving only visible rows are mounted (e.g. "8 / 50 rows rendered"); long messages truncate with a gradient fade instead of nested scroll bars
 - **Delta terminal streaming** — WS output instead of HTTP poll loops
 - **Instant chat switch** — switching chats paints from a per-chat view cache (no blank flash); the WS reconnect and queue poll are debounced so rapid switching doesn't storm
 
