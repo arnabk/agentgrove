@@ -1130,7 +1130,7 @@ export default function LeftRail() {
                                               });
                                               setRemoteStatusStore(
                                                 produce((s) => {
-                                                  if (s[w.id]?.pr) s[w.id]!.pr = undefined;
+                                                  if (s[w.id]?.pr) s[w.id]!.pr = null as never;
                                                 }),
                                               );
                                               fetchDrift(w.id);
