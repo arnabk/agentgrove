@@ -400,6 +400,13 @@ export const api = {
         body: JSON.stringify({ provider }),
       },
     ),
+  // ClickUp tasks (workspace-level, not repo-scoped)
+  listClickUpTasks: () => req<TicketRow[]>("/api/clickup/tasks"),
+  workOnClickUpTask: (taskId: string, projectId: string) =>
+    req<unknown>(`/api/clickup/tasks/${encodeURIComponent(taskId)}/work`, {
+      method: "POST",
+      body: JSON.stringify({ project_id: projectId }),
+    }),
   openWorktreeFolder: (worktreeId: string) =>
     req<void>(`/api/worktrees/${encodeURIComponent(worktreeId)}/open`, { method: "POST" }),
   createWorktree: (

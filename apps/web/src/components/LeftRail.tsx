@@ -48,15 +48,18 @@ import BranchCenterDialog from "./BranchCenterDialog";
 import TicketListDialog from "./TicketListDialog";
 import ProjectSettingsDialog from "./ProjectSettingsDialog";
 import DbSidebar from "./DbSidebar";
+import ClickUpPanel from "./ClickUpPanel";
 import Logo from "./Logo";
 
 /** Which view the left rail shows: the projects tree or the Database
  *  connection/table browser (VSCode activity-bar style). */
-type RailView = "projects" | "db";
+type RailView = "projects" | "db" | "clickup";
 const VIEW_LS_KEY = "ag-left-rail-view";
 
 function loadView(): RailView {
-  return localStorage.getItem(VIEW_LS_KEY) === "db" ? "db" : "projects";
+  const v = localStorage.getItem(VIEW_LS_KEY);
+  if (v === "db" || v === "clickup") return v;
+  return "projects";
 }
 
 /** Persisted set of expanded project ids — so multiple folders can stay
@@ -594,6 +597,15 @@ export default function LeftRail() {
         >
           Database
         </button>
+        <button
+          type="button"
+          class="ag-btn ag-btn-ghost ag-btn-sm"
+          classList={{ "!bg-accent-soft !text-accent": view() === "clickup" }}
+          onClick={() => setView("clickup")}
+          data-testid="rail-view-clickup"
+        >
+          ClickUp
+        </button>
       </div>
 
       <Show when={view() === "projects"}>
@@ -1077,7 +1089,13 @@ export default function LeftRail() {
                                   ↑{remoteStatus[w.id]!.ahead}
                                 </span>
                               </Show>
-                              <Show when={remoteStatus[w.id]?.pr && (remoteStatus[w.id]!.pr!.state === "open" || remoteStatus[w.id]!.pr!.state === "opened")}>
+                              <Show
+                                when={
+                                  remoteStatus[w.id]?.pr &&
+                                  (remoteStatus[w.id]!.pr!.state === "open" ||
+                                    remoteStatus[w.id]!.pr!.state === "opened")
+                                }
+                              >
                                 {(() => {
                                   const pr = remoteStatus[w.id]!.pr!;
                                   const label = pr.source === "glab" ? "MR" : "PR";
@@ -1440,6 +1458,10 @@ export default function LeftRail() {
 
       <Show when={view() === "db"}>
         <DbSidebar />
+      </Show>
+
+      <Show when={view() === "clickup"}>
+        <ClickUpPanel />
       </Show>
 
       {/* Resize handle: thin vertical strip on the right edge. Pointer

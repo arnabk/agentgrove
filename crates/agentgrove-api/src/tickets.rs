@@ -41,9 +41,11 @@ pub struct WorkOnTicketBody {
     pub base_ref: Option<String>,
 }
 
-/// `GET /api/projects/:id/tickets` — list open tickets for a project's
-/// forge. Errors from the provider degrade to an empty list (logged) so
-/// one offline/unauthenticated repo can't sink the view.
+/// `GET /api/projects/:id/tickets` — list open GitHub/GitLab issues for
+/// a project's forge (per-repo). ClickUp is workspace-level and lives on
+/// its own `/api/clickup/tasks` endpoint. Errors from the provider
+/// degrade to an empty list (logged) so one offline/unauthenticated repo
+/// can't sink the view.
 pub async fn list_tickets(
     State(state): State<AppState>,
     Path(project_id): Path<String>,
@@ -57,7 +59,7 @@ pub async fn list_tickets(
     })?;
 
     let forge = git::detect_forge(&project.root).await;
-    let mut rows = match forge.forge.as_str() {
+    let rows = match forge.forge.as_str() {
         "github" => list_github_issues_cli(&project.root).await,
         "gitlab" => list_gitlab_issues(&project.root).await,
         other => {
@@ -69,14 +71,81 @@ pub async fn list_tickets(
             Vec::new()
         }
     };
-    // Always append ClickUp tasks when connected, regardless of the git
-    // forge — ClickUp isn't git-aware so it can't be auto-detected from
-    // the remote. This gives an aggregated view (GitHub/GitLab issues +
-    // ClickUp tasks) in a single ticket list.
-    if let Some(tok) = load_token(&state, "clickup").await {
-        rows.extend(list_clickup_tasks(&tok).await);
-    }
     Ok(Json(rows))
+}
+
+/// `GET /api/clickup/tasks` — list the authenticated user's ClickUp tasks.
+/// Not scoped to any project (ClickUp is workspace-level, not repo-level).
+pub async fn list_clickup(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<TicketRow>>, (StatusCode, String)> {
+    let Some(tok) = load_token(&state, "clickup").await else {
+        return Ok(Json(Vec::new()));
+    };
+    Ok(Json(list_clickup_tasks(&tok).await))
+}
+
+/// Body for `POST /api/clickup/tasks/:task_id/work`.
+#[derive(Debug, Deserialize)]
+pub struct WorkOnClickUpBody {
+    pub project_id: String,
+}
+
+/// `POST /api/clickup/tasks/:task_id/work` — create a worktree in the
+/// chosen project for a ClickUp task.
+///
+/// ClickUp isn't repo-scoped, so the caller must pick which project the
+/// worktree lands in. The worktree is created via the shared
+/// [`worktrees::create`] flow; the provider mutation (assign + move to
+/// "In Progress") is best-effort and never fatal.
+pub async fn work_on_clickup(
+    State(state): State<AppState>,
+    Path(task_id): Path<String>,
+    Json(body): Json<WorkOnClickUpBody>,
+) -> Result<Json<WorktreeDto>, (StatusCode, String)> {
+    let project = state
+        .projects
+        .get(&body.project_id)
+        .await
+        .map_err(|e| match e {
+            agentgrove_store::ProjectError::NotFound(_) => (
+                StatusCode::NOT_FOUND,
+                format!("project {} not found", body.project_id),
+            ),
+            other => (StatusCode::INTERNAL_SERVER_ERROR, format!("db: {other}")),
+        })?;
+
+    let Some(tok) = load_token(&state, "clickup").await else {
+        return Err((StatusCode::BAD_REQUEST, "clickup not connected".into()));
+    };
+
+    // Find the task so we can build a descriptive branch slug.
+    let title = list_clickup_tasks(&tok)
+        .await
+        .into_iter()
+        .find(|t| t.id == task_id)
+        .map(|t| t.title)
+        .unwrap_or_default();
+
+    let branch = format!("ticket/{}-{}", task_id, slugify(&title));
+
+    let created = worktrees::create(
+        State(state.clone()),
+        Path(project.id.clone()),
+        Json(CreateWorktreeBody {
+            branch,
+            base_ref: "HEAD".to_owned(),
+            path: None,
+            pre_script: None,
+            post_script: None,
+        }),
+    )
+    .await?;
+
+    // Best-effort: assign to current user + move to "In Progress".
+    clickup_start_task(&task_id, &tok).await;
+
+    Ok(created)
 }
 
 /// `POST /api/projects/:id/tickets/:ticket_id/work` — create a worktree
