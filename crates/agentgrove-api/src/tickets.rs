@@ -57,24 +57,25 @@ pub async fn list_tickets(
     })?;
 
     let forge = git::detect_forge(&project.root).await;
-    let rows = match forge.forge.as_str() {
+    let mut rows = match forge.forge.as_str() {
         "github" => list_github_issues_cli(&project.root).await,
         "gitlab" => list_gitlab_issues(&project.root).await,
-        "clickup" => {
-            let Some(tok) = load_token(&state, "clickup").await else {
-                tracing::info!(
-                    project_id,
-                    "clickup not connected; returning empty ticket list"
-                );
-                return Ok(Json(Vec::new()));
-            };
-            list_clickup_tasks(&tok).await
-        }
         other => {
-            tracing::info!(project_id, forge = other, "no ticket provider for forge");
+            tracing::info!(
+                project_id,
+                forge = other,
+                "no git ticket provider for forge"
+            );
             Vec::new()
         }
     };
+    // Always append ClickUp tasks when connected, regardless of the git
+    // forge — ClickUp isn't git-aware so it can't be auto-detected from
+    // the remote. This gives an aggregated view (GitHub/GitLab issues +
+    // ClickUp tasks) in a single ticket list.
+    if let Some(tok) = load_token(&state, "clickup").await {
+        rows.extend(list_clickup_tasks(&tok).await);
+    }
     Ok(Json(rows))
 }
 
