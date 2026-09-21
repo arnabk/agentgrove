@@ -1077,7 +1077,7 @@ export default function LeftRail() {
                                   ↑{remoteStatus[w.id]!.ahead}
                                 </span>
                               </Show>
-                              <Show when={remoteStatus[w.id]?.pr}>
+                              <Show when={remoteStatus[w.id]?.pr && (remoteStatus[w.id]!.pr!.state === "open" || remoteStatus[w.id]!.pr!.state === "opened")}>
                                 {(() => {
                                   const pr = remoteStatus[w.id]!.pr!;
                                   const label = pr.source === "glab" ? "MR" : "PR";
@@ -1128,6 +1128,11 @@ export default function LeftRail() {
                                                 title: "Merge queued",
                                                 message: `${label} #${pr.number} — merging once checks pass.`,
                                               });
+                                              setRemoteStatusStore(
+                                                produce((s) => {
+                                                  if (s[w.id]?.pr) s[w.id]!.pr = undefined;
+                                                }),
+                                              );
                                               fetchDrift(w.id);
                                             } catch (e) {
                                               const msg =

@@ -171,6 +171,14 @@ async fn try_gh(cwd: &Path, branch: &str) -> Option<PrInfo> {
     }
     let prs: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).ok()?;
     let pr = prs.into_iter().next()?;
+    let state = pr
+        .get("state")
+        .and_then(|v| v.as_str())
+        .unwrap_or("open")
+        .to_lowercase();
+    if state != "open" && state != "opened" {
+        return None;
+    }
     let review_decision = pr
         .get("reviewDecision")
         .and_then(|v| v.as_str())
@@ -227,7 +235,10 @@ async fn try_glab(cwd: &Path, branch: &str) -> Option<PrInfo> {
         return None;
     }
     let mrs: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).ok()?;
-    let mr = mrs.into_iter().next()?;
+    let mr = mrs.into_iter().find(|m| {
+        let s = m.get("state").and_then(|v| v.as_str()).unwrap_or("");
+        s == "opened" || s == "open"
+    })?;
     let iid = mr.get("iid").or_else(|| mr.get("id"))?.as_u64()?;
     // `mr list` is shallow — it doesn't carry pipeline status, approval
     // state, or mergeability. Without those the FE's "Merge" button
