@@ -237,13 +237,33 @@ export default function LeftRail() {
   const isExpanded = (id: string) => Boolean(expanded[id]);
   function toggleExpanded(id: string) {
     setExpanded(
-      produce((e) => {
-        if (e[id]) delete e[id];
-        else e[id] = true;
+      produce((s) => {
+        if (s[id]) delete s[id];
+        else s[id] = true;
       }),
     );
     saveExpanded(expanded);
   }
+
+  // A worktree selected explicitly in the URL or by clicking its row
+  // needs its parent project open so its status/PR badges are visible.
+  // Do not apply this to project-root selection: collapsed projects must
+  // stay collapsed across refreshes.
+  function ensureExpanded(id: string) {
+    if (isExpanded(id)) return;
+    setExpanded(id, true);
+    saveExpanded(expanded);
+  }
+
+  // A worktree scope is an explicit navigation target. Open its parent
+  // so the selected worktree row can load and display its PR/MR status.
+  // Project-root navigation intentionally does not expand anything.
+  createEffect(() => {
+    const projectId = state.selectedProjectId;
+    const worktreeId = currentWorktreeId();
+    if (projectId && worktreeId) ensureExpanded(projectId);
+  });
+
   // Use a SolidJS store (not a plain signal) so reads like
   // `remoteStatus[w.id]?.diverged` inside <For> bodies get
   // fine-grained reactivity — a createSignal<Record> doesn't
