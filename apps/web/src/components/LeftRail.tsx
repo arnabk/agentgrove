@@ -255,13 +255,12 @@ export default function LeftRail() {
     saveExpanded(expanded);
   }
 
-  // A worktree scope is an explicit navigation target. Open its parent
-  // so the selected worktree row can load and display its PR/MR status.
-  // Project-root navigation intentionally does not expand anything.
-  createEffect(() => {
+  // Expand once for an initially worktree-scoped URL so its PR/MR
+  // status can load. Do not keep enforcing this reactively: after the
+  // user clicks the caret to collapse it, it must stay collapsed.
+  onMount(() => {
     const projectId = state.selectedProjectId;
-    const worktreeId = currentWorktreeId();
-    if (projectId && worktreeId) ensureExpanded(projectId);
+    if (projectId && currentWorktreeId()) ensureExpanded(projectId);
   });
 
   // Use a SolidJS store (not a plain signal) so reads like
