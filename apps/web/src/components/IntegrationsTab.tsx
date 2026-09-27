@@ -1,10 +1,5 @@
 import { For, Show, createSignal, onMount } from "solid-js";
-import {
-  api,
-  type ClickUpList,
-  type ClickUpOption,
-  type IntegrationSummary,
-} from "../api/client";
+import { api, type ClickUpList, type ClickUpOption, type IntegrationSummary } from "../api/client";
 import { confirm } from "./dialog";
 import { pushToast } from "./Toast";
 import MultiSelect from "./MultiSelect";
@@ -169,74 +164,74 @@ export default function IntegrationsTab() {
               data-testid={`integration-row-${def.provider}`}
             >
               <div class="flex items-center gap-3">
-              <span class="shrink-0 text-fg-muted text-2xl">{def.icon()}</span>
-              <div class="min-w-0 flex-1">
-                <h3 class="text-[13px] font-semibold tracking-tight">{def.label}</h3>
-                <p class="text-[11.5px] text-fg-subtle mt-0.5">
-                  <Show
-                    when={def.connectable}
-                    fallback={
-                      <Show when={connected()} fallback={`${def.cli} CLI not detected`}>
-                        via {def.cli} CLI
+                <span class="shrink-0 text-fg-muted text-2xl">{def.icon()}</span>
+                <div class="min-w-0 flex-1">
+                  <h3 class="text-[13px] font-semibold tracking-tight">{def.label}</h3>
+                  <p class="text-[11.5px] text-fg-subtle mt-0.5">
+                    <Show
+                      when={def.connectable}
+                      fallback={
+                        <Show when={connected()} fallback={`${def.cli} CLI not detected`}>
+                          via {def.cli} CLI
+                        </Show>
+                      }
+                    >
+                      <Show when={connected()} fallback="Not connected">
+                        Connected
+                        <Show when={s()?.user_name}> as @{s()!.user_name}</Show>
                       </Show>
+                    </Show>
+                  </p>
+                </div>
+                <span
+                  class="ag-chip text-[11px] shrink-0"
+                  classList={{ "ag-chip-accent": connected() }}
+                  data-testid={`integration-status-${def.provider}`}
+                >
+                  {connected() ? "connected" : def.connectable ? "off" : "cli"}
+                </span>
+                <Show when={def.connectable}>
+                  <Show
+                    when={connected()}
+                    fallback={
+                      <form
+                        class="flex items-center gap-2 shrink-0"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          void saveClickUpKey();
+                        }}
+                      >
+                        <input
+                          type="password"
+                          class="ag-input w-44 !py-1.5"
+                          placeholder="Paste API key"
+                          value={clickUpKey()}
+                          onInput={(e) => setClickUpKey(e.currentTarget.value)}
+                          disabled={busy() === def.provider}
+                          data-testid={`integration-key-input-${def.provider}`}
+                        />
+                        <button
+                          type="submit"
+                          class="ag-btn ag-btn-primary ag-btn-sm shrink-0"
+                          disabled={loading() || busy() === def.provider || !clickUpKey().trim()}
+                          data-testid={`integration-connect-${def.provider}`}
+                        >
+                          {busy() === def.provider ? "…" : "Save"}
+                        </button>
+                      </form>
                     }
                   >
-                    <Show when={connected()} fallback="Not connected">
-                      Connected
-                      <Show when={s()?.user_name}> as @{s()!.user_name}</Show>
-                    </Show>
-                  </Show>
-                </p>
-              </div>
-              <span
-                class="ag-chip text-[11px] shrink-0"
-                classList={{ "ag-chip-accent": connected() }}
-                data-testid={`integration-status-${def.provider}`}
-              >
-                {connected() ? "connected" : def.connectable ? "off" : "cli"}
-              </span>
-              <Show when={def.connectable}>
-                <Show
-                  when={connected()}
-                  fallback={
-                    <form
-                      class="flex items-center gap-2 shrink-0"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        void saveClickUpKey();
-                      }}
+                    <button
+                      type="button"
+                      class="ag-btn ag-btn-ghost ag-btn-sm shrink-0 text-danger"
+                      disabled={busy() === def.provider}
+                      onClick={() => void disconnect(def.provider, def.label)}
+                      data-testid={`integration-disconnect-${def.provider}`}
                     >
-                      <input
-                        type="password"
-                        class="ag-input w-44 !py-1.5"
-                        placeholder="Paste API key"
-                        value={clickUpKey()}
-                        onInput={(e) => setClickUpKey(e.currentTarget.value)}
-                        disabled={busy() === def.provider}
-                        data-testid={`integration-key-input-${def.provider}`}
-                      />
-                      <button
-                        type="submit"
-                        class="ag-btn ag-btn-primary ag-btn-sm shrink-0"
-                        disabled={loading() || busy() === def.provider || !clickUpKey().trim()}
-                        data-testid={`integration-connect-${def.provider}`}
-                      >
-                        {busy() === def.provider ? "…" : "Save"}
-                      </button>
-                    </form>
-                  }
-                >
-                  <button
-                    type="button"
-                    class="ag-btn ag-btn-ghost ag-btn-sm shrink-0 text-danger"
-                    disabled={busy() === def.provider}
-                    onClick={() => void disconnect(def.provider, def.label)}
-                    data-testid={`integration-disconnect-${def.provider}`}
-                  >
-                    {busy() === def.provider ? "…" : "Disconnect"}
-                  </button>
+                      {busy() === def.provider ? "…" : "Disconnect"}
+                    </button>
+                  </Show>
                 </Show>
-              </Show>
               </div>
 
               {/* ClickUp: filters picker (lists + assignee + statuses). */}
@@ -269,8 +264,8 @@ export default function IntegrationsTab() {
                   </button>
                   <Show when={filtersOpen()}>
                     <p class="text-[11px] text-fg-subtle mt-1">
-                      Scope the ClickUp panel by list, assignee and status. Leave everything empty to
-                      show the whole workspace.
+                      Scope the ClickUp panel by list, assignee and status. Leave everything empty
+                      to show the whole workspace.
                     </p>
                     <Show
                       when={!filtersLoading()}
