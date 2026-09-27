@@ -17,6 +17,17 @@ set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
+# Optional local secrets (Google OAuth etc.), kept out of git under
+# .data/. Sourced if present so the service starts in auth mode; absent
+# → auth stays disabled and the app behaves as before.
+if [ -f "$REPO/.data/auth.env" ]; then
+  echo "[service-run] sourcing .data/auth.env"
+  set -a
+  # shellcheck disable=SC1091
+  . "$REPO/.data/auth.env"
+  set +a
+fi
+
 BE_PORT="${AGENTGROVE_PORT:-4317}"
 FE_PORT="${AGENTGROVE_FE_PORT:-5173}"
 

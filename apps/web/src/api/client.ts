@@ -310,9 +310,39 @@ function baseUrl(): string {
   if (env) return env;
   if (typeof window !== "undefined") {
     const port = window.location.port;
-    if (port === "5173") return "http://127.0.0.1:4317";
+    // Use the SAME hostname the page is on (localhost vs 127.0.0.1) so
+    // auth cookies — set by the BE, keyed by host — round-trip. Hard-
+    // coding 127.0.0.1 while the page is on localhost split the cookie
+    // host and broke the OAuth state check.
+    if (port === "5173") return `http://${window.location.hostname}:4317`;
   }
   return "";
+}
+
+/** Full URL to the BE's Google-login entrypoint. */
+export function loginUrl(): string {
+  return `${baseUrl()}/api/auth/login`;
+}
+
+/** Navigate the browser to the BE login endpoint (which 302s to
+ *  Google). Guarded so a burst of 401s can't loop the location. */
+let redirecting = false;
+function redirectToLogin() {
+  if (redirecting || typeof window === "undefined") return;
+  redirecting = true;
+  window.location.href = loginUrl();
+}
+
+// Whether the BE requires auth. Set ONCE at boot from /api/auth/config.
+// Credentials are only sent when auth is on — sending `credentials:
+// "include"` against the auth-off BE (which returns
+// `Access-Control-Allow-Origin: *`) makes the browser block EVERY
+// cross-origin API call (wildcard-origin + credentials is illegal),
+// which blanked the whole app on refresh. Default false = today's
+// behavior.
+let authEnabled = false;
+export function setAuthEnabled(on: boolean) {
+  authEnabled = on;
 }
 
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
@@ -321,7 +351,16 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   if (opts.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(url, { ...opts, headers });
+  const init: RequestInit = { ...opts, headers };
+  if (authEnabled) init.credentials = "include";
+  const res = await fetch(url, init);
+  if (res.status === 401) {
+    // Session missing/expired while auth is enabled → bounce to Google
+    // login. `redirectToLogin` guards against loops and no-ops when the
+    // FE never learned auth is on.
+    redirectToLogin();
+    throw new ApiError(401, "unauthenticated");
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new ApiError(res.status, `${res.status} ${res.statusText}: ${text}`);
@@ -339,8 +378,34 @@ export interface VersionInfo {
   update_available: boolean;
 }
 
+export interface AuthConfig {
+  enabled: boolean;
+  provider: string;
+}
+
+export interface AuthMe {
+  authenticated: boolean;
+  auth_enabled: boolean;
+  email: string;
+  name?: string;
+  picture?: string;
+}
+
 export const api = {
   baseUrl,
+  loginUrl,
+  /** Whether the BE requires login. Public endpoint — never 401s. */
+  authConfig: () => req<AuthConfig>("/api/auth/config"),
+  /** Boot-time identity probe. Returns `null` on 401 instead of
+   *  redirecting, so the app can render a login SCREEN (with a button +
+   *  error messaging) rather than instantly bouncing to Google. */
+  async authProbe(): Promise<AuthMe | null> {
+    const res = await fetch(`${baseUrl()}/api/auth/me`, { credentials: "include" });
+    if (res.status === 401) return null;
+    if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+    return (await res.json()) as AuthMe;
+  },
+  authLogout: () => req<void>("/api/auth/logout", { method: "POST" }),
   async health() {
     return req<{ status: string; version: string }>("/health");
   },

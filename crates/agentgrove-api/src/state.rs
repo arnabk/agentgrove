@@ -98,6 +98,15 @@ pub struct AppState {
     /// across every space. Extra API calls, so a long TTL keeps it
     /// mostly from cache. Invalidated on disconnect / key change.
     pub clickup_statuses_cache: TtlCache<Vec<crate::tickets::ClickUpOption>>,
+    /// Google OAuth config, `Some` only when the required env vars are
+    /// set (see [`crate::auth::AuthConfig::from_env`]). `None` = auth
+    /// disabled → the server behaves exactly as before (loopback,
+    /// trusts the host, no login).
+    pub auth: Option<Arc<crate::auth::AuthConfig>>,
+    /// Machine-bound keyring, reused to AEAD-seal the stateless session
+    /// cookie (no session table — the cookie IS the session). Shares the
+    /// same key as `provider_secrets` / `integration_store`.
+    pub keyring: SecretKeyring,
 }
 
 /// A time-to-live cache slot: the cached value plus the instant it was
@@ -124,7 +133,11 @@ impl AppState {
         // and let us regenerate).
         let keyring = SecretKeyring::open(&state_dir).expect("open secrets keyring");
         let provider_secrets = ProviderSecretRepo::new(db.clone(), keyring.clone());
-        let integration_store = Arc::new(IntegrationRepo::new(db.clone(), keyring));
+        let integration_store = Arc::new(IntegrationRepo::new(db.clone(), keyring.clone()));
+        let auth = crate::auth::AuthConfig::from_env().map(Arc::new);
+        if auth.is_some() {
+            tracing::info!("google auth enabled");
+        }
         Self {
             state_dir: Arc::new(state_dir),
             db,
@@ -147,6 +160,8 @@ impl AppState {
             file_index: crate::file_index::FileIndex::new(),
             version_cache: Arc::new(Mutex::new(None)),
             clickup_cache: Arc::new(Mutex::new(None)),
+            auth,
+            keyring,
             clickup_lists_cache: Arc::new(Mutex::new(None)),
             clickup_members_cache: Arc::new(Mutex::new(None)),
             clickup_statuses_cache: Arc::new(Mutex::new(None)),

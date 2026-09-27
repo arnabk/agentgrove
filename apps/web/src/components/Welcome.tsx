@@ -67,7 +67,7 @@ export default function Welcome() {
 
           <a
             class="text-left rounded-xl border border-border bg-bg-1 p-5 hover:border-border-strong hover:bg-bg-2 transition-colors group"
-            href="https://github.com/agentgrove/agentgrove"
+            href="https://github.com/arnabk/agentgrove/tree/main/docs"
             target="_blank"
             rel="noreferrer"
             data-testid="welcome-docs"
@@ -99,9 +99,9 @@ export default function Welcome() {
             <span class="ag-kbd">⌘</span> + <span class="ag-kbd">,</span>
             <span class="ml-2">Open settings</span>
           </button>
-          <div class="opacity-60">
-            <span class="ag-kbd">⌘</span> + <span class="ag-kbd">K</span>
-            <span class="ml-2">Command palette (coming soon)</span>
+          <div>
+            <span class="ag-kbd">⌘</span> + <span class="ag-kbd">P</span>
+            <span class="ml-2">Command palette (fuzzy file finder)</span>
           </div>
         </div>
 

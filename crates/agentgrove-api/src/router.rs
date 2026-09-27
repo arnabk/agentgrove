@@ -1,14 +1,15 @@
 //! Axum router.
 
 use crate::{
-    backups, branch_center, branches, chats, db, diag, editor, files, fs as fsapi, git as gitapi,
+    auth, backups, branch_center, branches, chats, db, diag, editor, files, fs as fsapi,
+    git as gitapi,
     health::{health, version},
     integrations, layout, notes, open, projects, providers, prs, queue, scratchpad, settings,
     state::AppState,
     team_chat, terminal, themes, tickets, uploads, worktrees, ws,
 };
 use axum::{
-    http::Method,
+    http::{header, HeaderValue, Method},
     routing::{delete, get, post, put},
     Router,
 };
@@ -19,6 +20,13 @@ pub fn build_router(state: AppState) -> Router {
     let api = Router::new()
         .route("/health", get(health))
         .route("/api/version", get(version))
+        // Auth (Google OAuth). All public — the guard allowlists
+        // `/api/auth/*` so login can happen before a session exists.
+        .route("/api/auth/config", get(auth::config))
+        .route("/api/auth/me", get(auth::me))
+        .route("/api/auth/login", get(auth::login))
+        .route("/api/auth/callback", get(auth::callback))
+        .route("/api/auth/logout", post(auth::logout))
         .route("/api/db/info", get(db::info))
         .route("/api/db/test", post(db::test))
         .route("/api/db/databases", get(db::databases))
@@ -272,19 +280,55 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/uploads/:id/raw", get(uploads::raw));
 
-    let cors = CorsLayer::new()
-        .allow_methods([
-            Method::GET,
-            Method::POST,
-            Method::PUT,
-            Method::PATCH,
-            Method::DELETE,
-            Method::OPTIONS,
-        ])
-        .allow_headers(Any)
-        .allow_origin(Any);
+    let methods = [
+        Method::GET,
+        Method::POST,
+        Method::PUT,
+        Method::PATCH,
+        Method::DELETE,
+        Method::OPTIONS,
+    ];
+    // With auth ON the browser must send the session cookie
+    // cross-origin, which requires `allow_credentials(true)` + a
+    // CONCRETE origin (the spec forbids credentials with `*`). With
+    // auth OFF we keep the permissive wildcard the app has always used.
+    let cors = match state.auth.as_ref() {
+        Some(cfg) => {
+            // With credentials the CORS spec forbids `*` for BOTH origin
+            // and headers. Allow the configured public origin PLUS the
+            // localhost dev origins, so the app works whether it's hit
+            // via the public URL or a local `pnpm dev` (5173) / direct
+            // BE (4317). Unparseable entries are skipped.
+            let origins: Vec<HeaderValue> = [
+                cfg.public_url.as_str(),
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+                "http://localhost:4317",
+                "http://127.0.0.1:4317",
+            ]
+            .iter()
+            .filter_map(|o| o.parse::<HeaderValue>().ok())
+            .collect();
+            CorsLayer::new()
+                .allow_methods(methods)
+                .allow_headers([header::CONTENT_TYPE, header::ACCEPT])
+                .allow_credentials(true)
+                .allow_origin(origins)
+        }
+        None => CorsLayer::new()
+            .allow_methods(methods)
+            .allow_headers(Any)
+            .allow_origin(Any),
+    };
 
-    let router = api.layer(cors).with_state(state);
+    // Session guard runs BEFORE handlers. It's a no-op passthrough when
+    // auth is disabled (checked inside), so wiring it unconditionally
+    // keeps the router shape identical in both modes.
+    let guarded = api.layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        auth::guard,
+    ));
+    let router = guarded.layer(cors).with_state(state);
 
     // Optional: serve a static FE bundle from `AGENTGROVE_STATIC_DIR`.
     // When set, every request that doesn't match an API / WS route

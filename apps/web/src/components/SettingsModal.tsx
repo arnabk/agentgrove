@@ -1,6 +1,12 @@
 import { For, Show, createEffect, createSignal, createMemo, onCleanup, onMount } from "solid-js";
 import { produce } from "solid-js/store";
-import { api, type PromptTemplate, type ProviderDescriptor, type Theme } from "../api/client";
+import {
+  api,
+  type AuthMe,
+  type PromptTemplate,
+  type ProviderDescriptor,
+  type Theme,
+} from "../api/client";
 import {
   DEFAULT_MONO_FONT,
   DEFAULT_UI_FONT,
@@ -42,6 +48,23 @@ const TABS: { id: TabId; label: string }[] = [
 
 export default function SettingsModal() {
   const [tab, setTab] = createSignal<TabId>("appearance");
+  // Signed-in identity (only meaningful when BE auth is enabled). Probed
+  // when the modal opens so the footer can show who you are + Sign out.
+  const [authMe, setAuthMe] = createSignal<AuthMe | null>(null);
+  createEffect(() => {
+    if (!settingsOpen()) return;
+    void api
+      .authProbe()
+      .then((m) => setAuthMe(m))
+      .catch(() => setAuthMe(null));
+  });
+  async function signOut() {
+    try {
+      await api.authLogout();
+    } finally {
+      window.location.href = api.loginUrl();
+    }
+  }
 
   function onKey(e: KeyboardEvent) {
     if (e.key === "Escape") setSettingsOpen(false);
@@ -128,13 +151,27 @@ export default function SettingsModal() {
                 </span>
               </Show>
             </div>
-            <button
-              class="ag-btn ag-btn-primary"
-              onClick={() => setSettingsOpen(false)}
-              data-testid="settings-done"
-            >
-              Done
-            </button>
+            <div class="flex items-center gap-3">
+              <Show when={authMe()?.auth_enabled && authMe()?.authenticated}>
+                <span class="text-[11px] text-fg-subtle" data-testid="settings-signed-in">
+                  {authMe()?.email}
+                </span>
+                <button
+                  class="ag-btn ag-btn-ghost ag-btn-sm"
+                  onClick={() => void signOut()}
+                  data-testid="settings-signout"
+                >
+                  Sign out
+                </button>
+              </Show>
+              <button
+                class="ag-btn ag-btn-primary"
+                onClick={() => setSettingsOpen(false)}
+                data-testid="settings-done"
+              >
+                Done
+              </button>
+            </div>
           </footer>
         </div>
       </div>
