@@ -55,6 +55,12 @@ export default function MultiSelect(props: MultiSelectProps) {
 
   function onTriggerKey(e: KeyboardEvent) {
     if (props.disabled) return;
+    // While the menu is open, Enter/Space are owned by onMenuKey (they
+    // toggle the active option and keep the menu open for multi-pick).
+    // Only the trigger's *closed* state should open it; otherwise this
+    // handler and the document keydown listener both fire on the same
+    // Enter — toggling a value AND immediately closing the menu.
+    if (open()) return;
     if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
       e.preventDefault();
       toggleMenu();
