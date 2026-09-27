@@ -74,7 +74,8 @@ What you can do with it today.
 - **PR Center** — per-project overlay listing open PRs/MRs, searchable by title/branch/author/number, with color-coded age, review, and check status; rows open on GitHub/GitLab; close PRs/MRs directly from the list with a confirmation prompt
 - **Branch Center** — per-project overlay listing local branches, searchable by branch/commit subject/upstream, showing current branch, upstream tracking, and age; delete branches directly from the list (with confirmation, current branch protected)
 - **Ticket integration** — per-project ticket view showing GitHub Issues and GitLab Issues (auto-detected from the git remote); search, copy link/ID, open in browser, and "Work on this" creates a worktree from the ticket, assigns it, and moves it to In Progress
-- **ClickUp panel** — a dedicated left-rail tab (alongside Projects / Database) showing all your ClickUp tasks globally; search, status/priority/label chips, and "Work on this" with a project picker to create a worktree in any repo; connect via API key in Settings → Integrations
+- **ClickUp panel** — a dedicated left-rail tab (alongside Projects / Database) showing all your ClickUp tasks globally; search, status/priority/label chips, lazy-loaded rows (20 at a time, infinite scroll), and "Work on this" opens a modal project picker to create a worktree in any repo; connect via API key in Settings → Integrations
+- **ClickUp filters** — scope the panel by list, assignee, and status from Settings → Integrations → Filters using modern multi-select dropdowns; multi-value matching (a task in several lists or with several assignees still matches), the full task feed is paginated (not just the first 100), and lists/members/statuses/tasks are TTL-cached to stay under ClickUp's rate limit
 - **Worktree status badges** — `creating` and `pre_script` states are visible inline; a worktree whose pre-script fails is removed automatically (git worktree + branch + record) so no invalid worktrees linger
 - **Galaxy Map** — a zoomable map of every worktree you've visited, kept across removals; repeat visits to the same body show a ×N count, and the name pool spans 260+ real stars, planets, and galaxies so names rarely repeat
 - **VSCode-style git diff** — staged/unstaged groups with an inline CodeMirror merge view; theme-aware red/green change highlights, gutter ticks, intra-line token marks, and accent-tinted collapsed-lines pills
@@ -103,7 +104,7 @@ What you can do with it today.
 
 ### AI Chat
 
-- **Multi-provider** — Claude, opencode, and Kimi via CLI subprocess passthrough (user-authenticated)
+- **Multi-provider** — Claude, opencode, Kimi, and Codex (OpenAI `codex exec`) via CLI subprocess passthrough (user-authenticated)
 - **Live model discovery** — models fetched live from providers with cache + manual refresh
 - **Per-chat settings** — model, effort (thinking level), and slash commands configurable per chat
 - **Default provider/model** — choose the agent and model that new chats start with
@@ -120,8 +121,8 @@ What you can do with it today.
 - **Message retry** — re-trigger the latest user message or regenerate the last assistant turn
 - **Prompt revert** — ask AI to undo the file changes a specific prompt produced
 - **Delete from point** — truncate the conversation from any prompt onward
-- **`/compact`** — summarize the conversation and start a fresh provider session in place; works across all CLI providers (Claude, opencode, Kimi)
-- **Session resume + recovery** — Claude `--resume`, opencode `--session` + `--dir`, Kimi `--session`; stale opencode sessions auto-recover and retry with recent context; the UI shows "Retrying with fresh context…" during auto-recovery instead of going silent
+- **`/compact`** — summarize the conversation and start a fresh provider session in place; works across all CLI providers (Claude, opencode, Kimi, Codex)
+- **Session resume + recovery** — Claude `--resume`, opencode `--session` + `--dir`, Kimi `--session`, Codex `exec resume`; stale opencode sessions auto-recover and retry with recent context; the UI shows "Retrying with fresh context…" during auto-recovery instead of going silent
 - **Slash commands** — `/` menu with provider commands + user-defined prompt templates
 - **PR detection** — auto-detects GitHub PR URLs in agent output; shows a PR badge
 - **Auto-approve tools** — `--dangerously-skip-permissions` with per-chat override

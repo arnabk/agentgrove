@@ -59,9 +59,7 @@ impl ProviderDto {
                 "https://github.com/opencode-ai/opencode#install"
             }
             agentgrove_agents::ProviderId::Kimi => "https://moonshotai.github.io/kimi-cli/",
-            agentgrove_agents::ProviderId::Codex => {
-                "https://github.com/openai/codex#installation"
-            }
+            agentgrove_agents::ProviderId::Codex => "https://github.com/openai/codex#installation",
         };
         Self {
             id: d.id.as_str().to_string(),

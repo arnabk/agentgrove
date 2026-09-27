@@ -125,7 +125,10 @@ fn parse_models(text: &str) -> Vec<String> {
                 .filter(|m| {
                     // Default to visible when the field is absent so a
                     // future shape drop doesn't hide everything.
-                    m.get("visibility").and_then(|x| x.as_str()).unwrap_or("list") != "hide"
+                    m.get("visibility")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("list")
+                        != "hide"
                 })
                 .filter_map(|m| m.get("slug").and_then(|x| x.as_str()).map(String::from))
                 .collect()
@@ -290,7 +293,15 @@ impl AgentProvider for CodexProvider {
                 let tail = stderr_lines
                     .lock()
                     .ok()
-                    .map(|g| g.iter().rev().take(4).rev().cloned().collect::<Vec<_>>().join(" "))
+                    .map(|g| {
+                        g.iter()
+                            .rev()
+                            .take(4)
+                            .rev()
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
                     .filter(|s| !s.is_empty());
                 let msg = match tail {
                     Some(s) => format!("codex failed: {}", s.chars().take(300).collect::<String>()),
@@ -428,7 +439,10 @@ mod tests {
     #[test]
     fn thread_started_becomes_session_start() {
         let mut n = fresh();
-        let evs = translate(&json!({"type":"thread.started","thread_id":"abc-123"}), &mut n);
+        let evs = translate(
+            &json!({"type":"thread.started","thread_id":"abc-123"}),
+            &mut n,
+        );
         assert_eq!(
             evs,
             vec![AgentEvent::SessionStart {
@@ -531,7 +545,10 @@ mod tests {
 
     #[test]
     fn version_string_takes_last_token() {
-        assert_eq!("codex-cli 0.146.1".split_whitespace().next_back(), Some("0.146.1"));
+        assert_eq!(
+            "codex-cli 0.146.1".split_whitespace().next_back(),
+            Some("0.146.1")
+        );
     }
 
     #[test]
@@ -544,7 +561,10 @@ mod tests {
         ]}"#;
         // gpt-reserve hidden; the no-slug entry dropped; missing
         // visibility defaults to visible.
-        assert_eq!(parse_models(text), vec!["gpt-5.6-sol".to_string(), "gpt-5.5".to_string()]);
+        assert_eq!(
+            parse_models(text),
+            vec!["gpt-5.6-sol".to_string(), "gpt-5.5".to_string()]
+        );
         assert!(parse_models("not json").is_empty());
         assert!(parse_models("{}").is_empty());
     }

@@ -528,15 +528,27 @@ async fn gitlab_start_issue(cwd: &FsPath, iid: &str) {
 fn map_clickup_task(it: &serde_json::Value) -> TicketRow {
     TicketRow {
         provider: "clickup".into(),
-        id: it.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
-        title: it.get("name").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+        id: it
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        title: it
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
         status: it
             .get("status")
             .and_then(|s| s.get("status"))
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string(),
-        url: it.get("url").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+        url: it
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
         labels: Vec::new(),
         assignee: it
             .get("assignees")
@@ -550,8 +562,14 @@ fn map_clickup_task(it: &serde_json::Value) -> TicketRow {
             .and_then(|c| c.get("username"))
             .and_then(|v| v.as_str())
             .map(String::from),
-        created_at: it.get("date_created").and_then(|v| v.as_str()).map(String::from),
-        updated_at: it.get("date_updated").and_then(|v| v.as_str()).map(String::from),
+        created_at: it
+            .get("date_created")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        updated_at: it
+            .get("date_updated")
+            .and_then(|v| v.as_str())
+            .map(String::from),
         priority: it
             .get("priority")
             .and_then(|p| p.get("priority"))
@@ -756,9 +774,17 @@ pub async fn list_clickup_lists(
         &format!("https://api.clickup.com/api/v2/team/{team_id}/space"),
     )
     .await;
-    for space in spaces.get("spaces").and_then(|v| v.as_array()).into_iter().flatten() {
+    for space in spaces
+        .get("spaces")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+    {
         let space_id = space.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-        let space_name = space.get("name").and_then(|v| v.as_str()).unwrap_or("Space");
+        let space_name = space
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Space");
 
         // Folderless lists.
         let fl = get_json(
@@ -767,10 +793,18 @@ pub async fn list_clickup_lists(
             &format!("https://api.clickup.com/api/v2/space/{space_id}/list"),
         )
         .await;
-        for l in fl.get("lists").and_then(|v| v.as_array()).into_iter().flatten() {
+        for l in fl
+            .get("lists")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+        {
             if let Some(id) = l.get("id").and_then(|v| v.as_str()) {
                 let name = l.get("name").and_then(|v| v.as_str()).unwrap_or("List");
-                out.push(ClickUpList { id: id.into(), path: format!("{space_name} / {name}") });
+                out.push(ClickUpList {
+                    id: id.into(),
+                    path: format!("{space_name} / {name}"),
+                });
             }
         }
 
@@ -781,9 +815,19 @@ pub async fn list_clickup_lists(
             &format!("https://api.clickup.com/api/v2/space/{space_id}/folder"),
         )
         .await;
-        for f in folders.get("folders").and_then(|v| v.as_array()).into_iter().flatten() {
+        for f in folders
+            .get("folders")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+        {
             let folder_name = f.get("name").and_then(|v| v.as_str()).unwrap_or("Folder");
-            for l in f.get("lists").and_then(|v| v.as_array()).into_iter().flatten() {
+            for l in f
+                .get("lists")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+            {
                 if let Some(id) = l.get("id").and_then(|v| v.as_str()) {
                     let name = l.get("name").and_then(|v| v.as_str()).unwrap_or("List");
                     out.push(ClickUpList {
@@ -870,9 +914,21 @@ pub async fn put_clickup_filters(
     };
     // Normalize: drop blanks so an all-empty config stores as NULL scope.
     let filters = ClickUpFilters {
-        lists: body.lists.into_iter().filter(|s| !s.trim().is_empty()).collect(),
-        assignees: body.assignees.into_iter().filter(|s| !s.trim().is_empty()).collect(),
-        statuses: body.statuses.into_iter().filter(|s| !s.trim().is_empty()).collect(),
+        lists: body
+            .lists
+            .into_iter()
+            .filter(|s| !s.trim().is_empty())
+            .collect(),
+        assignees: body
+            .assignees
+            .into_iter()
+            .filter(|s| !s.trim().is_empty())
+            .collect(),
+        statuses: body
+            .statuses
+            .into_iter()
+            .filter(|s| !s.trim().is_empty())
+            .collect(),
     };
     let is_empty =
         filters.lists.is_empty() && filters.assignees.is_empty() && filters.statuses.is_empty();
@@ -932,7 +988,10 @@ pub async fn list_clickup_members(
             arr.iter()
                 .filter_map(|m| {
                     let u = m.get("user")?;
-                    let id = u.get("id").and_then(|v| v.as_i64()).map(|n| n.to_string())?;
+                    let id = u
+                        .get("id")
+                        .and_then(|v| v.as_i64())
+                        .map(|n| n.to_string())?;
                     let label = u
                         .get("username")
                         .and_then(|v| v.as_str())
@@ -990,10 +1049,18 @@ pub async fn list_clickup_statuses(
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     let mut add_statuses = |node: &serde_json::Value| {
-        for s in node.get("statuses").and_then(|v| v.as_array()).into_iter().flatten() {
+        for s in node
+            .get("statuses")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+        {
             if let Some(name) = s.get("status").and_then(|v| v.as_str()) {
                 if seen.insert(name.to_ascii_lowercase()) {
-                    out.push(ClickUpOption { value: name.to_string(), label: name.to_string() });
+                    out.push(ClickUpOption {
+                        value: name.to_string(),
+                        label: name.to_string(),
+                    });
                 }
             }
         }
@@ -1005,7 +1072,12 @@ pub async fn list_clickup_statuses(
         &format!("https://api.clickup.com/api/v2/team/{team_id}/space"),
     )
     .await;
-    for space in spaces.get("spaces").and_then(|v| v.as_array()).into_iter().flatten() {
+    for space in spaces
+        .get("spaces")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+    {
         add_statuses(space);
         let space_id = space.get("id").and_then(|v| v.as_str()).unwrap_or_default();
 
@@ -1016,7 +1088,12 @@ pub async fn list_clickup_statuses(
             &format!("https://api.clickup.com/api/v2/space/{space_id}/list"),
         )
         .await;
-        for l in fl.get("lists").and_then(|v| v.as_array()).into_iter().flatten() {
+        for l in fl
+            .get("lists")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+        {
             add_statuses(l);
         }
 
@@ -1027,9 +1104,19 @@ pub async fn list_clickup_statuses(
             &format!("https://api.clickup.com/api/v2/space/{space_id}/folder"),
         )
         .await;
-        for f in folders.get("folders").and_then(|v| v.as_array()).into_iter().flatten() {
+        for f in folders
+            .get("folders")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+        {
             add_statuses(f);
-            for l in f.get("lists").and_then(|v| v.as_array()).into_iter().flatten() {
+            for l in f
+                .get("lists")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+            {
                 add_statuses(l);
             }
         }
