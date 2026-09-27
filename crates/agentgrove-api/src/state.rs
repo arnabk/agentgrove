@@ -79,26 +79,32 @@ pub struct AppState {
     /// `POST /api/projects/:id/files/reindex` to force a re-scan.
     pub file_index: crate::file_index::FileIndex,
     /// Cached latest-version check from GitHub, refreshed on a TTL.
-    pub version_cache: Arc<Mutex<Option<(crate::health::VersionInfo, Instant)>>>,
+    pub version_cache: TtlCache<crate::health::VersionInfo>,
     /// Cached ClickUp task list, refreshed on a TTL to stay under the
     /// provider's rate limit (~100 req/min/token). Keyed only by time —
     /// there's a single stored token. Invalidated after a task mutation
     /// (`clickup_start_task`) so a moved task doesn't read stale.
-    pub clickup_cache: Arc<Mutex<Option<(Vec<crate::tickets::TicketRow>, Instant)>>>,
+    pub clickup_cache: TtlCache<Vec<crate::tickets::TicketRow>>,
     /// Cached ClickUp List catalog (Settings picker). Lists change
     /// rarely, so this uses a longer TTL than the task cache. Walking
     /// team→spaces→folders→lists is several requests, so caching it
     /// keeps the picker cheap. Invalidated on disconnect.
-    pub clickup_lists_cache: Arc<Mutex<Option<(Vec<crate::tickets::ClickUpList>, Instant)>>>,
+    pub clickup_lists_cache: TtlCache<Vec<crate::tickets::ClickUpList>>,
     /// Cached ClickUp workspace members (assignee filter picker). Long
     /// TTL — membership changes rarely. Invalidated on disconnect / key
     /// change.
-    pub clickup_members_cache: Arc<Mutex<Option<(Vec<crate::tickets::ClickUpOption>, Instant)>>>,
+    pub clickup_members_cache: TtlCache<Vec<crate::tickets::ClickUpOption>>,
     /// Cached ClickUp status catalog (status filter picker), collected
     /// across every space. Extra API calls, so a long TTL keeps it
     /// mostly from cache. Invalidated on disconnect / key change.
-    pub clickup_statuses_cache: Arc<Mutex<Option<(Vec<crate::tickets::ClickUpOption>, Instant)>>>,
+    pub clickup_statuses_cache: TtlCache<Vec<crate::tickets::ClickUpOption>>,
 }
+
+/// A time-to-live cache slot: the cached value plus the instant it was
+/// stored, behind a shared async mutex. `None` = empty/invalidated.
+/// Aliased to keep the [`AppState`] field types readable (and under
+/// clippy's `type_complexity` threshold).
+pub type TtlCache<T> = Arc<Mutex<Option<(T, Instant)>>>;
 
 impl AppState {
     /// Construct fresh state. Auth is not part of the model — the server
