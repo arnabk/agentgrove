@@ -1882,6 +1882,7 @@ async fn dispatch_via_provider(
     cwd: std::path::PathBuf,
 ) -> bool {
     use agentgrove_agents::SpawnOptions;
+    let provider_id = provider.id().as_str();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
     let mut stale_session = false;
     // Effective auto-approve = global default from settings.json
@@ -2083,7 +2084,7 @@ async fn dispatch_via_provider(
                         }
                     }
                     if let AgentEvent::Error { message } = &other {
-                        stale_session = message.contains("Session not found");
+                        stale_session = is_recoverable_session_error(provider_id, message);
                     }
                     if matches!(other, AgentEvent::Done { .. } | AgentEvent::Error { .. }) {
                         saw_terminal = true;
@@ -2281,6 +2282,12 @@ fn is_compact_command(body: &str) -> bool {
     body.trim().eq_ignore_ascii_case("/compact")
 }
 
+fn is_recoverable_session_error(provider: &str, message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("session not found")
+        || (provider == "opencode" && lower.contains("unexpected error"))
+}
+
 fn compact_prompt() -> &'static str {
     "Summarize the conversation so far into a concise continuation context. Preserve decisions, requirements, relevant code paths, commands, errors, and unresolved work."
 }
@@ -2379,6 +2386,29 @@ mod tests {
         );
         let p = reg.add_prompt(&c.id, "hi".into()).unwrap();
         (c.id, p.id)
+    }
+
+    #[test]
+    fn opencode_unexpected_error_is_recoverable() {
+        assert!(is_recoverable_session_error(
+            "opencode",
+            "opencode failed: Error: Unexpected error"
+        ));
+    }
+
+    #[test]
+    fn ordinary_provider_errors_are_not_recoverable() {
+        assert!(!is_recoverable_session_error(
+            "opencode",
+            "permission denied"
+        ));
+        assert!(!is_recoverable_session_error("claude", "Unexpected error"));
+    }
+
+    #[test]
+    fn session_not_found_is_recoverable_for_any_provider() {
+        assert!(is_recoverable_session_error("claude", "Session not found"));
+        assert!(is_recoverable_session_error("kimi", "session not found"));
     }
 
     /// Per ADR-0006: each prompt's event buffer is bounded so a
