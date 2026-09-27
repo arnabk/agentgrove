@@ -25,6 +25,7 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 
 pub mod claude;
+pub mod codex;
 pub mod fake;
 pub mod kimi;
 pub mod models_cache;
@@ -113,6 +114,8 @@ pub enum ProviderId {
     Opencode,
     /// Moonshot AI Kimi via the `kimi` CLI.
     Kimi,
+    /// OpenAI Codex via the `codex` CLI (`codex exec`).
+    Codex,
 }
 
 impl ProviderId {
@@ -123,6 +126,7 @@ impl ProviderId {
             ProviderId::Fake => "fake",
             ProviderId::Opencode => "opencode",
             ProviderId::Kimi => "kimi",
+            ProviderId::Codex => "codex",
         }
     }
 }
@@ -138,6 +142,7 @@ pub const PROVIDER_OS_SUPPORT: &[(&str, &[&str])] = &[
     ("claude", &["macos", "linux"]),
     ("opencode", &["macos", "linux"]),
     ("kimi", &["macos", "linux"]),
+    ("codex", &["macos", "linux"]),
     ("fake", &["macos", "linux", "windows"]),
 ];
 
