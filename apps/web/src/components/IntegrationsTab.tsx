@@ -1,7 +1,13 @@
 import { For, Show, createSignal, onMount } from "solid-js";
-import { api, type IntegrationSummary } from "../api/client";
+import {
+  api,
+  type ClickUpList,
+  type ClickUpOption,
+  type IntegrationSummary,
+} from "../api/client";
 import { confirm } from "./dialog";
 import { pushToast } from "./Toast";
+import MultiSelect from "./MultiSelect";
 
 interface IntegrationDef {
   provider: string;
@@ -22,6 +28,72 @@ export default function IntegrationsTab() {
   const [loading, setLoading] = createSignal(true);
   const [busy, setBusy] = createSignal<string | null>(null);
   const [clickUpKey, setClickUpKey] = createSignal("");
+  // ClickUp filters picker (lists + assignee + statuses).
+  const [filtersOpen, setFiltersOpen] = createSignal(false);
+  const [lists, setLists] = createSignal<ClickUpList[]>([]);
+  const [members, setMembers] = createSignal<ClickUpOption[]>([]);
+  const [statusOpts, setStatusOpts] = createSignal<ClickUpOption[]>([]);
+  const [watched, setWatched] = createSignal<Set<string>>(new Set());
+  const [assignees, setAssignees] = createSignal<Set<string>>(new Set());
+  const [statuses, setStatuses] = createSignal<Set<string>>(new Set());
+  const [filtersLoading, setFiltersLoading] = createSignal(false);
+  const [filtersLoaded, setFiltersLoaded] = createSignal(false);
+  const [savingFilters, setSavingFilters] = createSignal(false);
+
+  async function toggleFilters() {
+    if (filtersOpen()) {
+      setFiltersOpen(false);
+      return;
+    }
+    setFiltersOpen(true);
+    if (!filtersLoaded()) {
+      setFiltersLoading(true);
+      try {
+        const [allLists, allMembers, allStatuses, saved] = await Promise.all([
+          api.listClickUpLists(),
+          api.listClickUpMembers(),
+          api.listClickUpStatuses(),
+          api.getClickUpFilters(),
+        ]);
+        setLists(allLists);
+        setMembers(allMembers);
+        setStatusOpts(allStatuses);
+        setWatched(new Set(saved.lists));
+        setAssignees(new Set(saved.assignees));
+        setStatuses(new Set(saved.statuses));
+        setFiltersLoaded(true);
+      } catch (e) {
+        pushToast({
+          title: "Could not load filters",
+          message: e instanceof Error ? e.message : String(e),
+          level: "error",
+        });
+        setFiltersOpen(false);
+      } finally {
+        setFiltersLoading(false);
+      }
+    }
+  }
+
+  async function saveFilters() {
+    setSavingFilters(true);
+    try {
+      await api.setClickUpFilters({
+        lists: [...watched()],
+        assignees: [...assignees()],
+        statuses: [...statuses()],
+      });
+      pushToast({ title: "ClickUp filters saved", message: "", level: "info" });
+    } catch (e) {
+      pushToast({
+        title: "Save failed",
+        message: e instanceof Error ? e.message : String(e),
+        level: "error",
+      });
+    } finally {
+      setSavingFilters(false);
+    }
+  }
 
   async function refresh() {
     try {
@@ -93,10 +165,11 @@ export default function IntegrationsTab() {
           const connected = () => Boolean(s()?.connected);
           return (
             <section
-              class="flex items-center gap-3 rounded-lg border border-border bg-bg-2 p-3"
+              class="flex flex-col rounded-lg border border-border bg-bg-2 p-3"
               data-testid={`integration-row-${def.provider}`}
             >
-              <span class="shrink-0 text-fg-muted">{def.icon()}</span>
+              <div class="flex items-center gap-3">
+              <span class="shrink-0 text-fg-muted text-2xl">{def.icon()}</span>
               <div class="min-w-0 flex-1">
                 <h3 class="text-[13px] font-semibold tracking-tight">{def.label}</h3>
                 <p class="text-[11.5px] text-fg-subtle mt-0.5">
@@ -163,6 +236,116 @@ export default function IntegrationsTab() {
                     {busy() === def.provider ? "…" : "Disconnect"}
                   </button>
                 </Show>
+              </Show>
+              </div>
+
+              {/* ClickUp: filters picker (lists + assignee + statuses). */}
+              <Show when={def.provider === "clickup" && connected()}>
+                <div class="mt-2 border-t border-border pt-2">
+                  <button
+                    type="button"
+                    class="ag-btn ag-btn-ghost ag-btn-sm flex items-center gap-1.5 text-[13px] font-medium"
+                    onClick={() => void toggleFilters()}
+                    data-testid="clickup-filters-toggle"
+                  >
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      aria-hidden="true"
+                      class="transition-transform duration-150"
+                      classList={{ "rotate-90": filtersOpen() }}
+                    >
+                      <path
+                        d="M9 6l6 6-6 6"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                    Filters
+                  </button>
+                  <Show when={filtersOpen()}>
+                    <p class="text-[11px] text-fg-subtle mt-1">
+                      Scope the ClickUp panel by list, assignee and status. Leave everything empty to
+                      show the whole workspace.
+                    </p>
+                    <Show
+                      when={!filtersLoading()}
+                      fallback={<div class="text-[11px] text-fg-subtle py-2">Loading…</div>}
+                    >
+                      {/* Assignee */}
+                      <div class="mt-2">
+                        <div class="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
+                          Assignee
+                        </div>
+                        <MultiSelect
+                          values={[...assignees()]}
+                          onChange={(v) => setAssignees(new Set(v))}
+                          placeholder="Any assignee"
+                          ariaLabel="Assignee filter"
+                          testId="clickup-assignee-select"
+                          options={members().map((m) => ({ value: m.value, label: m.label }))}
+                        />
+                      </div>
+
+                      {/* Statuses */}
+                      <div class="mt-2">
+                        <div class="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
+                          Statuses
+                        </div>
+                        <MultiSelect
+                          values={[...statuses()]}
+                          onChange={(v) => setStatuses(new Set(v))}
+                          placeholder="Any status"
+                          ariaLabel="Status filter"
+                          testId="clickup-status-select"
+                          options={statusOpts().map((s) => ({ value: s.value, label: s.label }))}
+                        />
+                      </div>
+
+                      {/* Lists */}
+                      <div class="mt-2">
+                        <div class="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
+                          Lists
+                        </div>
+                        <MultiSelect
+                          values={[...watched()]}
+                          onChange={(v) => setWatched(new Set(v))}
+                          placeholder="Whole workspace"
+                          ariaLabel="List filter"
+                          testId="clickup-list-select"
+                          options={lists().map((l) => ({ value: l.id, label: l.path }))}
+                        />
+                      </div>
+
+                      <div class="flex items-center gap-2 mt-3">
+                        <button
+                          type="button"
+                          class="ag-btn ag-btn-primary ag-btn-sm"
+                          disabled={savingFilters()}
+                          onClick={() => void saveFilters()}
+                          data-testid="clickup-filters-save"
+                        >
+                          {savingFilters() ? "…" : "Save"}
+                        </button>
+                        <span class="text-[11px] text-fg-subtle">
+                          {watched().size === 0 && assignees().size === 0 && statuses().size === 0
+                            ? "Whole workspace"
+                            : [
+                                watched().size ? `${watched().size} list(s)` : "",
+                                assignees().size ? `${assignees().size} assignee(s)` : "",
+                                statuses().size ? `${statuses().size} status` : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                        </span>
+                      </div>
+                    </Show>
+                  </Show>
+                </div>
               </Show>
             </section>
           );

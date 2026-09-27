@@ -1,7 +1,19 @@
-import { For, Show, createMemo, createResource, createSignal } from "solid-js";
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  createResource,
+  onCleanup,
+} from "solid-js";
 import { api, type TicketRow } from "../api/client";
 import { pushToast } from "./Toast";
 import { state } from "../stores/app";
+import { pickDialog } from "./dialog";
+
+/** How many rows to reveal per lazy-load step. */
+const PAGE_SIZE = 20;
 
 /** Left-rail ClickUp view: lists the authenticated user's ClickUp tasks
  *  (workspace-level, not repo-scoped). Each row opens in the browser,
@@ -11,7 +23,6 @@ import { state } from "../stores/app";
 export default function ClickUpPanel() {
   const [query, setQuery] = createSignal("");
   const [working, setWorking] = createSignal<string | null>(null);
-  const [pickFor, setPickFor] = createSignal<string | null>(null);
   const [tasks, { refetch }] = createResource<TicketRow[]>(() => api.listClickUpTasks());
 
   const filtered = createMemo(() => {
@@ -24,6 +35,35 @@ export default function ClickUpPanel() {
         .toLowerCase()
         .includes(q),
     );
+  });
+
+  // Lazy render: show PAGE_SIZE rows, reveal more as the sentinel scrolls
+  // into view. Reset the window whenever the filtered set changes (new
+  // search / refetch) so we never leave a stale, over-tall window.
+  const [visibleCount, setVisibleCount] = createSignal(PAGE_SIZE);
+  createEffect(() => {
+    // Reset the window whenever the filtered set changes (new search /
+    // refetch) so we never leave a stale, over-tall window.
+    void filtered().length;
+    setVisibleCount(PAGE_SIZE);
+  });
+  const visible = createMemo(() => filtered().slice(0, visibleCount()));
+  const hasMore = () => visibleCount() < filtered().length;
+
+  let sentinel: HTMLElement | undefined;
+  createEffect(() => {
+    const el = sentinel;
+    if (!el) return;
+    const io = new window.IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setVisibleCount((n) => Math.min(n + PAGE_SIZE, filtered().length));
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    io.observe(el);
+    onCleanup(() => io.disconnect());
   });
 
   function statusClass(status: string): string {
@@ -47,10 +87,23 @@ export default function ClickUpPanel() {
     }
   }
 
+  async function startWork(taskId: string) {
+    if (working()) return;
+    if (state.projects.length === 0) {
+      pushToast({ title: "No projects yet", message: "Add a project first.", level: "error" });
+      return;
+    }
+    const projectId = await pickDialog({
+      title: "Create worktree in…",
+      choices: state.projects.map((p) => ({ label: p.name, value: p.id })),
+      testId: `clickup-project-picker-${taskId}`,
+    });
+    if (projectId) void work(taskId, projectId);
+  }
+
   async function work(taskId: string, projectId: string) {
     if (working()) return;
     setWorking(taskId);
-    setPickFor(null);
     try {
       await api.workOnClickUpTask(taskId, projectId);
       pushToast({
@@ -131,7 +184,7 @@ export default function ClickUpPanel() {
               }
             >
               <ul class="divide-y divide-border">
-                <For each={filtered()}>
+                <For each={visible()}>
                   {(t) => (
                     <li class="group relative">
                       <div
@@ -190,7 +243,7 @@ export default function ClickUpPanel() {
                             disabled={working() !== null}
                             onClick={(e) => {
                               e.stopPropagation();
-                              setPickFor(pickFor() === t.id ? null : t.id);
+                              void startWork(t.id);
                             }}
                             data-testid={`clickup-work-${t.id}`}
                           >
@@ -198,40 +251,18 @@ export default function ClickUpPanel() {
                           </button>
                         </div>
                       </div>
-                      <Show when={pickFor() === t.id}>
-                        <div
-                          class="px-3 pb-2 pt-1 bg-bg-2 border-t border-border"
-                          data-testid={`clickup-project-picker-${t.id}`}
-                        >
-                          <div class="text-[10px] uppercase tracking-wide text-fg-subtle mb-1">
-                            Create worktree in…
-                          </div>
-                          <Show
-                            when={state.projects.length > 0}
-                            fallback={
-                              <div class="text-[11px] text-fg-subtle py-1">No projects yet.</div>
-                            }
-                          >
-                            <div class="space-y-0.5">
-                              <For each={state.projects}>
-                                {(p) => (
-                                  <button
-                                    type="button"
-                                    class="w-full text-left px-2 py-1 rounded hover:bg-bg-3 text-fg truncate text-[12px]"
-                                    onClick={() => void work(t.id, p.id)}
-                                    data-testid={`clickup-pick-${t.id}-${p.id}`}
-                                  >
-                                    {p.name}
-                                  </button>
-                                )}
-                              </For>
-                            </div>
-                          </Show>
-                        </div>
-                      </Show>
                     </li>
                   )}
                 </For>
+                <Show when={hasMore()}>
+                  <li
+                    ref={(el) => (sentinel = el)}
+                    class="text-fg-subtle text-[11px] px-3 py-3 text-center"
+                    data-testid="clickup-load-more"
+                  >
+                    Loading more…
+                  </li>
+                </Show>
               </ul>
             </Show>
           </Show>

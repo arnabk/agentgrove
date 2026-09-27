@@ -99,6 +99,47 @@ export async function alert(opts: {
   });
 }
 
+/** Single-choice picker modal. Resolves the chosen value, or null when
+ *  dismissed. Choices render as a vertical, scrollable list in the body
+ *  so it stays clean whether there are 2 projects or 40. */
+export async function pickDialog(opts: {
+  title?: string;
+  choices: { label: string; value: string }[];
+  testId?: string;
+}): Promise<string | null> {
+  const result = await new Promise<string>((resolve) => {
+    const id = nextId++;
+    setQueue((q) => [
+      ...q,
+      {
+        id,
+        title: opts.title,
+        testId: opts.testId ?? "pick-dialog",
+        dismissValue: "__cancel__",
+        buttons: [{ label: "Cancel", value: "__cancel__", variant: "ghost" }],
+        body: (
+          <div class="max-h-72 overflow-auto flex flex-col gap-1">
+            <For each={opts.choices}>
+              {(c) => (
+                <button
+                  type="button"
+                  class="ag-btn ag-btn-secondary w-full !justify-start"
+                  onClick={() => popAndResolve(id, c.value)}
+                  data-testid={`pick-${c.value}`}
+                >
+                  {c.label}
+                </button>
+              )}
+            </For>
+          </div>
+        ),
+        resolve,
+      },
+    ]);
+  });
+  return result === "__cancel__" ? null : result;
+}
+
 /** Mount once near the root. Renders the active dialog (if any). */
 export function DialogHost() {
   function onKey(e: KeyboardEvent) {

@@ -75,6 +75,16 @@ pub fn build_router(state: AppState) -> Router {
             "/api/clickup/tasks/:task_id/work",
             post(tickets::work_on_clickup),
         )
+        // ClickUp filters: browse the workspace's Lists / members /
+        // statuses and scope the task feed by list + assignee + status
+        // (all empty = whole workspace, unfiltered).
+        .route("/api/clickup/lists", get(tickets::list_clickup_lists))
+        .route("/api/clickup/members", get(tickets::list_clickup_members))
+        .route("/api/clickup/statuses", get(tickets::list_clickup_statuses))
+        .route(
+            "/api/clickup/filters",
+            get(tickets::get_clickup_filters).put(tickets::put_clickup_filters),
+        )
         // Aggregate local branches across every project (branch center).
         .route("/api/branches", get(branch_center::list_all))
         // Cmd+P fuzzy file finder. The index is lazy: the first

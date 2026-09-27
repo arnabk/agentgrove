@@ -144,13 +144,29 @@ pub async fn save_clickup_key(
             .into_response();
     }
 
+    // Fresh key = possibly a different workspace; drop stale caches.
+    *state.clickup_cache.lock().await = None;
+    *state.clickup_lists_cache.lock().await = None;
+    *state.clickup_members_cache.lock().await = None;
+    *state.clickup_statuses_cache.lock().await = None;
+
     StatusCode::NO_CONTENT.into_response()
 }
 
 /// `DELETE /api/integrations/:provider` — disconnect (delete token).
 pub async fn disconnect(State(state): State<AppState>, Path(provider): Path<String>) -> StatusCode {
     match state.integration_store.delete_token(&provider).await {
-        Ok(_) => StatusCode::NO_CONTENT,
+        Ok(_) => {
+            // Drop ClickUp caches so a reconnect (possibly a different
+            // account) never serves the old workspace's tasks/lists.
+            if provider == "clickup" {
+                *state.clickup_cache.lock().await = None;
+                *state.clickup_lists_cache.lock().await = None;
+                *state.clickup_members_cache.lock().await = None;
+                *state.clickup_statuses_cache.lock().await = None;
+            }
+            StatusCode::NO_CONTENT
+        }
         Err(e) => {
             tracing::warn!(provider, error = %e, "disconnect failed");
             StatusCode::INTERNAL_SERVER_ERROR

@@ -80,6 +80,24 @@ pub struct AppState {
     pub file_index: crate::file_index::FileIndex,
     /// Cached latest-version check from GitHub, refreshed on a TTL.
     pub version_cache: Arc<Mutex<Option<(crate::health::VersionInfo, Instant)>>>,
+    /// Cached ClickUp task list, refreshed on a TTL to stay under the
+    /// provider's rate limit (~100 req/min/token). Keyed only by time —
+    /// there's a single stored token. Invalidated after a task mutation
+    /// (`clickup_start_task`) so a moved task doesn't read stale.
+    pub clickup_cache: Arc<Mutex<Option<(Vec<crate::tickets::TicketRow>, Instant)>>>,
+    /// Cached ClickUp List catalog (Settings picker). Lists change
+    /// rarely, so this uses a longer TTL than the task cache. Walking
+    /// team→spaces→folders→lists is several requests, so caching it
+    /// keeps the picker cheap. Invalidated on disconnect.
+    pub clickup_lists_cache: Arc<Mutex<Option<(Vec<crate::tickets::ClickUpList>, Instant)>>>,
+    /// Cached ClickUp workspace members (assignee filter picker). Long
+    /// TTL — membership changes rarely. Invalidated on disconnect / key
+    /// change.
+    pub clickup_members_cache: Arc<Mutex<Option<(Vec<crate::tickets::ClickUpOption>, Instant)>>>,
+    /// Cached ClickUp status catalog (status filter picker), collected
+    /// across every space. Extra API calls, so a long TTL keeps it
+    /// mostly from cache. Invalidated on disconnect / key change.
+    pub clickup_statuses_cache: Arc<Mutex<Option<(Vec<crate::tickets::ClickUpOption>, Instant)>>>,
 }
 
 impl AppState {
@@ -122,6 +140,10 @@ impl AppState {
             cancel_tokens: Arc::new(Mutex::new(HashMap::new())),
             file_index: crate::file_index::FileIndex::new(),
             version_cache: Arc::new(Mutex::new(None)),
+            clickup_cache: Arc::new(Mutex::new(None)),
+            clickup_lists_cache: Arc::new(Mutex::new(None)),
+            clickup_members_cache: Arc::new(Mutex::new(None)),
+            clickup_statuses_cache: Arc::new(Mutex::new(None)),
         }
     }
 }

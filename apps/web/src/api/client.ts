@@ -170,6 +170,26 @@ export interface IntegrationSummary {
   connected: boolean;
 }
 
+/** A pickable ClickUp List from `GET /api/clickup/lists`. */
+export interface ClickUpList {
+  id: string;
+  /** `Space / Folder / List` breadcrumb. */
+  path: string;
+}
+
+/** A pickable option (member or status) for the ClickUp filters. */
+export interface ClickUpOption {
+  value: string;
+  label: string;
+}
+
+/** The persisted ClickUp task-feed filters. All empty = whole workspace. */
+export interface ClickUpFilters {
+  lists: string[];
+  assignees: string[];
+  statuses: string[];
+}
+
 export interface TicketRow {
   provider: string;
   id: string;
@@ -402,6 +422,16 @@ export const api = {
     ),
   // ClickUp tasks (workspace-level, not repo-scoped)
   listClickUpTasks: () => req<TicketRow[]>("/api/clickup/tasks"),
+  // ClickUp filters (pick lists / assignee / statuses the feed shows)
+  listClickUpLists: () => req<ClickUpList[]>("/api/clickup/lists"),
+  listClickUpMembers: () => req<ClickUpOption[]>("/api/clickup/members"),
+  listClickUpStatuses: () => req<ClickUpOption[]>("/api/clickup/statuses"),
+  getClickUpFilters: () => req<ClickUpFilters>("/api/clickup/filters"),
+  setClickUpFilters: (filters: ClickUpFilters) =>
+    req<void>("/api/clickup/filters", {
+      method: "PUT",
+      body: JSON.stringify(filters),
+    }),
   workOnClickUpTask: (taskId: string, projectId: string) =>
     req<unknown>(`/api/clickup/tasks/${encodeURIComponent(taskId)}/work`, {
       method: "POST",
