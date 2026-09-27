@@ -245,23 +245,9 @@ export default function LeftRail() {
     saveExpanded(expanded);
   }
 
-  // A worktree selected explicitly in the URL or by clicking its row
-  // needs its parent project open so its status/PR badges are visible.
-  // Do not apply this to project-root selection: collapsed projects must
-  // stay collapsed across refreshes.
-  function ensureExpanded(id: string) {
-    if (isExpanded(id)) return;
-    setExpanded(id, true);
-    saveExpanded(expanded);
-  }
-
-  // Expand once for an initially worktree-scoped URL so its PR/MR
-  // status can load. Do not keep enforcing this reactively: after the
-  // user clicks the caret to collapse it, it must stay collapsed.
-  onMount(() => {
-    const projectId = state.selectedProjectId;
-    if (projectId && currentWorktreeId()) ensureExpanded(projectId);
-  });
+  // Expansion is user-controlled and persisted in localStorage. Do not
+  // auto-expand a selected project or a worktree URL on mount: refresh
+  // must restore the collapsed state the user chose.
 
   // Use a SolidJS store (not a plain signal) so reads like
   // `remoteStatus[w.id]?.diverged` inside <For> bodies get
