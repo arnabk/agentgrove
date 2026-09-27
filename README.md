@@ -273,7 +273,6 @@ What you can do with it today.
 
 All detailed docs live under [`docs/`](./docs/):
 
-- [Roadmap (working draft)](./docs/roadmap/README.md)
 - [Architecture](./docs/architecture/overview.md)
 - [Contributing](./docs/CONTRIBUTING.md)
 - [Local dev guide](./docs/guides/local-dev.md)
