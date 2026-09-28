@@ -216,6 +216,14 @@ What you can do with it today.
 - **Restore CLI** — `just restore-db <name>` to recover from any snapshot
 - **Encrypted secrets** — provider API keys encrypted at rest with XChaCha20-Poly1305
 
+### Authentication (optional)
+
+- **Off by default** — no login; the server trusts whoever reaches the loopback socket (unchanged behavior)
+- **Google sign-in** — set `AGENTGROVE_GOOGLE_CLIENT_ID` + `_SECRET` to require login; server-side OAuth (secret never touches the browser)
+- **Access control** — restrict by domain (`AGENTGROVE_AUTH_ALLOWED_DOMAINS`) and/or exact email (`AGENTGROVE_AUTH_ALLOWED_EMAILS`)
+- **Stateless sessions** — the session cookie is an AEAD-sealed blob signed with the machine-bound keyring; no session table
+- See [`docs/SECURITY.md`](./docs/SECURITY.md#google-login-optional) for setup + the Google Cloud Console redirect URI
+
 ### Developer Experience
 
 - **Release notifications** — in-app toast when a new GitHub release is available
