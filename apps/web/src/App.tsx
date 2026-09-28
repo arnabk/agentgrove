@@ -45,6 +45,8 @@ import {
   galaxyMapOpen,
   isSidebarOpen,
   latestVersion,
+  markScopeCompleted,
+  clearScopeCompleted,
   routeError,
   scheduleGlobalLayoutWrite,
   selectedChatId,
@@ -124,6 +126,14 @@ export default function App() {
     await bootstrap();
     await seedScopeChatTabs();
     void checkReleaseVersion();
+  });
+
+  // Viewing a scope clears its "finished chat" attention dot — the user
+  // is now looking at it, so there's nothing to return to.
+  createEffect(() => {
+    const pid = state.selectedProjectId;
+    if (!pid) return;
+    clearScopeCompleted(pid, currentWorktreeId());
   });
 
   // Seed chat tabs for the active scope when it has 0 tabs but the BE
@@ -284,6 +294,11 @@ export default function App() {
             // rows no longer include it). Needed so "Go to chat" can
             // switch to the chat's own project/worktree.
             const scope = activeChatScopes.get(id);
+            // Light a steady attention dot on the finished chat's scope
+            // in the left rail so the user knows where to return, even
+            // after the toast auto-dismisses. No-op if it's the focused
+            // scope (markScopeCompleted guards that).
+            if (scope) markScopeCompleted(scope.projectId, scope.worktreeId);
             playNotificationSound();
             pushToast({
               title: "Response ready",

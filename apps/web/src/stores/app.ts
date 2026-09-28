@@ -186,6 +186,37 @@ export function isScopeWorking(projectId: string, worktreeId: string | null): bo
   return activeWork().has(makeKey(projectId, worktreeId));
 }
 
+/** Scopes with a background chat that FINISHED while the user was
+ *  looking elsewhere. Drives a steady "attention" dot in the left rail
+ *  so the user knows which scope to go back to. Keyed like `activeWork`
+ *  (`pid` for root, `pid::wid` for a worktree). Cleared when the scope
+ *  is focused. */
+export const [completedScopes, setCompletedScopes] = createSignal<Set<string>>(new Set());
+
+/** Mark a scope as having an unseen finished chat. No-op if the scope
+ *  is currently focused (the user can already see the result). */
+export function markScopeCompleted(projectId: string, worktreeId: string | null) {
+  const key = makeKey(projectId, worktreeId);
+  if (key === currentScopeKey()) return;
+  setCompletedScopes((s) => (s.has(key) ? s : new Set(s).add(key)));
+}
+
+/** Clear the attention flag for a scope (called when it's focused). */
+export function clearScopeCompleted(projectId: string, worktreeId: string | null) {
+  const key = makeKey(projectId, worktreeId);
+  setCompletedScopes((s) => {
+    if (!s.has(key)) return s;
+    const next = new Set(s);
+    next.delete(key);
+    return next;
+  });
+}
+
+/** Does the given scope have an unseen finished chat? */
+export function isScopeCompleted(projectId: string, worktreeId: string | null): boolean {
+  return completedScopes().has(makeKey(projectId, worktreeId));
+}
+
 /** Transient, dismissable navigation error (e.g. the user used the
  *  browser back button to land on a project/worktree that no longer
  *  exists). Rendered as a toast in App.tsx; cleared on dismiss or the

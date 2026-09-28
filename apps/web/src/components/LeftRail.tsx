@@ -22,6 +22,7 @@ import {
   currentScopeKey,
   currentWorktreeId,
   isScopeWorking,
+  isScopeCompleted,
   refreshProjects,
   refreshWorktreesForProject,
   selectFile,
@@ -704,6 +705,9 @@ export default function LeftRail() {
                         <Show when={isScopeWorking(p.id, null)}>
                           <WorkingDot title="A chat in this project's root is working…" />
                         </Show>
+                        <Show when={!isScopeWorking(p.id, null) && isScopeCompleted(p.id, null)}>
+                          <AttentionDot title="A chat here finished — click to view" />
+                        </Show>
 
                         <div class="flex items-center gap-0.5 shrink-0 flex-nowrap">
                           {/* Worktree branch */}
@@ -1047,6 +1051,11 @@ export default function LeftRail() {
                               </span>
                               <Show when={isScopeWorking(p.id, w.id)}>
                                 <WorkingDot title="A chat in this worktree is working…" />
+                              </Show>
+                              <Show
+                                when={!isScopeWorking(p.id, w.id) && isScopeCompleted(p.id, w.id)}
+                              >
+                                <AttentionDot title="A chat here finished — click to view" />
                               </Show>
                               <Show
                                 when={
@@ -1643,6 +1652,19 @@ function WorkingDot(props: { title: string }) {
       title={props.title}
       data-testid="rail-working-dot"
       aria-label="Working"
+    />
+  );
+}
+
+/** Steady (non-pulsing) dot marking a scope whose background chat
+ *  finished while unfocused. Cleared once the user opens the scope. */
+function AttentionDot(props: { title: string }) {
+  return (
+    <span
+      class="w-1.5 h-1.5 rounded-full bg-success shrink-0"
+      title={props.title}
+      data-testid="rail-attention-dot"
+      aria-label="Finished"
     />
   );
 }
