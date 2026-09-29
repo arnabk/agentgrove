@@ -313,14 +313,32 @@ body,
    the window narrower than this, the browser shows a horizontal
    scrollbar instead of letting the layout collapse. We set min-width on
    #root (not body) so body's fixed maze background still covers the
-   full viewport; #root carries the actual flexbox shell. */
-#root {
+   full viewport; #root carries the actual flexbox shell.
+
+   Scoped to the desktop shell via the data attribute shell.tsx writes:
+   the mobile shell is built to fit a phone, and a floor here would put
+   it behind a horizontal scrollbar. The attribute is absent for one
+   frame before the shell resolves, which is why the floor is opt-in
+   rather than opt-out — a phone must never flash the desktop width. */
+#root[data-shell="desktop"] {
   min-width: var(--ag-min-app-width);
 }
 
 body {
   overflow: hidden;
   height: 100vh;
+}
+
+/* Phones report 100vh as the tallest the viewport ever gets (chrome
+   collapsed), so a 100vh body leaves the composer under the URL bar.
+   dvh tracks the visible viewport instead. */
+#root[data-shell="mobile"] {
+  min-width: 0;
+  width: 100%;
+}
+
+body:has(#root[data-shell="mobile"]) {
+  height: 100dvh;
 }
 
 html {

@@ -1,7 +1,6 @@
 import { render } from "solid-js/web";
-import { Route, Router } from "@solidjs/router";
 import { Match, Show, Switch, createResource } from "solid-js";
-import App from "@/shells/desktop/App";
+import Shell from "@/shell";
 import ToastHost from "@/ui/Toast";
 import { applyCachedZoom } from "@/core/stores/app";
 import { api, setAuthEnabled } from "@/core/api/client";
@@ -15,19 +14,6 @@ if (!root) throw new Error("missing #root");
 // settings load. The authoritative value is reconciled in bootstrap().
 applyCachedZoom();
 
-// We only have one visual layout — the App shell — but we still wrap
-// it in @solidjs/router so the URL can mirror the active scope
-// (project / worktree / pane / chat / file). The catch-all `*` route
-// lets us read params and query strings anywhere via `useLocation` /
-// `useParams` while keeping App as the sole rendered child.
-//
-// Routable URL shape:
-//   /                                         → no scope (landing)
-//   /p/:projectId                             → project root scope
-//   /p/:projectId/w/:worktreeId               → worktree scope
-//   ?pane=chat|editor|terminal|notes          → active pane
-//   ?chat=:chatId                             → active chat tab
-//   ?file=<urlencoded absolute path>          → active editor file
 // Auth gate: resolve the BE's auth state ONCE before mounting the app.
 // - auth disabled (the default) → render the app immediately.
 // - auth enabled + valid session → render the app.
@@ -60,9 +46,7 @@ function Root() {
     >
       <Switch fallback={<div class="flex h-screen w-screen items-center justify-center bg-bg-1" />}>
         <Match when={gate()!.show === "app"}>
-          <Router>
-            <Route path="*" component={App} />
-          </Router>
+          <Shell />
         </Match>
         <Match when={gate()!.show === "forbidden"}>
           <div class="flex h-screen w-screen flex-col items-center justify-center gap-3 bg-bg-1 text-fg">

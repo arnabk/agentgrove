@@ -65,6 +65,8 @@ export default [
         HTMLFormElement: "readonly",
         CloseEvent: "readonly",
         MessageEvent: "readonly",
+        MediaQueryList: "readonly",
+        MediaQueryListEvent: "readonly",
         BinaryType: "readonly",
         crypto: "readonly",
         globalThis: "readonly",

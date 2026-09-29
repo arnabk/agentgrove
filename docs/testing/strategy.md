@@ -34,6 +34,9 @@ L5 FE/App E2E      (Playwright against real built binary)
 - Contract: types generated from OpenAPI; `tsc --noEmit` is a gate.
 - App E2E: Playwright drives chromium on PR, firefox + webkit nightly.
   Global setup builds release binary and boots it on ephemeral port.
+  Two projects: `chromium` (Desktop Chrome) runs everything except
+  `mobile-*.spec.ts`; `mobile` (Pixel 7 — real touch, DPR and mobile UA)
+  runs only those. Pick one with `--project=`.
 - Visual regression: Playwright snapshots, per-OS in nightly.
 - Accessibility: `@axe-core/playwright`, zero serious/critical.
 - Performance: Lighthouse CI budgets.
@@ -54,3 +57,26 @@ running process. This is the canonical "everything works" gate.
 - `tests/fixtures/repos/` minimal git repos as tarballs.
 - `tests/fixtures/agents/<provider>/*.ndjson` recorded streams.
 - Deterministic clocks and IDs via injectable `Clock` and `IdGen`.
+
+## Running Playwright locally
+
+```sh
+pnpm -C apps/web test:e2e                      # both projects, bundled chromium
+pnpm -C apps/web exec playwright test --project=mobile
+```
+
+Two escape hatches for machines where `playwright install` can't reach the
+CDN (e.g. a TLS-intercepting corporate proxy). Neither changes CI, which
+installs the bundled browsers:
+
+| Variable        | Effect                                                    |
+| --------------- | --------------------------------------------------------- |
+| `PW_CHANNEL`    | Drive an installed browser instead, e.g. `PW_CHANNEL=chrome` |
+| `PW_NO_VIDEO=1` | Skip failure video, which needs Playwright's bundled ffmpeg |
+
+Against an already-running `just dev` stack:
+
+```sh
+PW_LIVE=1 BASE_URL=http://localhost:5173 \
+  pnpm -C apps/web exec playwright test --project=mobile
+```

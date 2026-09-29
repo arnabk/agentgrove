@@ -9,6 +9,13 @@ const PREVIEW_PORT = Number(process.env.AGENTGROVE_E2E_PORT ?? 5193);
 const liveBase = process.env.BASE_URL ?? "http://localhost:5173";
 const baseURL = LIVE ? liveBase : `http://127.0.0.1:${PREVIEW_PORT}`;
 
+// Browser channel. Default is Playwright's bundled Chromium, which is
+// what CI installs. Set PW_CHANNEL=chrome to drive a locally-installed
+// Google Chrome instead — needed on networks whose TLS interception
+// blocks `playwright install`.
+const channel = process.env.PW_CHANNEL;
+const channelUse = channel ? { channel } : {};
+
 const webServer = LIVE
   ? undefined
   : {
@@ -28,9 +35,25 @@ export default defineConfig({
   use: {
     baseURL,
     trace: "retain-on-failure",
-    video: "retain-on-failure",
+    // Video needs Playwright's bundled ffmpeg. PW_NO_VIDEO=1 skips it for
+    // local runs on machines where `playwright install` can't fetch it.
+    video: process.env.PW_NO_VIDEO === "1" ? "off" : "retain-on-failure",
     screenshot: "only-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"], ...channelUse },
+      testIgnore: /mobile-.*\.spec\.ts/,
+    },
+    {
+      // Phone form factor: real touch, real DPR, real mobile UA, so the
+      // mobile shell is exercised the way a phone exercises it rather
+      // than as a narrow desktop window.
+      name: "mobile",
+      use: { ...devices["Pixel 7"], ...channelUse },
+      testMatch: /mobile-.*\.spec\.ts/,
+    },
+  ],
   ...(webServer ? { webServer } : {}),
 });
