@@ -29,7 +29,9 @@ apps/web/src/
   core/                 headless. No JSX layout, no component imports.
     api/                client.ts, types.ts
     stores/             app.ts (scope/projects/tabs/settings), db.ts
-    chat/               chatStream.ts — WS frame protocol, shell-agnostic
+    chat/               chatStream.ts      WS frame protocol + per-prompt
+                                           derivations, shell-agnostic
+                        createChatSession  headless timeline + socket
     lib/                routeSync, crossInstanceSync, crossTabs, memory,
                         memMonitor, toastBus, celestial, notesTodo, …
 
@@ -96,12 +98,32 @@ identically in either and works with auth on or off.
 
 A deliberate subset — see ADR-0009 non-goals for what is excluded.
 
-- Hamburger → navigation drawer: projects, worktrees (read-write), chats
+- Hamburger → navigation drawer: projects, worktrees (create / rename /
+  delete). Adding a project stays desktop-only: it means browsing the
+  server's filesystem.
 - Bottom tab bar: Chats · Team · Notes · Settings
-- Full-screen chat thread with the shared Tiptap composer
+- Chat is a drill-down (list → conversation) rather than a tab strip, but
+  writes through to the store via `ensureChatTab`, so `?chat=` stays
+  correct and a link opens the same conversation on either shell
+- Turns render at full fidelity — thinking traces and the tool rail are
+  both present, collapsed by default and auto-opened while in flight
+- Settings renders the shared `SettingsContent` full-bleed, all six tabs
 - Live via the same `/ws?topic=sync` cross-instance channel as desktop, so
   desktop and phone stay in step
-- `startMemoryMonitor()` is desktop-only (a debugging tool, not a feature)
+- `startMemoryMonitor()` is desktop-only (a debugging tool, not a
+  feature), and the background-finish poll runs at 10s vs the desktop's 3s
+
+### What is shared, and what is still duplicated
+
+`core/chat/chatStream` holds the rules that are easy to get subtly wrong
+— preferring the live token buffer over the events array mid-stream, the
+`Truncated { dropped }` sentinel, gating "pending" on being the tail
+prompt — so the two timelines cannot disagree about what a turn says.
+
+`core/chat/createChatSession` is the headless engine above that (fetch,
+socket with delta batching and reconnect backoff, reconcile, send/stop,
+in-flight fallback poll). The mobile shell uses it. **ChatPane still runs
+its own copy**; rewiring it onto the primitive is a known follow-up.
 
 ## Theming
 
@@ -109,6 +131,24 @@ CSS variables. Built-in themes ship as JSON. The user can import
 VSCode-style JSON themes for the editor (CodeMirror highlight styles).
 App-wide font scaling is CSS `zoom` on the root element, with
 `--ag-zoom-inv` available to cancel it where an element must not scale.
+
+## Bundle shape
+
+Both shells are `lazy()`, so neither pays for the other. Measured with
+`pnpm -C apps/web build`:
+
+| Chunk                       | Raw    | gzip   | Loaded by            |
+| --------------------------- | ------ | ------ | -------------------- |
+| entry (main + shell)        | 73 kB  | 25 kB  | both                 |
+| shared core (api + stores)  | 33 kB  | 10 kB  | both                 |
+| mobile shell                | 26 kB  | 9 kB   | mobile               |
+| desktop shell               | 227 kB | 65 kB  | desktop              |
+| tiptap                      | 419 kB | 144 kB | on chat / notes open |
+| codemirror, xterm           | —      | —      | desktop, on demand   |
+
+Mobile first paint is ~44 kB gzip of JS. Tiptap, `marked` and DOMPurify
+sit behind lazy boundaries (`ChatDetail`, `NotesView`, `SettingsContent`,
+`NewChatDialog`) so the chat *list* paints without them.
 
 ## Targets
 

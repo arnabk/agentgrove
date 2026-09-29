@@ -166,6 +166,23 @@ What you can do with it today.
 - **WebSocket delivery** — instant message broadcast via existing `/ws` channels
 - **Unread badges** — cross-browser unread indicators
 - **Persistent history** — saved to the local SQLite database
+- **Per-person identity** — posts as your signed-in email when auth is enabled, falling back to the server's OS user when it isn't (so several devices don't all appear as the same name)
+
+### Mobile
+
+Open the same URL on a phone and you get a shell built for it — no
+horizontal scrolling, no desktop chrome. Chosen by viewport, so there's
+nothing to install and no second address to remember.
+
+- **Viewport-selected** — `matchMedia` picks the shell; override with `?ui=mobile`, `?ui=desktop`, or `?ui=auto`, and there's a "Use the desktop version" link in Settings
+- **Lightweight** — the shell is ~44 KB gzipped of JS; the desktop shell and its CodeMirror / xterm dependencies never download, and Tiptap arrives only when you open a conversation
+- **Hamburger navigation** — projects and worktrees in a slide-over drawer; worktrees are create / rename / delete
+- **Bottom tabs** — Chats · Team · Notes · Settings
+- **Full AI chat** — a chat list, then the conversation: streaming replies, thinking traces and the tool-activity rail (collapsed by default), attachments, voice dictation, and the same Tiptap composer the desktop uses
+- **All of Settings** — the same six tabs, rendered full-screen rather than in a dialog
+- **Live with the desktop** — the same `/ws?topic=sync` channel, so a chat you start at your desk shows up on the phone without a refresh, and deep links open the same scope on either
+- **Works with or without auth** — both shells sit inside the same login gate
+- **Desktop-only by design** — editor, terminal, diff, database, ClickUp, prompt queue, galaxy map and the command palette. See [ADR-0009](./docs/adr/0009-mobile-shell-and-frontend-layering.md)
 
 ### Reusable Prompt Templates
 
@@ -282,6 +299,7 @@ What you can do with it today.
 All detailed docs live under [`docs/`](./docs/):
 
 - [Architecture](./docs/architecture/overview.md)
+- [Frontend layering + mobile shell](./docs/architecture/frontend.md)
 - [Contributing](./docs/CONTRIBUTING.md)
 - [Local dev guide](./docs/guides/local-dev.md)
 - [Agent providers](./docs/guides/agent-providers.md)
