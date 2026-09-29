@@ -104,7 +104,7 @@ echo "[verify] running browser checks"
 BASE_URL="http://localhost:$FE_PORT" PW_LIVE=1 \
   AGENTGROVE_BE_URL="http://127.0.0.1:$BE_PORT" \
   REPO_ROOT="$REPO" \
-  pnpm -C apps/web exec playwright test e2e/verify-live.spec.ts --reporter=line >"$LOG_DIR/verify-playwright.log" 2>&1
+  pnpm -C apps/web exec playwright test e2e/verify-live.spec.ts e2e/shell-desktop.spec.ts --reporter=line >"$LOG_DIR/verify-playwright.log" 2>&1
 PW_EXIT=$?
 check "10: Full UI flow (welcome + project + shell)" test "$PW_EXIT" = 0
 
