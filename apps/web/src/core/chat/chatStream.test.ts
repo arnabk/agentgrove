@@ -10,9 +10,14 @@ import {
   MAX_PROMPTS_IN_VIEW,
   appendEventBounded,
   applyWsFrame,
+  assistantText,
   chatWsUrl,
+  errorMessages,
   freshChatStore,
+  isPromptPending,
   parseWsFrame,
+  thinkingText,
+  toolEvents,
   type ChatStore,
 } from "@/core/chat/chatStream";
 
@@ -217,5 +222,128 @@ describe("caps", () => {
 describe("chatWsUrl", () => {
   it("builds a ws:// URL on /ws with the topic as a query param", () => {
     expect(chatWsUrl("chat:abc")).toBe("ws://127.0.0.1:4317/ws?topic=chat%3Aabc");
+  });
+});
+
+describe("per-prompt derivations", () => {
+  const tokens = (...texts: string[]) =>
+    texts.map((text) => ({ type: "token", text }) as AgentEvent);
+
+  describe("assistantText", () => {
+    it("concatenates persisted token events", () => {
+      expect(assistantText(prompt("p1", tokens("Hello, ", "world")), {})).toBe("Hello, world");
+    });
+
+    it("prefers the live buffer so a streaming reply isn't shown twice", () => {
+      // The BE mirrors coalesced tokens into events as well, so during a
+      // turn both sources hold text. Summing them would duplicate it.
+      const p = prompt("p1", tokens("Hel", "lo"));
+      expect(assistantText(p, { p1: "Hello" })).toBe("Hello");
+    });
+
+    it("treats an empty live buffer as authoritative, not as absent", () => {
+      expect(assistantText(prompt("p1", tokens("stale")), { p1: "" })).toBe("");
+    });
+
+    it("ignores thinking and tool events", () => {
+      const p = prompt("p1", [
+        { type: "thinking", text: "hmm" },
+        { type: "tool_call", name: "Read" },
+        { type: "token", text: "answer" },
+      ] as unknown as AgentEvent[]);
+      expect(assistantText(p, {})).toBe("answer");
+    });
+  });
+
+  describe("thinkingText", () => {
+    it("concatenates thinking events and ignores tokens", () => {
+      const p = prompt("p1", [
+        { type: "thinking", text: "step 1 " },
+        { type: "token", text: "answer" },
+        { type: "thinking", text: "step 2" },
+      ] as unknown as AgentEvent[]);
+      expect(thinkingText(p, {})).toBe("step 1 step 2");
+    });
+
+    it("is empty for a model that doesn't think", () => {
+      expect(thinkingText(prompt("p1", tokens("hi")), {})).toBe("");
+    });
+
+    it("prefers its own live buffer, not the token one", () => {
+      expect(thinkingText(prompt("p1"), { p1: "live thought" })).toBe("live thought");
+    });
+  });
+
+  describe("toolEvents", () => {
+    it("keeps tool activity, errors and the truncation sentinel", () => {
+      const p = prompt("p1", [
+        { type: "token", text: "x" },
+        { type: "tool_call", name: "Read" },
+        { type: "thinking", text: "hm" },
+        { type: "tool_result", output: "ok" },
+        { type: "error", message: "boom" },
+        { type: "truncated", dropped: 3 },
+        { type: "done" },
+      ] as unknown as AgentEvent[]);
+      expect(toolEvents(p).map((e) => e.type)).toEqual([
+        "tool_call",
+        "tool_result",
+        "error",
+        "truncated",
+      ]);
+    });
+  });
+
+  describe("errorMessages", () => {
+    it("collects provider error text so a failed turn never looks empty", () => {
+      const p = prompt("p1", [
+        { type: "error", message: "rate limited" },
+        { type: "token", text: "partial" },
+        { type: "error", message: "cancelled by user" },
+      ] as unknown as AgentEvent[]);
+      expect(errorMessages(p)).toEqual(["rate limited", "cancelled by user"]);
+    });
+
+    it("is empty for a clean turn", () => {
+      expect(errorMessages(prompt("p1", [{ type: "done" }] as AgentEvent[]))).toEqual([]);
+    });
+  });
+
+  describe("isPromptPending", () => {
+    it("treats an accepted-but-silent prompt as working", () => {
+      expect(isPromptPending(prompt("p1"), {}, {}, true)).toBe(true);
+    });
+
+    it("is working while tokens or thinking are streaming", () => {
+      expect(isPromptPending(prompt("p1", tokens("hi")), { p1: "hi" }, {}, true)).toBe(true);
+      expect(isPromptPending(prompt("p1"), {}, { p1: "hm" }, true)).toBe(true);
+    });
+
+    it("is finished on done and on error", () => {
+      expect(isPromptPending(prompt("p1", [{ type: "done" }] as AgentEvent[]), {}, {}, true)).toBe(
+        false,
+      );
+      expect(
+        isPromptPending(
+          prompt("p1", [{ type: "error", message: "x" }] as unknown as AgentEvent[]),
+          {},
+          {},
+          true,
+        ),
+      ).toBe(false);
+    });
+
+    it("is working when the last event is non-terminal", () => {
+      const p = prompt("p1", [{ type: "tool_call", name: "Read" }] as unknown as AgentEvent[]);
+      expect(isPromptPending(p, {}, {}, true)).toBe(true);
+    });
+
+    it("never reports a non-tail prompt as working, even mid-stream", () => {
+      // A dropped done/error frame would otherwise leave an older bubble
+      // stuck on "working…" for the rest of the session.
+      expect(isPromptPending(prompt("p1"), { p1: "partial" }, {}, false)).toBe(false);
+      const p = prompt("p1", [{ type: "tool_call", name: "Read" }] as unknown as AgentEvent[]);
+      expect(isPromptPending(p, {}, {}, false)).toBe(false);
+    });
   });
 });

@@ -11,7 +11,6 @@ import {
 declareMemorySource("chat.activeView", "Chat events");
 import {
   api,
-  type AgentEvent,
   type ChatView,
   type Prompt,
   type ProviderDescriptor,
@@ -32,9 +31,14 @@ import { useSyncSubscription } from "@/core/lib/crossInstanceSync";
 import {
   MAX_PROMPTS_IN_VIEW,
   applyWsFrame,
+  assistantText as assistantTextOf,
   chatWsUrl,
+  errorMessages as errorMessagesOf,
   freshChatStore,
+  isPromptPending,
   parseWsFrame,
+  thinkingText as thinkingTextOf,
+  toolEvents as toolEventsOf,
   type ChatStore,
   type WsFrame,
 } from "@/core/chat/chatStream";
@@ -2393,69 +2397,13 @@ function PromptRow(props: {
   onRetry: () => void;
   onTruncate: () => void;
 }) {
-  function assistantText(): string {
-    const live = props.liveTokens[props.prompt.id];
-    if (live !== undefined) return live;
-    let out = "";
-    for (const ev of props.prompt.events) {
-      if (ev.type === "token") out += ev.text;
-    }
-    return out;
-  }
-
-  /** Concatenate the model's thinking trace (extended-thinking
-   *  output). Prefers the in-flight live buffer over walking the
-   *  events array. Returns the empty string when the model wasn't
-   *  asked to think (or doesn't support it). */
-  function thinkingText(): string {
-    const live = props.liveThinking[props.prompt.id];
-    if (live !== undefined) return live;
-    let out = "";
-    for (const ev of props.prompt.events) {
-      if (ev.type === "thinking") out += ev.text;
-    }
-    return out;
-  }
-
-  function tools(): AgentEvent[] {
-    return props.prompt.events.filter(
-      (e) =>
-        e.type === "tool_call" ||
-        e.type === "tool_result" ||
-        e.type === "error" ||
-        e.type === "truncated",
-    );
-  }
-
-  /** Error events emitted by the provider (rate limits, spawn failures,
-   *  cancellations, …). Shown prominently in the assistant bubble so the
-   *  user isn't left staring at a blank turn or a collapsed internals panel. */
-  function errorMessages(): string[] {
-    return props.prompt.events.filter((e) => e.type === "error").map((e) => e.message);
-  }
-
-  /** True while the agent hasn't yet finished this prompt. Used to
-   *  show a placeholder assistant bubble (with a pulsing dots
-   *  affordance) before the first token arrives. */
-  function isPending(): boolean {
-    // Only the tail prompt can ever be in-flight: the queue drains one
-    // at a time in order, and once a newer prompt exists this one is
-    // immutable history. Gating the whole function on isLast fixes the
-    // report that sending several messages quickly left EARLIER bubbles
-    // stuck on "working…" — whether they had zero events (queued) or a
-    // missing terminal event (a lost `done`/`error` WS frame).
-    if (!props.isLast) return false;
-    if (
-      props.liveTokens[props.prompt.id] !== undefined ||
-      props.liveThinking[props.prompt.id] !== undefined
-    ) {
-      return true;
-    }
-    const evs = props.prompt.events;
-    if (evs.length === 0) return true;
-    const last = evs[evs.length - 1]!;
-    return last.type !== "done" && last.type !== "error";
-  }
+  // Shared with the mobile timeline — see core/chat/chatStream.
+  const assistantText = () => assistantTextOf(props.prompt, props.liveTokens);
+  const thinkingText = () => thinkingTextOf(props.prompt, props.liveThinking);
+  const tools = () => toolEventsOf(props.prompt);
+  const errorMessages = () => errorMessagesOf(props.prompt);
+  const isPending = () =>
+    isPromptPending(props.prompt, props.liveTokens, props.liveThinking, props.isLast);
 
   // Very long user messages (e.g. a pasted transcript) would otherwise
   // render as one giant bubble that fills the whole timeline. Collapse

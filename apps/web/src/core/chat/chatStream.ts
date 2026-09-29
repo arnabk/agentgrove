@@ -167,3 +167,73 @@ export function chatWsUrl(topic: string): string {
   url.searchParams.set("topic", topic);
   return url.toString();
 }
+
+// ---- Per-prompt derivations -------------------------------------------
+//
+// Pure reads over `(prompt, liveTokens, liveThinking)`. Shared so the
+// desktop and mobile timelines agree on what a turn currently says --
+// in particular on preferring the live buffer over the events array
+// while a turn streams, which is what keeps a reply from appearing
+// twice once the BE's mirrored Token events land.
+
+/** The assistant's reply text so far. */
+export function assistantText(prompt: Prompt, liveTokens: Record<string, string>): string {
+  const live = liveTokens[prompt.id];
+  if (live !== undefined) return live;
+  let out = "";
+  for (const ev of prompt.events) {
+    if (ev.type === "token") out += ev.text;
+  }
+  return out;
+}
+
+/** The model's extended-thinking trace. Empty when the model wasn't
+ *  asked to think, or doesn't support it. */
+export function thinkingText(prompt: Prompt, liveThinking: Record<string, string>): string {
+  const live = liveThinking[prompt.id];
+  if (live !== undefined) return live;
+  let out = "";
+  for (const ev of prompt.events) {
+    if (ev.type === "thinking") out += ev.text;
+  }
+  return out;
+}
+
+/** Tool activity plus the sentinels worth surfacing next to it. */
+export function toolEvents(prompt: Prompt): AgentEvent[] {
+  return prompt.events.filter(
+    (e) =>
+      e.type === "tool_call" ||
+      e.type === "tool_result" ||
+      e.type === "error" ||
+      e.type === "truncated",
+  );
+}
+
+/** Provider errors (rate limits, spawn failures, cancellations). Shown
+ *  prominently so a failed turn never reads as an empty one. */
+export function errorMessages(prompt: Prompt): string[] {
+  return prompt.events.filter((e) => e.type === "error").map((e) => e.message);
+}
+
+/**
+ * Whether the agent is still working on this prompt.
+ *
+ * Gated on `isLast` deliberately: the queue drains one prompt at a time,
+ * so once a newer prompt exists this one is immutable history. Without
+ * the gate, a prompt that never received its terminal `done`/`error`
+ * frame (a dropped WS message) stays stuck on "working…" forever.
+ */
+export function isPromptPending(
+  prompt: Prompt,
+  liveTokens: Record<string, string>,
+  liveThinking: Record<string, string>,
+  isLast: boolean,
+): boolean {
+  if (!isLast) return false;
+  if (liveTokens[prompt.id] !== undefined || liveThinking[prompt.id] !== undefined) return true;
+  const evs = prompt.events;
+  if (evs.length === 0) return true;
+  const last = evs[evs.length - 1]!;
+  return last.type !== "done" && last.type !== "error";
+}
