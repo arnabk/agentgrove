@@ -99,7 +99,7 @@ impl Default for ProviderRegistry {
             // FakeProvider stays in the registry so the BE L4 e2e
             // suite can pin `provider="fake"` for deterministic
             // dispatch. The FE's new-chat dropdown filters Fake
-            // out (see apps/web/src/components/NewChatDialog.tsx)
+            // out (see apps/web/src/features/chat/NewChatDialog.tsx)
             // so users never see a "test-only" choice; the route
             // `GET /api/providers` still returns it for parity
             // with how the rest of the code reasons about

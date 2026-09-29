@@ -13,7 +13,7 @@ state dir is `<repo>/.data`.
 
 ## What each line holds
 
-Emitted by the FE monitor (`apps/web/src/lib/memMonitor.ts`) and enriched
+Emitted by the FE monitor (`apps/web/src/core/lib/memMonitor.ts`) and enriched
 server-side (`crates/agentgrove-api/src/diag.rs::mem_sample`):
 
 | field            | meaning |

@@ -133,7 +133,7 @@ If your provider lives behind an HTTP endpoint rather than a CLI:
   `<state_dir>/secrets.key`; never round-trip them over HTTP.
 - The Settings → Providers tab's `ProviderForm` already wraps the
   encryption + persistence; add an entry to `HTTP_PROVIDERS` in
-  `apps/web/src/components/SettingsModal.tsx`.
+  `apps/web/src/features/settings/SettingsModal.tsx`.
 - Construct the provider on-demand from `providers::resolve()` so
   the runtime config is read at dispatch time, not boot.
 

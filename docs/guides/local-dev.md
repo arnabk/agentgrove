@@ -40,7 +40,7 @@ Two ports are involved, and they are NOT the same app twice:
 
 - **`:5173`** — the Vite dev server (SolidJS UI with hot reload). **Open
   this in dev.** It calls the backend on `:4317` (the `5173 → 4317`
-  mapping is hardcoded in `apps/web/src/api/client.ts`).
+  mapping is hardcoded in `apps/web/src/core/api/client.ts`).
 - **`:4317`** — the Rust backend: the HTTP API + WebSockets. It serves
   the built frontend *too*, but **only when `AGENTGROVE_STATIC_DIR` is
   set** (packaged / service / Docker mode). In that mode `:4317` is the

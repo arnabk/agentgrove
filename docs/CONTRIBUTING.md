@@ -181,7 +181,7 @@ write the failing test first, then the code. CI runs
 - TypeScript: `eslint` + `prettier`. Strict TS (`tsc --noEmit` is a gate).
 - Conventional Commits. DCO sign-off required: `git commit -s`.
 - No native browser dialogs (`window.confirm`, `alert`, `prompt`) — use
-  the themed `confirm` / `alert` from `apps/web/src/components/dialog.tsx`.
+  the themed `confirm` / `alert` from `apps/web/src/ui/dialog.tsx`.
 - Cross-platform paths: `std::path::PathBuf`, never hardcode separators.
 
 ## Adding a feature
