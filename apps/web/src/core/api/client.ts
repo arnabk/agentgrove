@@ -345,6 +345,11 @@ export function setAuthEnabled(on: boolean) {
   authEnabled = on;
 }
 
+/** Whether the backend requires login, as learned at boot. */
+export function isAuthEnabled(): boolean {
+  return authEnabled;
+}
+
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const url = `${baseUrl()}${path}`;
   const headers = new Headers(opts.headers);
@@ -406,9 +411,18 @@ export const api = {
   authConfig: () => req<AuthConfig>("/api/auth/config"),
   /** Boot-time identity probe. Returns `null` on 401 instead of
    *  redirecting, so the app can render a login SCREEN (with a button +
-   *  error messaging) rather than instantly bouncing to Google. */
+   *  error messaging) rather than instantly bouncing to Google.
+   *
+   *  Credentials are gated on `authEnabled` for the same reason `req`
+   *  gates them: an auth-off backend answers with
+   *  `Access-Control-Allow-Origin: *`, and wildcard-origin plus
+   *  `credentials: "include"` is illegal, so the browser blocks the
+   *  request outright and logs a CORS error. Harmless while this was
+   *  only called behind an `if (cfg.enabled)`; `teamChatIdentity` calls
+   *  it either way. */
   async authProbe(): Promise<AuthMe | null> {
-    const res = await fetch(`${baseUrl()}/api/auth/me`, { credentials: "include" });
+    const init: RequestInit = authEnabled ? { credentials: "include" } : {};
+    const res = await fetch(`${baseUrl()}/api/auth/me`, init);
     if (res.status === 401) return null;
     if (!res.ok) throw new ApiError(res.status, `${res.status} ${res.statusText}`);
     return (await res.json()) as AuthMe;
