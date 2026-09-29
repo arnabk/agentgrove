@@ -1,47 +1,21 @@
 import { For, Show, createSignal, onMount } from "solid-js";
-import { logClient } from "@/core/api/client";
+import {
+  DEFAULT_TOAST_MS,
+  dismissToast,
+  pushToast,
+  toasts,
+  type ToastItem,
+} from "@/core/lib/toastBus";
 
-export interface ToastItem {
-  id: string;
-  title: string;
-  message: string;
-  action?: { label: string; onClick: () => void };
-  timeoutMs?: number;
-  /** Severity. Drives the persisted log level on the BE. Defaults to
-   *  "info"; callers showing failures should pass "error". */
-  level?: "error" | "warn" | "info";
-}
-
-const [toasts, setToasts] = createSignal<ToastItem[]>([]);
-
-export function pushToast(item: Omit<ToastItem, "id">) {
-  const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const full: ToastItem = { id, ...item };
-  setToasts((prev) => [...prev, full]);
-  const ms = item.timeoutMs ?? 8000;
-  setTimeout(() => dismissToast(id), ms);
-  // Persist every toast to the BE so transient messages (especially
-  // errors that vanish after a few seconds) are debuggable later from
-  // logs/client.log instead of living only in the browser. Heuristic:
-  // if the caller didn't set a level, treat titles that read like a
-  // failure as errors so they're easy to grep.
-  const level =
-    item.level ?? (/(fail|error|could not|unable|denied)/i.test(item.title) ? "error" : "info");
-  logClient({
-    level,
-    title: item.title,
-    message: item.message,
-    context: { route: window.location.href },
-  });
-}
-
-export function dismissToast(id: string) {
-  setToasts((prev) => prev.filter((t) => t.id !== id));
-}
+// The queue itself is headless and lives in core/lib/toastBus so
+// non-UI layers can raise toasts. Re-exported here because every
+// existing call site imports { pushToast } from this module.
+export { pushToast, dismissToast };
+export type { ToastItem };
 
 function ToastCard(props: { toast: ToastItem }) {
   const [visible, setVisible] = createSignal(false);
-  const ms = props.toast.timeoutMs ?? 8000;
+  const ms = props.toast.timeoutMs ?? DEFAULT_TOAST_MS;
 
   onMount(() => {
     requestAnimationFrame(() => setVisible(true));

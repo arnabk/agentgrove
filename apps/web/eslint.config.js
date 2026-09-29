@@ -85,4 +85,111 @@ export default [
       ...solid.configs.typescript.rules,
     },
   },
+
+  // ---------------------------------------------------------------
+  // Layer boundaries. These make the src/ layering enforceable rather
+  // than conventional, so the desktop and mobile shells can be worked
+  // on in parallel without drifting into each other.
+  //
+  //   core/     headless. May not import ui, features or shells.
+  //   ui/       generic primitives. May not import features or shells.
+  //   features/ shared domain components. May not import shells.
+  //   shells/*  form-factor shells. May not import each other.
+  //
+  // Patterns match the trailing path so both alias ("@/shells/...")
+  // and relative ("../../shells/...") specifiers are caught.
+  // ---------------------------------------------------------------
+  {
+    files: ["src/core/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/ui/**", "@/ui/*"],
+              message: "core/ is headless — it may not import from ui/.",
+            },
+            {
+              group: ["**/features/**", "@/features/*"],
+              message: "core/ is headless — it may not import from features/.",
+            },
+            {
+              group: ["**/shells/**", "@/shells/*"],
+              message: "core/ is headless — it may not import from shells/.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/ui/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/features/**", "@/features/*"],
+              message: "ui/ holds generic primitives — it may not import from features/.",
+            },
+            {
+              group: ["**/shells/**", "@/shells/*"],
+              message: "ui/ holds generic primitives — it may not import from shells/.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/features/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/shells/**", "@/shells/*"],
+              message:
+                "features/ is shared by both shells — it may not import from shells/. Pass a prop instead.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/shells/desktop/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/shells/mobile/**", "@/shells/mobile/*"],
+              message: "Shells may not import each other. Promote shared code to features/ or ui/.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/shells/mobile/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/shells/desktop/**", "@/shells/desktop/*"],
+              message: "Shells may not import each other. Promote shared code to features/ or ui/.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];

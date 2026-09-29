@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 import { api, type DbColumn, type DbConnection, type DbQueryResponse } from "@/core/api/client";
-import { pushToast } from "@/ui/Toast";
+import { pushToast } from "@/core/lib/toastBus";
 
 /** Shared state for the Database feature. The left rail's Database view
  *  (connections + tables tree) and the DB editor tab (SQL + results)
