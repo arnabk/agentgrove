@@ -66,6 +66,7 @@ export default [
         CloseEvent: "readonly",
         MessageEvent: "readonly",
         MediaQueryList: "readonly",
+        ScrollBehavior: "readonly",
         MediaQueryListEvent: "readonly",
         BinaryType: "readonly",
         crypto: "readonly",

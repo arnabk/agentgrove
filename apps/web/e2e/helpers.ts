@@ -39,7 +39,7 @@ async function listProjects(): Promise<{ id: string; name: string; root: string 
   return [];
 }
 
-async function ensureProject(): Promise<string> {
+export async function ensureProject(): Promise<string> {
   const projects = await listProjects();
   if (projects.length > 0) return projects[0]!.id;
   let attempts = 3;
@@ -62,7 +62,7 @@ async function ensureProject(): Promise<string> {
   throw new Error("failed to seed project after retries");
 }
 
-async function createChat(projectId: string): Promise<string> {
+export async function createChat(projectId: string): Promise<string> {
   // Use the fake/test provider so the chat can be exercised without
   // requiring a real Claude / opencode CLI on the test runner.
   return createChatWithProvider(projectId, "fake", "fake");

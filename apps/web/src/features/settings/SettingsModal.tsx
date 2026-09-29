@@ -46,13 +46,71 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "integrations", label: "Integrations" },
 ];
 
+/**
+ * Settings in a centred dialog. Below the `md` breakpoint the dialog
+ * goes full-bleed so a phone isn't reading six tabs of forms through a
+ * letterbox.
+ */
 export default function SettingsModal() {
+  function onKey(e: KeyboardEvent) {
+    if (e.key === "Escape") setSettingsOpen(false);
+  }
+  onMount(() => document.addEventListener("keydown", onKey));
+  onCleanup(() => document.removeEventListener("keydown", onKey));
+
+  return (
+    <Show when={settingsOpen()}>
+      <div
+        class="fixed inset-0 z-50 flex items-center justify-center md:p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
+        data-testid="settings-modal"
+      >
+        <div class="absolute inset-0 bg-black/60" onClick={() => setSettingsOpen(false)} />
+        <div class="relative flex h-full w-full flex-col overflow-hidden border-border bg-bg-1 shadow-2xl md:h-[min(80vh,800px)] md:max-w-2xl md:rounded-xl md:border">
+          <header class="flex shrink-0 items-center justify-between border-b border-border px-5 py-3 pt-[max(env(safe-area-inset-top),0.75rem)] md:pt-3">
+            <h2 class="text-[15px] font-semibold tracking-tight">Settings</h2>
+            <button
+              class="ag-btn ag-btn-ghost ag-btn-icon"
+              onClick={() => setSettingsOpen(false)}
+              aria-label="Close"
+              data-testid="settings-close"
+            >
+              <XIcon />
+            </button>
+          </header>
+          <SettingsContent showDone />
+        </div>
+      </div>
+    </Show>
+  );
+}
+
+/**
+ * The tabs and their bodies, with no surrounding chrome.
+ *
+ * Shared so the mobile shell can render settings as a full-height tab
+ * rather than a modal-inside-a-tab, without a second copy of six tabs
+ * of forms. `showDone` is the only difference: a dialog needs a way to
+ * dismiss itself, a tab does not.
+ */
+/**
+ * True while the settings tabs are actually on screen — inside the
+ * dialog on desktop, or as a tab on mobile. The tab bodies key their
+ * data loads and form resets off this rather than `settingsOpen()`,
+ * which is only ever true for the dialog.
+ */
+const [settingsVisible, setSettingsVisible] = createSignal(false);
+
+export function SettingsContent(props: { showDone?: boolean }) {
   const [tab, setTab] = createSignal<TabId>("appearance");
-  // Signed-in identity (only meaningful when BE auth is enabled). Probed
-  // when the modal opens so the footer can show who you are + Sign out.
+  onMount(() => setSettingsVisible(true));
+  onCleanup(() => setSettingsVisible(false));
+  // Signed-in identity (only meaningful when BE auth is enabled).
+  // Probed on mount so the footer can show who you are + Sign out.
   const [authMe, setAuthMe] = createSignal<AuthMe | null>(null);
-  createEffect(() => {
-    if (!settingsOpen()) return;
+  onMount(() => {
     void api
       .authProbe()
       .then((m) => setAuthMe(m))
@@ -66,116 +124,93 @@ export default function SettingsModal() {
     }
   }
 
-  function onKey(e: KeyboardEvent) {
-    if (e.key === "Escape") setSettingsOpen(false);
-  }
-  onMount(() => document.addEventListener("keydown", onKey));
-  onCleanup(() => document.removeEventListener("keydown", onKey));
-
   return (
-    <Show when={settingsOpen()}>
-      <div
-        class="fixed inset-0 z-50 flex items-center justify-center p-4"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Settings"
-        data-testid="settings-modal"
+    <>
+      {/* Tab strip. Six tabs overflow a phone, so it scrolls sideways
+          rather than wrapping into a second row. */}
+      <nav
+        class="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-bg-1 px-4 pt-3"
+        data-testid="settings-tabs"
       >
-        <div class="absolute inset-0 bg-black/60" onClick={() => setSettingsOpen(false)} />
-        <div class="relative w-full max-w-2xl rounded-xl border border-border bg-bg-1 shadow-2xl overflow-hidden flex flex-col h-[min(80vh,800px)]">
-          <header class="flex items-center justify-between px-5 py-3 border-b border-border">
-            <h2 class="text-[15px] font-semibold tracking-tight">Settings</h2>
+        <For each={TABS}>
+          {(t) => (
             <button
-              class="ag-btn ag-btn-ghost ag-btn-icon"
-              onClick={() => setSettingsOpen(false)}
-              aria-label="Close"
-              data-testid="settings-close"
+              class="ag-btn ag-btn-ghost !py-1.5 !px-3 text-[12.5px] rounded-b-none shrink-0"
+              classList={{ "!bg-bg-3 !text-fg": tab() === t.id }}
+              onClick={() => setTab(t.id)}
+              data-testid={`settings-tab-${t.id}`}
             >
-              <XIcon />
+              {t.label}
             </button>
-          </header>
+          )}
+        </For>
+      </nav>
 
-          {/* Tab strip */}
-          <nav
-            class="flex gap-1 px-4 pt-3 border-b border-border bg-bg-1"
-            data-testid="settings-tabs"
-          >
-            <For each={TABS}>
-              {(t) => (
-                <button
-                  class="ag-btn ag-btn-ghost !py-1.5 !px-3 text-[12.5px] rounded-b-none"
-                  classList={{ "!bg-bg-3 !text-fg": tab() === t.id }}
-                  onClick={() => setTab(t.id)}
-                  data-testid={`settings-tab-${t.id}`}
-                >
-                  {t.label}
-                </button>
-              )}
-            </For>
-          </nav>
-
-          <div class="px-5 py-5 overflow-y-auto flex-1">
-            <Show when={tab() === "appearance"}>
-              <AppearanceTab />
-            </Show>
-            <Show when={tab() === "agents"}>
-              <AgentsTab />
-            </Show>
-            <Show when={tab() === "prompts"}>
-              <PromptsTab />
-            </Show>
-            <Show when={tab() === "providers"}>
-              <ProvidersTab />
-            </Show>
-            <Show when={tab() === "backups"}>
-              <BackupsTab />
-            </Show>
-            <Show when={tab() === "integrations"}>
-              <IntegrationsTab />
-            </Show>
-          </div>
-
-          <footer class="flex items-center justify-between px-5 py-3 border-t border-border">
-            <div class="text-[11px] text-fg-subtle">
-              <span>AgentGrove v{latestVersion()?.current ?? "—"}</span>
-              <Show when={latestVersion()?.update_available}>
-                <span class="ml-2 text-accent">
-                  <a
-                    href={latestVersion()?.html_url ?? undefined}
-                    target="_blank"
-                    rel="noreferrer"
-                    class="hover:underline"
-                  >
-                    v{latestVersion()?.latest} available →
-                  </a>
-                </span>
-              </Show>
-            </div>
-            <div class="flex items-center gap-3">
-              <Show when={authMe()?.auth_enabled && authMe()?.authenticated}>
-                <span class="text-[11px] text-fg-subtle" data-testid="settings-signed-in">
-                  {authMe()?.email}
-                </span>
-                <button
-                  class="ag-btn ag-btn-ghost ag-btn-sm"
-                  onClick={() => void signOut()}
-                  data-testid="settings-signout"
-                >
-                  Sign out
-                </button>
-              </Show>
-              <button
-                class="ag-btn ag-btn-primary"
-                onClick={() => setSettingsOpen(false)}
-                data-testid="settings-done"
-              >
-                Done
-              </button>
-            </div>
-          </footer>
-        </div>
+      <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+        <Show when={tab() === "appearance"}>
+          <AppearanceTab />
+        </Show>
+        <Show when={tab() === "agents"}>
+          <AgentsTab />
+        </Show>
+        <Show when={tab() === "prompts"}>
+          <PromptsTab />
+        </Show>
+        <Show when={tab() === "providers"}>
+          <ProvidersTab />
+        </Show>
+        <Show when={tab() === "backups"}>
+          <BackupsTab />
+        </Show>
+        <Show when={tab() === "integrations"}>
+          <IntegrationsTab />
+        </Show>
       </div>
-    </Show>
+
+      <footer class="flex shrink-0 items-center justify-between gap-3 border-t border-border px-5 py-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] md:pb-3">
+        <div class="min-w-0 text-[11px] text-fg-subtle">
+          <span>AgentGrove v{latestVersion()?.current ?? "—"}</span>
+          <Show when={latestVersion()?.update_available}>
+            <span class="ml-2 text-accent">
+              <a
+                href={latestVersion()?.html_url ?? undefined}
+                target="_blank"
+                rel="noreferrer"
+                class="hover:underline"
+              >
+                v{latestVersion()?.latest} available →
+              </a>
+            </span>
+          </Show>
+        </div>
+        <div class="flex shrink-0 items-center gap-3">
+          <Show when={authMe()?.auth_enabled && authMe()?.authenticated}>
+            <span
+              class="max-w-[120px] truncate text-[11px] text-fg-subtle"
+              data-testid="settings-signed-in"
+            >
+              {authMe()?.email}
+            </span>
+            <button
+              class="ag-btn ag-btn-ghost ag-btn-sm"
+              onClick={() => void signOut()}
+              data-testid="settings-signout"
+            >
+              Sign out
+            </button>
+          </Show>
+          <Show when={props.showDone}>
+            <button
+              class="ag-btn ag-btn-primary"
+              onClick={() => setSettingsOpen(false)}
+              data-testid="settings-done"
+            >
+              Done
+            </button>
+          </Show>
+        </div>
+      </footer>
+    </>
   );
 }
 
@@ -190,7 +225,7 @@ function AppearanceTab() {
   const [editingTheme, setEditingTheme] = createSignal<Theme | null>(null);
 
   createEffect(() => {
-    if (settingsOpen()) {
+    if (settingsVisible()) {
       setTheme(state.themeId);
       setUiFont(state.settings.ui_font ?? FONT_FAMILY_PRESETS[0]!.value);
       setMonoFont(state.settings.mono_font ?? MONO_FAMILY_PRESETS[0]!.value);
@@ -629,7 +664,7 @@ function BackupsTab() {
   }
 
   createEffect(() => {
-    if (!settingsOpen()) return;
+    if (!settingsVisible()) return;
     void refresh();
   });
 
@@ -748,9 +783,9 @@ function PromptsTab() {
    *  on every commit (blur / explicit Save). */
   const [drafts, setDrafts] = createSignal<PromptTemplate[]>(state.settings.prompts ?? []);
 
-  // Re-pull from store whenever the modal reopens.
+  // Re-pull from store whenever the tabs become visible again.
   createEffect(() => {
-    if (settingsOpen()) setDrafts(state.settings.prompts ?? []);
+    if (settingsVisible()) setDrafts(state.settings.prompts ?? []);
   });
 
   async function persist(next: PromptTemplate[]) {
