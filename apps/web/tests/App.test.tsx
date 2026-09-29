@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, waitFor } from "@solidjs/testing-library";
 import { Route, Router } from "@solidjs/router";
-import App from "../src/App";
+import App from "@/shells/desktop/App";
 
 /** Helper that returns 200 + empty array for any list endpoint and the
  *  themes endpoint, simulating a freshly-booted local BE. */

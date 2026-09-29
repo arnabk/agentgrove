@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "@solidjs/testing-library";
-import GalaxyMapDialog from "../src/components/GalaxyMapDialog";
+import GalaxyMapDialog from "@/shells/desktop/GalaxyMapDialog";
 
 // jsdom has no canvas 2d context; stub it so the dialog's draw() is a
 // no-op and we can assert on the DOM-rendered visited panel instead.

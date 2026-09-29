@@ -1,10 +1,10 @@
 import { render } from "solid-js/web";
 import { Route, Router } from "@solidjs/router";
 import { Match, Show, Switch, createResource } from "solid-js";
-import App from "./App";
-import ToastHost from "./components/Toast";
-import { applyCachedZoom } from "./stores/app";
-import { api, setAuthEnabled } from "./api/client";
+import App from "@/shells/desktop/App";
+import ToastHost from "@/ui/Toast";
+import { applyCachedZoom } from "@/core/stores/app";
+import { api, setAuthEnabled } from "@/core/api/client";
 import "./styles.css";
 
 const root = document.getElementById("root");
