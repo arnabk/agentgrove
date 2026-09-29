@@ -4,7 +4,7 @@
 [![Release](https://github.com/arnabk/agentgrove/actions/workflows/release.yml/badge.svg)](https://github.com/arnabk/agentgrove/actions/workflows/release.yml)
 [![Nightly](https://github.com/arnabk/agentgrove/actions/workflows/nightly.yml/badge.svg)](https://github.com/arnabk/agentgrove/actions/workflows/nightly.yml)
 
-AgentGrove is a local developer workspace that keeps your projects, git worktrees, terminal, database, notes, team chat, and AI agents in one window. The backend is Rust; the UI is SolidJS. It runs on Linux, macOS, and Windows.
+AgentGrove is a local developer workspace that keeps your projects, git worktrees, terminal, database, notes, team chat, and AI agents in one window — plus a light [mobile view](#mobile) on the same URL for when you're away from your desk. The backend is Rust; the UI is SolidJS. It runs on Linux, macOS, and Windows.
 
 ## Demo
 
@@ -201,7 +201,7 @@ nothing to install and no second address to remember.
 
 ### Settings & Themes
 
-- **Tabbed modal** — Appearance, Prompts, Providers, Agents, Integrations, Backups
+- **Tabbed** — Appearance, Prompts, Providers, Agents, Integrations, Backups; a dialog on desktop, full-screen on a phone, one implementation
 - **Built-in themes** — Dark, Light, Solarized, Tokyo Night, plus a Material Dark design system
 - **Custom themes** — create and persist personal color themes, applied live across the app
 - **Fonts & size** — 10+ Google Font presets for UI/mono; global 12–28px size control
@@ -251,11 +251,12 @@ nothing to install and no second address to remember.
 - **Open in OS file manager** — reveal any project/worktree folder in Finder/Explorer/Files
 - **Custom dialogs** — themed `confirm`/`alert` replace native dialogs
 - **URL routing** — scope/pane/chat/file encoded in the URL; refresh restores deep state
+- **Layered frontend** — `core` / `ui` / `features` / `shells`, with the boundaries enforced by eslint rather than convention, so the desktop and mobile shells can be worked on in parallel ([layout](./docs/architecture/frontend.md))
 
 ### Quality & Open Source
 
 - **MIT licensed** with a contributing guide, Code of Conduct, and security policy
-- **Tested** — BE endpoint e2e tests + FE Playwright specs; route inventory enforced in CI
+- **Tested** — BE endpoint e2e tests + FE Playwright specs across two projects (Desktop Chrome and a Pixel 7 for the mobile shell); route inventory enforced in CI
 - **3 green CI badges** — CI, Release, Nightly; cross-platform nightly matrix
 - **Auto-release** — every merge to main bumps the version and builds 4-platform binaries + a GitHub Release
 - **ADRs** — architecture decision records documenting key choices
