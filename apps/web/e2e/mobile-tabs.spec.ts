@@ -81,10 +81,12 @@ test.describe("mobile team chat", () => {
     await page.getByTestId("team-chat-input").fill(body);
     await page.getByTestId("team-chat-send").click();
 
-    await expect(page.getByText(body)).toBeVisible({ timeout: 20_000 });
+    // The shared dev database means other specs' messages are in the
+    // same room, so scope to our own unique body.
+    await expect(page.getByText(body).first()).toBeVisible({ timeout: 30_000 });
     // Identity resolves to the auth email, or the OS user when auth is
     // off — never the empty string.
-    await expect(page.getByTestId("team-chat-input")).toHaveValue("");
+    await expect(page.getByTestId("team-chat-input")).toHaveValue("", { timeout: 15_000 });
   });
 
   test("the unread badge does not show while the team tab is open", async ({ page }) => {

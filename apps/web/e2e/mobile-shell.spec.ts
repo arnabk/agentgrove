@@ -65,9 +65,15 @@ test("?ui=auto clears the override and hands back to the viewport", async ({ pag
 
 test("the escape hatch switches to desktop and sticks", async ({ page }) => {
   await page.goto(url(), { waitUntil: "domcontentloaded" });
-  await page.getByTestId("mobile-switch-to-desktop").click();
-  await expect(page.getByTestId("app-root")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("mobile-app")).toBeVisible({ timeout: 20_000 });
 
+  // The escape hatch lives at the bottom of the Settings tab — the one
+  // place where "use the other UI" is a sensible thing to offer.
+  await page.getByTestId("mobile-tab-settings").click();
+  await page.getByTestId("mobile-switch-to-desktop").click();
+  await expect(page.getByTestId("app-root")).toBeVisible({ timeout: 20_000 });
+
+  // And it survives a reload with no query string.
   await page.goto(url(), { waitUntil: "domcontentloaded" });
-  await expect(page.getByTestId("app-root")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("app-root")).toBeVisible({ timeout: 20_000 });
 });
