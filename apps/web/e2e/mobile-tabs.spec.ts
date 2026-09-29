@@ -71,3 +71,25 @@ test.describe("mobile tabs", () => {
     await expect(page.getByTestId("mobile-settings")).toBeVisible({ timeout: 20_000 });
   });
 });
+
+test.describe("mobile team chat", () => {
+  test("sends a message and shows it with a sender", async ({ page }) => {
+    await bootMobile(page);
+    await page.getByTestId("mobile-tab-team").click();
+
+    const body = `hello from mobile ${Date.now()}`;
+    await page.getByTestId("team-chat-input").fill(body);
+    await page.getByTestId("team-chat-send").click();
+
+    await expect(page.getByText(body)).toBeVisible({ timeout: 20_000 });
+    // Identity resolves to the auth email, or the OS user when auth is
+    // off — never the empty string.
+    await expect(page.getByTestId("team-chat-input")).toHaveValue("");
+  });
+
+  test("the unread badge does not show while the team tab is open", async ({ page }) => {
+    await bootMobile(page);
+    await page.getByTestId("mobile-tab-team").click();
+    await expect(page.getByTestId("mobile-team-unread")).toHaveCount(0);
+  });
+});

@@ -383,6 +383,14 @@ export interface AuthConfig {
   provider: string;
 }
 
+/** One persisted team-chat message. */
+export interface TeamChatMessage {
+  id: string;
+  sender: string;
+  body: string;
+  created_at: string;
+}
+
 export interface AuthMe {
   authenticated: boolean;
   auth_enabled: boolean;
@@ -406,6 +414,44 @@ export const api = {
     return (await res.json()) as AuthMe;
   },
   authLogout: () => req<void>("/api/auth/logout", { method: "POST" }),
+
+  // ---- Team chat ----
+  //
+  // These go through `req` so the session cookie is attached when auth
+  // is enabled. They previously used a bare `fetch`, which meant every
+  // team-chat call 401'd on an auth-enabled server.
+  teamChatMessages: () => req<TeamChatMessage[]>("/api/team-chat/messages"),
+  teamChatSend: (sender: string, body: string) =>
+    req<TeamChatMessage>("/api/team-chat/messages", {
+      method: "POST",
+      body: JSON.stringify({ sender, body }),
+    }),
+  /** The OS user of the machine running the server. */
+  teamChatWhoami: () => req<{ username: string }>("/api/team-chat/whoami"),
+  /**
+   * Who to post as.
+   *
+   * `/api/team-chat/whoami` reports the *server's* OS user, which is
+   * the right answer for a single-developer local instance and the
+   * wrong one the moment a second device connects — every client would
+   * post under the same name. When auth is on, the session email is a
+   * real per-person identity, so prefer it.
+   */
+  async teamChatIdentity(): Promise<string> {
+    try {
+      const me = await api.authProbe();
+      if (me?.authenticated && me.email) return me.email;
+    } catch {
+      // Fall through to the OS user.
+    }
+    try {
+      const who = await api.teamChatWhoami();
+      if (who.username) return who.username;
+    } catch {
+      // Fall through to the placeholder.
+    }
+    return "dev";
+  },
   async health() {
     return req<{ status: string; version: string }>("/health");
   },

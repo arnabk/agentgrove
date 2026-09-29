@@ -108,6 +108,16 @@ BASE_URL="http://localhost:$FE_PORT" PW_LIVE=1 \
 PW_EXIT=$?
 check "10: Full UI flow (welcome + project + shell)" test "$PW_EXIT" = 0
 
+# Mobile shell. Runs in the `mobile` Playwright project (Pixel 7 — real
+# touch, DPR and mobile UA) against the same live stack.
+echo "[verify] running mobile shell checks"
+BASE_URL="http://localhost:$FE_PORT" PW_LIVE=1 \
+  AGENTGROVE_BE_URL="http://127.0.0.1:$BE_PORT" \
+  REPO_ROOT="$REPO" \
+  pnpm -C apps/web exec playwright test --project=mobile --reporter=line >"$LOG_DIR/verify-playwright-mobile.log" 2>&1
+PW_MOBILE_EXIT=$?
+check "11: Mobile shell (selector + nav + tabs + chat)" test "$PW_MOBILE_EXIT" = 0
+
 # ---- summary -------------------------------------------------------------
 echo
 echo "================ VERIFY RESULTS ================"
@@ -121,5 +131,6 @@ if [ "${#FAIL[@]}" -ne 0 ]; then
   echo "--- backend log (tail) ---"; tail -30 "$BE_LOG"
   echo "--- frontend log (tail) ---"; tail -30 "$FE_LOG"
   echo "--- playwright log (tail) ---"; tail -50 "$LOG_DIR/verify-playwright.log" 2>/dev/null || true
+  echo "--- playwright mobile log (tail) ---"; tail -50 "$LOG_DIR/verify-playwright-mobile.log" 2>/dev/null || true
   exit 1
 fi
