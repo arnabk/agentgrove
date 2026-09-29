@@ -12,6 +12,7 @@ import {
 import { api } from "@/core/api/client";
 import { installCrossInstanceSync } from "@/core/lib/crossInstanceSync";
 import { installRouteSync } from "@/core/lib/routeSync";
+import { installViewportScrollGuard } from "@/core/lib/viewportScrollGuard";
 import { switchShell } from "@/core/lib/shellSelect";
 import {
   bootstrap,
@@ -19,6 +20,7 @@ import {
   currentWorktreeId,
   markScopeCompleted,
   selectedChatId,
+  setLatestVersion,
   setTheme,
   setUnreadTeamChat,
   state,
@@ -30,8 +32,9 @@ import { pushToast } from "@/ui/Toast";
 import ChatView from "@/shells/mobile/ChatView";
 
 // Each of these is a tab the user may never open on a phone, and each
-// is heavy: NotesPane is Tiptap, SettingsContent is six tabs of forms.
-const NotesPane = lazy(() => import("@/features/notes/NotesPane"));
+// is heavy: the notes editor is Tiptap, SettingsContent is six tabs of
+// forms.
+const NotesView = lazy(() => import("@/shells/mobile/NotesView"));
 const SettingsContent = lazy(() =>
   import("@/features/settings/SettingsModal").then((m) => ({ default: m.SettingsContent })),
 );
@@ -67,6 +70,10 @@ export default function MobileApp() {
   // URL <-> store sync, so a link opens the same scope on either shell.
   onMount(() => installRouteSync());
 
+  // Without this the notes editor's scrollIntoView scrolls the document
+  // and the header vanishes off the top of the screen.
+  onMount(() => installViewportScrollGuard());
+
   // Live updates from every other connected client. This is what keeps
   // the phone in step with the desktop, so unlike the memory monitor it
   // is not optional on mobile.
@@ -100,6 +107,18 @@ export default function MobileApp() {
     if (mobileTab() === "team") setUnreadTeamChat(false);
   });
 
+  // Populate the version the Settings footer reads. Deliberately no
+  // update toast: the desktop app is where you'd act on a new release,
+  // and a recurring "update available" nag on a phone is just noise.
+  onMount(() => {
+    void api
+      .version()
+      .then(setLatestVersion)
+      .catch(() => {
+        // Offline or GitHub hiccup — the footer just shows a dash.
+      });
+  });
+
   useBackgroundChatNotifications();
 
   const headerTitle = () => {
@@ -123,7 +142,11 @@ export default function MobileApp() {
   return (
     <>
       <Show when={state.ready} fallback={<MobileSplash />}>
-        <div class="flex h-full w-full flex-col overflow-hidden bg-bg" data-testid="mobile-app">
+        <div
+          class="flex w-full flex-col overflow-hidden bg-bg"
+          style={{ height: "calc(100dvh * var(--ag-zoom-inv, 1))" }}
+          data-testid="mobile-app"
+        >
           <header
             class="flex h-14 shrink-0 items-center gap-1 border-b border-border px-1.5 pt-[env(safe-area-inset-top)]"
             data-testid="mobile-header"
@@ -179,11 +202,9 @@ export default function MobileApp() {
                 <TeamChatPane />
               </Match>
               <Match when={mobileTab() === "notes"}>
-                <div class="h-full overflow-hidden">
-                  <Suspense fallback={<TabSpinner />}>
-                    <NotesPane />
-                  </Suspense>
-                </div>
+                <Suspense fallback={<TabSpinner />}>
+                  <NotesView />
+                </Suspense>
               </Match>
               <Match when={mobileTab() === "settings"}>
                 <SettingsTabBody />

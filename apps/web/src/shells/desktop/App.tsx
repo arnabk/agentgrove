@@ -20,6 +20,7 @@ import SettingsModal from "@/features/settings/SettingsModal";
 import TabStrip from "@/shells/desktop/TabStrip";
 import Welcome from "@/shells/desktop/Welcome";
 import { installRouteSync } from "@/core/lib/routeSync";
+import { installViewportScrollGuard } from "@/core/lib/viewportScrollGuard";
 import { installCrossInstanceSync } from "@/core/lib/crossInstanceSync";
 import { declareMemorySource, estimateJsonBytes, recordMemoryUsage } from "@/core/lib/memory";
 import { startMemoryMonitor } from "@/core/lib/memMonitor";
@@ -199,20 +200,9 @@ export default function App() {
   // refreshScopeChats once it mounts (the initial seed creates tabs
   // so ChatPane can mount).
 
-  // CSS zoom on <html> (from font-size scaling in app.ts) makes body's
-  // 100vh render taller than the viewport, creating a ~149 px scroll gap
-  // that ProseMirror's scrollIntoView exploits on paste, formatting, or
-  // selection changes — scrolling the entire viewport up and shifting the
-  // UI. Intercept viewport scroll and immediately reset to 0. This is safe
-  // because the app fills the viewport; all internal scrolling (notes-host,
-  // chat-pane, etc.) uses overflow:auto on their own containers.
-  onMount(() => {
-    const onScroll = () => {
-      if (window.scrollY > 0) window.scrollTo(0, 0);
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    onCleanup(() => window.removeEventListener("scroll", onScroll));
-  });
+  // Keep ProseMirror's scrollIntoView from dragging the whole document
+  // out from under the app chrome. See the guard's own comment.
+  onMount(() => installViewportScrollGuard());
 
   // Memory / resource growth monitor: samples heap + DOM + live WS count
   // on a timer and reports a trend to the client log, so a long-running

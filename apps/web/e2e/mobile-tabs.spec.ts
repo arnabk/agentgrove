@@ -93,3 +93,37 @@ test.describe("mobile team chat", () => {
     await expect(page.getByTestId("mobile-team-unread")).toHaveCount(0);
   });
 });
+
+test.describe("mobile notes", () => {
+  test("the toolbar exposes the editor controls the desktop sidebar has", async ({ page }) => {
+    await bootMobile(page);
+    await page.getByTestId("mobile-tab-notes").click();
+    await expect(page.getByTestId("mobile-notes")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTitle("Todo item")).toBeVisible();
+    await expect(page.getByTitle("Section heading")).toBeVisible();
+    await expect(page.getByTitle("Undo")).toBeVisible();
+    await expect(page.getByTestId("mobile-notes-show-done")).toBeVisible();
+  });
+
+  test("the editor does not scroll the header off the screen", async ({ page }) => {
+    // The root carries a CSS zoom, which makes the document taller than
+    // the viewport; ProseMirror's scrollIntoView used to exploit that
+    // sliver and drag the header away.
+    await bootMobile(page);
+    await page.getByTestId("mobile-tab-notes").click();
+    await expect(page.getByTestId("mobile-notes")).toBeVisible({ timeout: 20_000 });
+    await page.locator(".ag-prose").click();
+    await page.waitForTimeout(500);
+
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    await expect(page.getByTestId("mobile-header")).toBeInViewport();
+    await expect(page.getByTestId("mobile-tab-bar")).toBeInViewport();
+  });
+
+  test("the settings footer shows a real version, not a dash", async ({ page }) => {
+    await bootMobile(page);
+    await page.getByTestId("mobile-tab-settings").click();
+    await expect(page.getByTestId("settings-tabs")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText(/AgentGrove v\d+\.\d+\.\d+/)).toBeVisible({ timeout: 20_000 });
+  });
+});
