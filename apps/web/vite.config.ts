@@ -32,6 +32,22 @@ export default defineConfig({
     host: "0.0.0.0",
     allowedHosts: true,
     headers: isolationHeaders,
+    // Same-origin BE access when the FE is reached through a reverse
+    // tunnel (no :5173 in the URL → baseUrl() is "" → relative calls).
+    // Local :5173 use still talks to :4317 directly.
+    proxy: {
+      "/api": { target: "http://127.0.0.1:4317", ws: true },
+      "/ws": { target: "http://127.0.0.1:4317", ws: true },
+      "/health": "http://127.0.0.1:4317",
+    },
+    // The dev server's /@fs route bypasses BE auth. Confine it to the
+    // FE package + installed deps, and hard-deny the state dir (Google
+    // secret, session-sealing key, DB) in case the allow list widens.
+    fs: {
+      strict: true,
+      allow: [__dirname, path.resolve(__dirname, "../../node_modules")],
+      deny: [".env", ".env.*", "*.{crt,pem,key}", "**/.git/**", "**/.data/**"],
+    },
   },
   preview: {
     headers: isolationHeaders,

@@ -52,6 +52,32 @@ last `pnpm -C apps/web build`, which may be **stale**. In dev, use
 `:5173` (the live one) and either don't set `AGENTGROVE_STATIC_DIR` or
 rebuild `dist` if you want `:4317` to reflect current FE code.
 
+### Reaching the dev UI from another host (tunnel / reverse proxy)
+
+The Vite dev server proxies `/api`, `/ws` and `/health` to `:4317`, so
+`:5173` also works as a **single origin**. When the page is served
+without `:5173` in the URL (e.g. `https://agentgrove.example.com` via a
+tunnel), the FE uses relative URLs and Vite forwards them to the
+backend — expose only `:5173`, never `:4317` separately.
+
+Example with fxtunnel, kept alive by launchd
+(`~/Library/LaunchAgents/com.agentgrove.fxtunnel.plist`, `RunAtLoad` +
+`KeepAlive`), whose script waits for `:5173` and then runs:
+
+```bash
+fxtunnel http 5173 --domain agentgrove --server "$FXTUNNEL_SERVER" --token "$FXTUNNEL_TOKEN"
+```
+
+**Enable Google login before exposing the app** — the UI gives shell,
+file and agent access to this machine. Point `AGENTGROVE_PUBLIC_URL` and
+`AGENTGROVE_APP_URL` at the public origin (see
+[SECURITY.md](../SECURITY.md#google-login-optional)).
+
+The dev server's `/@fs` route bypasses backend auth, so
+`vite.config.ts` restricts it to `apps/web` + `node_modules` and denies
+`**/.data/**`, `.env*`, keys and `.git`. Keep those rules if you edit
+the config.
+
 ## Running as a service (auto-start on login, restart on crash)
 
 If you keep losing the app after a reboot, install it as a native OS

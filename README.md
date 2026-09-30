@@ -239,6 +239,7 @@ nothing to install and no second address to remember.
 - **Google sign-in** — set `AGENTGROVE_GOOGLE_CLIENT_ID` + `_SECRET` to require login; server-side OAuth (secret never touches the browser)
 - **Access control** — restrict by domain (`AGENTGROVE_AUTH_ALLOWED_DOMAINS`) and/or exact email (`AGENTGROVE_AUTH_ALLOWED_EMAILS`)
 - **Stateless sessions** — the session cookie is an AEAD-sealed blob signed with the machine-bound keyring; no session table
+- **Remote access via tunnel** — the dev server proxies `/api` + `/ws` to the backend, so one tunnel to `:5173` serves the whole app from a single origin; its file route is locked down so it can't leak the state dir ([guide](./docs/guides/local-dev.md#reaching-the-dev-ui-from-another-host-tunnel--reverse-proxy))
 - See [`docs/SECURITY.md`](./docs/SECURITY.md#google-login-optional) for setup + the Google Cloud Console redirect URI
 
 ### Developer Experience

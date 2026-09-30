@@ -33,6 +33,11 @@ Out of scope:
 - Remote bind (`AGENTGROVE_BIND=0.0.0.0`) is allowed but the server logs
   a warning. Front it with a reverse proxy that adds TLS, and enable
   auth.
+- The Vite dev server (`:5173`) listens on all interfaces and proxies
+  the API, so a tunnel to `:5173` exposes the whole app. Its `/@fs` file
+  route is outside backend auth; `vite.config.ts` confines it to the FE
+  package and denies the state dir (`.data/` holds the OAuth secret,
+  session key and DB), `.env*`, keys and `.git`.
 - Provider API keys are stored in the OS keyring
   ([`keyring`](https://crates.io/crates/keyring) crate), never in the
   database.
@@ -62,6 +67,14 @@ Authorized redirect URI of `<AGENTGROVE_PUBLIC_URL>/api/auth/callback`:
 
 - Local dev: `http://localhost:4317/api/auth/callback`
 - Prod: `https://agentgrove.poc.dev.theysaid.io/api/auth/callback`
+
+When served through a tunnel or reverse proxy, set **both**
+`AGENTGROVE_PUBLIC_URL` and `AGENTGROVE_APP_URL` to the public origin
+(e.g. `https://agentgrove.poc.dev.theysaid.io`) — the Vite proxy routes
+`/api/auth/callback` to the backend on the same origin. Only one
+callback origin is supported at a time, so login then works via the
+public URL only (an existing local session keeps working until it
+expires). An `https` `PUBLIC_URL` also marks the cookies `Secure`.
 
 **Sessions** are stateless: the cookie is an AEAD-sealed blob
 (`{email, name, picture, exp}`) signed with the machine-bound keyring —
