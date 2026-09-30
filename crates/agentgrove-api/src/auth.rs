@@ -60,6 +60,12 @@ pub struct AuthConfig {
     /// FE origin to land on after login. Defaults to `public_url`; set
     /// separately in dev where FE (:5173) and BE (:4317) differ.
     pub app_url: String,
+    /// Extra single-origin deployments (tunnel / reverse proxy), e.g.
+    /// `https://agentgrove.example.com`. A request arriving on one of
+    /// these hosts uses that origin for BOTH the OAuth callback and the
+    /// post-login landing; anything else falls back to `public_url` /
+    /// `app_url`. Allowlist, so a spoofed Host can't steer redirects.
+    pub extra_origins: Vec<String>,
 }
 
 impl AuthConfig {
@@ -92,6 +98,10 @@ impl AuthConfig {
             .ok()
             .map(|s| s.trim_end_matches('/').to_string())
             .unwrap_or_else(|| public_url.clone());
+        let extra_origins = csv_lower("AGENTGROVE_AUTH_EXTRA_ORIGINS")
+            .into_iter()
+            .map(|o| o.trim_end_matches('/').to_string())
+            .collect();
         Some(Self {
             client_id,
             client_secret,
@@ -99,13 +109,37 @@ impl AuthConfig {
             allowed_emails,
             public_url,
             app_url,
+            extra_origins,
         })
     }
 
-    fn redirect_uri(&self) -> String {
-        format!("{}/api/auth/callback", self.public_url)
+    /// `(callback origin, landing origin)` for this request. Uses the
+    /// forwarded host (tunnel/proxy) or `Host`, but only when it matches
+    /// an allowlisted extra origin — whose scheme we trust, not the
+    /// proxy's `X-Forwarded-Proto` (fxtunnel reports `http` over TLS).
+    fn origins_for(&self, headers: &header::HeaderMap) -> (&str, &str) {
+        let host = headers
+            .get("x-forwarded-host")
+            .or_else(|| headers.get(header::HOST))
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.split(',').next())
+            .map(str::trim)
+            .unwrap_or_default();
+        match self.extra_origins.iter().find(|o| {
+            o.split_once("://")
+                .is_some_and(|(_, h)| h.eq_ignore_ascii_case(host))
+        }) {
+            Some(o) => (o, o),
+            None => (&self.public_url, &self.app_url),
+        }
     }
+}
 
+fn redirect_uri(public: &str) -> String {
+    format!("{public}/api/auth/callback")
+}
+
+impl AuthConfig {
     /// True when `email` may sign in. Email + domain allowlists are
     /// ANDed and each is skipped when empty: the email (if any) must
     /// match an exact address, the domain (if any) must match the part
@@ -221,10 +255,11 @@ pub async fn me(State(state): State<AppState>, req: Request<Body>) -> Response {
 }
 
 /// `GET /api/auth/login` — redirect to Google's consent screen.
-pub async fn login(State(state): State<AppState>) -> Response {
+pub async fn login(State(state): State<AppState>, req: Request<Body>) -> Response {
     let Some(cfg) = state.auth.as_ref() else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    let (public, _) = cfg.origins_for(req.headers());
     // CSRF: random state echoed back on the callback via a short-lived
     // cookie. ponytail: single opaque nonce, no PKCE (confidential
     // client already holds the secret); add PKCE if we ever ship a
@@ -243,9 +278,9 @@ pub async fn login(State(state): State<AppState>) -> Response {
          &client_id={cid}&redirect_uri={ru}&scope={scope}&state={csrf}\
          &access_type=online&prompt=select_account{hd}",
         cid = urlencode(&cfg.client_id),
-        ru = urlencode(&cfg.redirect_uri()),
+        ru = urlencode(&redirect_uri(public)),
     );
-    let secure = cfg.public_url.starts_with("https");
+    let secure = public.starts_with("https");
     let cookie = format!(
         "ag_csrf={csrf}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600{}",
         if secure { "; Secure" } else { "" }
@@ -289,6 +324,10 @@ pub async fn callback(
     if q.code.is_empty() || csrf_cookie.as_deref() != Some(q.state.as_str()) {
         return (StatusCode::BAD_REQUEST, "invalid oauth state").into_response();
     }
+    // Same origin pick as /login: Google echoes back to the host the
+    // login started on, and the token exchange must repeat that URI.
+    let (public, app) = cfg.origins_for(req.headers());
+    let callback_uri = redirect_uri(public);
 
     // Exchange the authorization code for tokens.
     let client = reqwest::Client::new();
@@ -298,7 +337,7 @@ pub async fn callback(
             ("code", q.code.as_str()),
             ("client_id", cfg.client_id.as_str()),
             ("client_secret", cfg.client_secret.as_str()),
-            ("redirect_uri", cfg.redirect_uri().as_str()),
+            ("redirect_uri", callback_uri.as_str()),
             ("grant_type", "authorization_code"),
         ])
         .send()
@@ -350,7 +389,7 @@ pub async fn callback(
         .unwrap_or(false);
     if email.is_empty() || !verified || !cfg.email_allowed(email) {
         tracing::warn!(email, "auth: account not allowed");
-        let to = format!("{}/?auth_error=forbidden", cfg.app_url);
+        let to = format!("{app}/?auth_error=forbidden");
         return (StatusCode::FOUND, [(header::LOCATION, to)]).into_response();
     }
 
@@ -371,7 +410,7 @@ pub async fn callback(
     let Some(sealed) = seal_session(&state, &session) else {
         return (StatusCode::INTERNAL_SERVER_ERROR, "session seal failed").into_response();
     };
-    let secure = cfg.public_url.starts_with("https");
+    let secure = public.starts_with("https");
     let set = set_cookie_header(&sealed, SESSION_TTL_SECS as i64, secure);
     // Clear the CSRF cookie and land the user in the app. AppendHeaders
     // preserves BOTH Set-Cookie headers (a plain tuple array would
@@ -384,18 +423,18 @@ pub async fn callback(
                 header::SET_COOKIE,
                 "ag_csrf=; HttpOnly; Path=/; Max-Age=0".to_string(),
             ),
-            (header::LOCATION, cfg.app_url.clone()),
+            (header::LOCATION, app.to_string()),
         ]),
     )
         .into_response()
 }
 
 /// `POST /api/auth/logout` — clear the session cookie.
-pub async fn logout(State(state): State<AppState>) -> Response {
+pub async fn logout(State(state): State<AppState>, req: Request<Body>) -> Response {
     let secure = state
         .auth
         .as_ref()
-        .map(|c| c.public_url.starts_with("https"))
+        .map(|c| c.origins_for(req.headers()).0.starts_with("https"))
         .unwrap_or(false);
     let cleared = set_cookie_header("", 0, secure);
     (StatusCode::NO_CONTENT, [(header::SET_COOKIE, cleared)]).into_response()
@@ -455,7 +494,44 @@ mod tests {
             allowed_emails: emails.iter().map(|e| e.to_string()).collect(),
             public_url: "https://app.example.com".into(),
             app_url: "https://app.example.com".into(),
+            extra_origins: vec![],
         }
+    }
+
+    fn hdrs(pairs: &[(&'static str, &str)]) -> header::HeaderMap {
+        let mut h = header::HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(*k, v.parse().unwrap());
+        }
+        h
+    }
+
+    #[test]
+    fn origin_follows_allowlisted_host_else_falls_back() {
+        let mut c = cfg(&[]);
+        c.public_url = "http://localhost:4317".into();
+        c.app_url = "http://localhost:5173".into();
+        c.extra_origins = vec!["https://agentgrove.example.com".into()];
+        let local = ("http://localhost:4317", "http://localhost:5173");
+        let tunnel = (
+            "https://agentgrove.example.com",
+            "https://agentgrove.example.com",
+        );
+        // Direct localhost hit → configured dev origins.
+        assert_eq!(c.origins_for(&hdrs(&[("host", "localhost:4317")])), local);
+        // Tunnel: Vite proxy rewrites Host to 127.0.0.1:4317 but keeps
+        // X-Forwarded-Host → the tunnel origin wins, scheme from config.
+        assert_eq!(
+            c.origins_for(&hdrs(&[
+                ("host", "127.0.0.1:4317"),
+                ("x-forwarded-host", "Agentgrove.Example.com"),
+                ("x-forwarded-proto", "http"),
+            ])),
+            tunnel
+        );
+        // Unknown / spoofed host can't steer the redirect.
+        assert_eq!(c.origins_for(&hdrs(&[("host", "evil.com")])), local);
+        assert_eq!(c.origins_for(&hdrs(&[])), local);
     }
     fn cfg(domains: &[&str]) -> AuthConfig {
         cfg2(domains, &[])
@@ -494,7 +570,7 @@ mod tests {
     #[test]
     fn redirect_uri_is_public_url_plus_callback() {
         assert_eq!(
-            cfg(&[]).redirect_uri(),
+            redirect_uri(&cfg(&[]).public_url),
             "https://app.example.com/api/auth/callback"
         );
     }

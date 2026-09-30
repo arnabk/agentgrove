@@ -56,6 +56,7 @@ environment; the OS-managed service sources them from the gitignored
 | `AGENTGROVE_AUTH_ALLOWED_EMAILS` | Comma-separated exact emails allowed. Empty = don't restrict by email. When set, ONLY these addresses may sign in. |
 | `AGENTGROVE_PUBLIC_URL` | BE origin. Builds the OAuth redirect URI (`<PUBLIC_URL>/api/auth/callback`, which Google calls back to). |
 | `AGENTGROVE_APP_URL` | FE origin to land on after login. Defaults to `PUBLIC_URL`; set separately in dev (FE `:5173` vs BE `:4317`). |
+| `AGENTGROVE_AUTH_EXTRA_ORIGINS` | Comma-separated extra single-origin deployments (tunnel / reverse proxy). A login arriving on one of these hosts uses that origin for both the callback and the landing page. |
 
 Both `CLIENT_ID` and `CLIENT_SECRET` must be present or auth stays off.
 The domain and email allowlists are ANDed (each is skipped when empty),
@@ -68,13 +69,16 @@ Authorized redirect URI of `<AGENTGROVE_PUBLIC_URL>/api/auth/callback`:
 - Local dev: `http://localhost:4317/api/auth/callback`
 - Prod: `https://agentgrove.poc.dev.theysaid.io/api/auth/callback`
 
-When served through a tunnel or reverse proxy, set **both**
-`AGENTGROVE_PUBLIC_URL` and `AGENTGROVE_APP_URL` to the public origin
-(e.g. `https://agentgrove.poc.dev.theysaid.io`) — the Vite proxy routes
-`/api/auth/callback` to the backend on the same origin. Only one
-callback origin is supported at a time, so login then works via the
-public URL only (an existing local session keeps working until it
-expires). An `https` `PUBLIC_URL` also marks the cookies `Secure`.
+When also served through a tunnel or reverse proxy, keep
+`PUBLIC_URL`/`APP_URL` on localhost and list the public origin in
+`AGENTGROVE_AUTH_EXTRA_ORIGINS` (e.g.
+`https://agentgrove.poc.dev.theysaid.io`). A login started on that host
+(matched via `X-Forwarded-Host`, else `Host`) calls back to and lands on
+that same origin; any other host falls back to `PUBLIC_URL`/`APP_URL`.
+Only allowlisted origins are honoured, so a spoofed `Host` can't steer
+the redirect, and the scheme comes from the configured origin, not the
+proxy. Register **every** origin's `/api/auth/callback` in Google Cloud
+Console. Cookies are marked `Secure` when the chosen origin is `https`.
 
 **Sessions** are stateless: the cookie is an AEAD-sealed blob
 (`{email, name, picture, exp}`) signed with the machine-bound keyring —

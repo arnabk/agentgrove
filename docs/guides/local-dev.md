@@ -69,8 +69,9 @@ fxtunnel http 5173 --domain agentgrove --server "$FXTUNNEL_SERVER" --token "$FXT
 ```
 
 **Enable Google login before exposing the app** — the UI gives shell,
-file and agent access to this machine. Point `AGENTGROVE_PUBLIC_URL` and
-`AGENTGROVE_APP_URL` at the public origin (see
+file and agent access to this machine. Add the public origin to
+`AGENTGROVE_AUTH_EXTRA_ORIGINS` so login works on both localhost and the
+tunnel, and register its callback in Google Cloud Console (see
 [SECURITY.md](../SECURITY.md#google-login-optional)).
 
 The dev server's `/@fs` route bypasses backend auth, so

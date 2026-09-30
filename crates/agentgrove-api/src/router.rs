@@ -306,7 +306,8 @@ pub fn build_router(state: AppState) -> Router {
                 "http://localhost:4317",
                 "http://127.0.0.1:4317",
             ]
-            .iter()
+            .into_iter()
+            .chain(cfg.extra_origins.iter().map(String::as_str))
             .filter_map(|o| o.parse::<HeaderValue>().ok())
             .collect();
             CorsLayer::new()
