@@ -281,8 +281,13 @@ pub async fn login(State(state): State<AppState>, req: Request<Body>) -> Respons
         ru = urlencode(&redirect_uri(public)),
     );
     let secure = public.starts_with("https");
+    // Domain-wide CSRF cookie so the callback always sees it: login can
+    // be started on the tunnel (host-only cookie) while the browser
+    // completes it on localhost (or vice versa) — the round-trip then
+    // lands on a different cookie host and a host-only ag_csrf would be
+    // missing → spurious "invalid oauth state".
     let cookie = format!(
-        "ag_csrf={csrf}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600{}",
+        "ag_csrf={csrf}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600; Domain=localhost{}",
         if secure { "; Secure" } else { "" }
     );
     (
@@ -322,7 +327,17 @@ pub async fn callback(
                 .next()
         });
     if q.code.is_empty() || csrf_cookie.as_deref() != Some(q.state.as_str()) {
-        return (StatusCode::BAD_REQUEST, "invalid oauth state").into_response();
+        // Redirect into the app with an error instead of a dead-end 400
+        // page: the FE shows a friendly message and offers to re-login.
+        let (_, app) = cfg.origins_for(req.headers());
+        return (
+            StatusCode::FOUND,
+            [(
+                header::LOCATION,
+                format!("{}/?auth_error=invalid_state", app),
+            )],
+        )
+            .into_response();
     }
     // Same origin pick as /login: Google echoes back to the host the
     // login started on, and the token exchange must repeat that URI.
