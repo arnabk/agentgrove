@@ -75,8 +75,6 @@ export interface Scope {
   /** ID of the currently-focused tab, or null when the strip is
    *  empty. Must match one of `tabs[].id`. */
   activeTab: string | null;
-  /** Whether the right sidebar (Notes + Queue) is visible. */
-  sidebarOpen: boolean;
 
   // ---- Legacy fields kept for migration + backward compat ----
   // The layout write-through still serialises these so an older FE
@@ -103,7 +101,6 @@ function freshScope(): Scope {
   return {
     tabs: [],
     activeTab: null,
-    sidebarOpen: true,
     chatsHydrated: false,
   };
 }
@@ -147,6 +144,12 @@ export const [state, setState] = createStore<AppState>({
 
 /** Visibility of the global Settings modal. */
 export const [settingsOpen, setSettingsOpen] = createSignal(false);
+/** Global right-sidebar (Notes) visibility. Deliberately NOT per-scope:
+ *  collapsing it once keeps it collapsed across every project/worktree,
+ *  matching user expectation. Persisted to localStorage. */
+export const [sidebarOpen, setSidebarOpen] = createSignal(
+  typeof localStorage === "undefined" || localStorage.getItem("ag-sidebar-open") !== "0",
+);
 /** Visibility of the Galaxy Map dialog. */
 export const [galaxyMapOpen, setGalaxyMapOpen] = createSignal(false);
 /** Celestial bodies ever visited across all branches, persisted to the
@@ -405,24 +408,18 @@ export function renameTab(tabId: string, rawTitle: string) {
   }
 }
 
-/** Toggle the right sidebar (Notes + Queue). */
+/** Toggle the right sidebar (Notes) — global across all scopes. */
 export function toggleSidebar() {
-  const key = currentScopeKey();
-  if (!key) return;
-  ensureScope(key);
-  setState(
-    "byScope",
-    key,
-    produce((s) => {
-      s.sidebarOpen = !s.sidebarOpen;
-    }),
-  );
-  scheduleScopeLayoutWrite(key);
+  const next = !sidebarOpen();
+  setSidebarOpen(next);
+  if (typeof localStorage !== "undefined") {
+    localStorage.setItem("ag-sidebar-open", next ? "1" : "0");
+  }
 }
 
 /** Whether the right sidebar is open. */
 export function isSidebarOpen(): boolean {
-  return currentScope()?.sidebarOpen ?? true;
+  return sidebarOpen();
 }
 
 // ---- Backward-compat shims (delegate to unified tabs) -----------------
