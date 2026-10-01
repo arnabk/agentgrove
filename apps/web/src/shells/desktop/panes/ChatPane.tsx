@@ -585,6 +585,14 @@ export default function ChatPane() {
     if (!id) return;
     try {
       const view = await api.getChat(id);
+      // Same stale-response guard as loadChat(): a fast A→B switch may
+      // have moved on before this resolved. Writing A's view into the
+      // store now would clobber the now-active chat B (mixed history) or
+      // repaint a freshly-blanked store (blank window). Drop it.
+      if (activeId() !== id) {
+        cacheChatView(id, view, view.prompts, view.prompts.length >= view.prompts_total);
+        return;
+      }
       setChatStore(
         produce((s) => {
           s.view = view;
@@ -640,6 +648,9 @@ export default function ChatPane() {
     setChatStore("loadingOlder", true);
     try {
       const page = await api.listPrompts(id, oldest.seq, 50);
+      // Stale guard: the user may have switched chats mid-fetch. Don't
+      // prepend A's older page onto chat B's history.
+      if (activeId() !== id) return;
       setChatStore(
         produce((s) => {
           // Combine + cap at MAX_PROMPTS_IN_VIEW.
