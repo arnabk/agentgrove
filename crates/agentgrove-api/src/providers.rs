@@ -60,6 +60,7 @@ impl ProviderDto {
             }
             agentgrove_agents::ProviderId::Kimi => "https://moonshotai.github.io/kimi-cli/",
             agentgrove_agents::ProviderId::Codex => "https://github.com/openai/codex#installation",
+            agentgrove_agents::ProviderId::Kiro => "https://kiro.dev/docs/cli/",
         };
         Self {
             id: d.id.as_str().to_string(),
@@ -96,6 +97,7 @@ impl Default for ProviderRegistry {
             Arc::new(agentgrove_agents::opencode::OpencodeProvider::new()),
             Arc::new(agentgrove_agents::kimi::KimiProvider::new()),
             Arc::new(agentgrove_agents::codex::CodexProvider::new()),
+            Arc::new(agentgrove_agents::kiro::KiroProvider::new()),
             // FakeProvider stays in the registry so the BE L4 e2e
             // suite can pin `provider="fake"` for deterministic
             // dispatch. The FE's new-chat dropdown filters Fake

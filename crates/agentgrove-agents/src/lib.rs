@@ -28,6 +28,7 @@ pub mod claude;
 pub mod codex;
 pub mod fake;
 pub mod kimi;
+pub mod kiro;
 pub mod models_cache;
 pub mod opencode;
 pub mod slash_files;
@@ -116,6 +117,8 @@ pub enum ProviderId {
     Kimi,
     /// OpenAI Codex via the `codex` CLI (`codex exec`).
     Codex,
+    /// Kiro via the `kiro-cli` CLI (`kiro-cli chat`).
+    Kiro,
 }
 
 impl ProviderId {
@@ -127,6 +130,7 @@ impl ProviderId {
             ProviderId::Opencode => "opencode",
             ProviderId::Kimi => "kimi",
             ProviderId::Codex => "codex",
+            ProviderId::Kiro => "kiro",
         }
     }
 }
@@ -143,6 +147,7 @@ pub const PROVIDER_OS_SUPPORT: &[(&str, &[&str])] = &[
     ("opencode", &["macos", "linux"]),
     ("kimi", &["macos", "linux"]),
     ("codex", &["macos", "linux"]),
+    ("kiro", &["macos", "linux"]),
     ("fake", &["macos", "linux", "windows"]),
 ];
 
