@@ -19,6 +19,7 @@ nohup bash scripts/dev.sh > .data/logs/dev-wrapper.log 2>&1 &
 ```
 
 Check first — skip launch if already up:
+
 ```bash
 curl -fsS http://127.0.0.1:4317/health   # BE
 curl -fsS -o /dev/null -w "%{http_code}" http://localhost:5173   # FE -> 200
@@ -35,6 +36,7 @@ Logs: `.data/logs/dev-backend.log`, `.data/logs/dev-frontend.log`.
 ## Commit / push flow
 
 Stage source files only (NOT Cargo.lock):
+
 ```bash
 git add <source files>
 git commit -m "..."
@@ -82,3 +84,7 @@ Reddit thread:
 
 If more than one release landed since the last announcement, post one
 comment covering all of them, newest first.
+
+Gotcha: Reddit's composer overlay intercepts clicks on **Comment**, so a
+click can time out yet still post. After any failed or timed-out submit,
+re-read the thread before retrying; never resubmit blind.
