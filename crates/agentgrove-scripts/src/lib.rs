@@ -207,8 +207,10 @@ pub async fn run_script_with_env(
 #[cfg(unix)]
 async fn kill_tree(pid: Option<u32>) {
     if let Some(pid) = pid {
+        // `--` so procps `kill` (Linux) reads `-<pid>` as a process
+        // group, not an option. macOS `kill` accepts either form.
         let _ = Command::new("kill")
-            .args(["-KILL", &format!("-{pid}")])
+            .args(["-s", "KILL", "--", &format!("-{pid}")])
             .status()
             .await;
     }
