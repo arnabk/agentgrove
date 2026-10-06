@@ -85,6 +85,10 @@ Reddit thread:
 If more than one release landed since the last announcement, post one
 comment covering all of them, newest first.
 
+Skip releases whose notes contain only `Chore` or `Documentation`
+entries: they're internal and not worth announcing. Their entries are
+also left out of the next combined comment.
+
 Gotcha: Reddit's composer overlay intercepts clicks on **Comment**, so a
 click can time out yet still post. After any failed or timed-out submit,
 re-read the thread before retrying; never resubmit blind.

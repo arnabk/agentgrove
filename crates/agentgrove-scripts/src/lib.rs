@@ -144,7 +144,13 @@ pub async fn run_script_with_env(
         }
         cmd.env(k, v);
     }
+    // Own process group, so a timeout can kill the whole tree: package
+    // managers (pnpm, bun) fork workers that would otherwise outlive the
+    // shell and keep writing into the worktree.
+    #[cfg(unix)]
+    cmd.process_group(0);
     let mut child = cmd.spawn()?;
+    let pid = child.id();
 
     let stdout = child.stdout.take().expect("stdout piped");
     let stderr = child.stderr.take().expect("stderr piped");
@@ -165,8 +171,7 @@ pub async fn run_script_with_env(
         }
     });
 
-    let wait = child.wait();
-    let result = tokio::time::timeout(timeout, wait).await;
+    let result = tokio::time::timeout(timeout, child.wait()).await;
 
     match result {
         Ok(Ok(status)) => {
@@ -181,10 +186,33 @@ pub async fn run_script_with_env(
             Err(ScriptError::Io(e))
         }
         Err(_) => {
-            // Timeout — kill child. `Child` no longer has a sync `id()`
-            // after we called `wait()`; use `start_kill` instead.
+            // Timeout: kill the whole process group, then reap the shell.
+            // Previously the child was never killed, so a hung install
+            // kept running and the worktree stayed in `pre_script`.
+            kill_tree(pid).await;
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            // Readers end once every writer of the pipes is gone; don't
+            // block on them if a grandchild escaped the group.
+            out_task.abort();
+            err_task.abort();
             let _ = tx.send(ScriptEvent::Exit { code: -1 });
             Err(ScriptError::Timeout(timeout))
         }
     }
 }
+
+/// SIGKILL the process group led by `pid` (see `process_group(0)`).
+/// Shells out to `kill` because this crate forbids `unsafe`.
+#[cfg(unix)]
+async fn kill_tree(pid: Option<u32>) {
+    if let Some(pid) = pid {
+        let _ = Command::new("kill")
+            .args(["-KILL", &format!("-{pid}")])
+            .status()
+            .await;
+    }
+}
+
+#[cfg(not(unix))]
+async fn kill_tree(_pid: Option<u32>) {}

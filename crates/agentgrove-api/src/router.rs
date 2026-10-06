@@ -329,7 +329,12 @@ pub fn build_router(state: AppState) -> Router {
         state.clone(),
         auth::guard,
     ));
-    let router = guarded.layer(cors).with_state(state);
+    // `route_layer` runs after routing, so `MatchedPath` (the route
+    // template) is available to the slow-request logger.
+    let router = guarded
+        .route_layer(axum::middleware::from_fn(log_slow_requests))
+        .layer(cors)
+        .with_state(state);
 
     // Optional: serve a static FE bundle from `AGENTGROVE_STATIC_DIR`.
     // When set, every request that doesn't match an API / WS route
@@ -346,4 +351,39 @@ pub fn build_router(state: AppState) -> Router {
     } else {
         router
     }
+}
+
+/// Requests slower than this are logged with their route and duration.
+/// Override with `AGENTGROVE_SLOW_REQUEST_MS` (0 logs every request).
+fn slow_request_ms() -> u128 {
+    static MS: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    *MS.get_or_init(|| {
+        std::env::var("AGENTGROVE_SLOW_REQUEST_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(500)
+    })
+}
+
+/// Log any HTTP request that takes longer than [`slow_request_ms`].
+/// Uses the matched route template (`/api/projects/:id/...`) so ids
+/// don't explode the log into one line shape per resource. WebSocket
+/// upgrades return immediately and never trip this.
+async fn log_slow_requests(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let method = req.method().clone();
+    let route = req
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map(|p| p.as_str().to_owned())
+        .unwrap_or_else(|| req.uri().path().to_owned());
+    let started = std::time::Instant::now();
+    let res = next.run(req).await;
+    let ms = started.elapsed().as_millis();
+    if ms >= slow_request_ms() {
+        tracing::warn!(%method, route, status = res.status().as_u16(), ms = ms as u64, "slow request");
+    }
+    res
 }

@@ -132,6 +132,15 @@ async fn cleanup_failed_worktree(
         // Clear any dangling administrative state under .git/worktrees/.
         let _ = git::prune_worktrees(project_root).await;
     }
+    // `git worktree remove` can fail with "Directory not empty" when the
+    // pre-script left untracked files (e.g. node_modules), leaving the
+    // folder orphaned on disk. Only touch paths inside our own
+    // worktrees dir, never a user-supplied custom path.
+    if wt_path.starts_with(state.state_dir.join("worktrees")) && wt_path.exists() {
+        if let Err(e) = tokio::fs::remove_dir_all(wt_path).await {
+            tracing::warn!(wt_id, error = %e, "cleanup: remove leftover worktree dir failed");
+        }
+    }
     // The pre-script branch was created by `git worktree add -b`; drop it
     // so a retry with the same name doesn't collide. `-D` because it may
     // be ahead of base. Harmless if it's already gone.
@@ -232,6 +241,21 @@ pub async fn create(
     let wt_path_for_task = wt_path.clone();
     let topic_for_task = topic.clone();
     tokio::spawn(async move {
+        // Per-stage timing, logged at info so slow creates are visible
+        // in the backend log (`worktree stage` lines).
+        let started = std::time::Instant::now();
+        let mut lap = started;
+        let mut stage_done = |stage: &str| {
+            let now = std::time::Instant::now();
+            tracing::info!(
+                wt_id = %wt_id,
+                stage,
+                ms = now.duration_since(lap).as_millis() as u64,
+                total_ms = now.duration_since(started).as_millis() as u64,
+                "worktree stage"
+            );
+            lap = now;
+        };
         // Step 1: fetch the latest of `base_ref` from `origin`.
         // The remote was validated at request time, so any failure
         // here is a hard error (network down, branch deleted
@@ -270,6 +294,7 @@ pub async fn create(
             );
             return;
         }
+        stage_done("git_fetch");
         state_for_task.logbus.publish(
             &topic_for_task,
             serde_json::json!({"type":"stage","stage":"git_fetch_done"}).to_string(),
@@ -313,6 +338,7 @@ pub async fn create(
             );
             return;
         }
+        stage_done("git_add");
         state_for_task.logbus.publish(
             &topic_for_task,
             serde_json::json!({"type":"stage","stage":"git_add_done"}).to_string(),
@@ -347,11 +373,19 @@ pub async fn create(
                 &script,
                 &wt_path_for_task,
                 &Shell::Auto,
-                Duration::from_secs(120),
+                // Dependency installs on a big monorepo can exceed a few
+                // minutes; the timeout now really kills the script, so
+                // keep it generous enough not to abort a slow-but-working
+                // install.
+                Duration::from_secs(600),
                 envs,
                 tx,
             )
             .await;
+            stage_done("pre_script");
+            if let Err(e) = &res {
+                tracing::warn!(wt_id = %wt_id, error = %e, "worktree pre-script failed");
+            }
             match res {
                 Ok(0) => {}
                 Ok(code) => {
@@ -432,6 +466,7 @@ pub async fn create(
             .worktrees
             .set_status(&wt_id, WorktreeStatus::Ready)
             .await;
+        stage_done("ready");
         state_for_task.logbus.publish(
             &topic_for_task,
             serde_json::json!({"type":"stage","stage":"ready"}).to_string(),

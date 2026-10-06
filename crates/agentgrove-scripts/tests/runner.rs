@@ -75,3 +75,27 @@ async fn long_script_times_out() {
     .unwrap_err();
     assert!(matches!(err, ScriptError::Timeout(_)));
 }
+
+/// A timeout must kill the script's children too, not just the shell:
+/// pnpm/bun spawn workers that otherwise keep writing into the worktree.
+#[cfg(unix)]
+#[tokio::test]
+async fn timeout_kills_background_children() {
+    let dir = tempdir().unwrap();
+    let marker = dir.path().join("still-running");
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let script = format!("(sleep 1; touch '{}') & sleep 5", marker.to_string_lossy());
+    let err = run_script(
+        &script,
+        dir.path(),
+        &Shell::Auto,
+        Duration::from_millis(300),
+        tx,
+    )
+    .await
+    .unwrap_err();
+    assert!(matches!(err, ScriptError::Timeout(_)));
+    // The orphaned child would have touched the marker at ~1s.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(!marker.exists(), "background child survived the timeout");
+}
