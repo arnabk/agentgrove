@@ -39,19 +39,35 @@ fn pad_path(state_dir: &std::path::Path, project_id: &str) -> PathBuf {
         .join(format!("{project_id}.json"))
 }
 
-async fn read_one(state_dir: &std::path::Path, project_id: &str) -> Scratchpad {
+/// Only a missing file means "empty note". Any other IO error or a
+/// corrupt file is surfaced as a 500: answering with an empty body
+/// made the FE show a blank editor whose next save would overwrite
+/// the real (still on-disk) notes.
+async fn read_one(
+    state_dir: &std::path::Path,
+    project_id: &str,
+) -> Result<Scratchpad, (StatusCode, String)> {
     let p = pad_path(state_dir, project_id);
     match fs::read(&p).await {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|_| Scratchpad {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
+            tracing::error!(path = %p.display(), error = %e, "scratchpad: corrupt file");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("corrupt notes file: {e}"),
+            )
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Scratchpad {
             project_id: project_id.to_owned(),
             body: String::new(),
             updated_at: Utc::now(),
         }),
-        Err(_) => Scratchpad {
-            project_id: project_id.to_owned(),
-            body: String::new(),
-            updated_at: Utc::now(),
-        },
+        Err(e) => {
+            tracing::error!(path = %p.display(), error = %e, "scratchpad: read failed");
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("read notes failed: {e}"),
+            ))
+        }
     }
 }
 
@@ -72,8 +88,8 @@ pub struct UpdateBody {
 pub async fn get(
     State(state): State<AppState>,
     Path(project_id): Path<String>,
-) -> Json<Scratchpad> {
-    Json(read_one(&state.state_dir, &project_id).await)
+) -> Result<Json<Scratchpad>, (StatusCode, String)> {
+    read_one(&state.state_dir, &project_id).await.map(Json)
 }
 
 pub async fn put(
@@ -112,8 +128,10 @@ pub async fn put(
 /// reserved [`GLOBAL_NOTE_ID`]. The `project_id` field in the returned
 /// payload echoes that reserved id so the FE can reuse the [`Scratchpad`]
 /// shape unchanged.
-pub async fn get_global(State(state): State<AppState>) -> Json<Scratchpad> {
-    Json(read_one(&state.state_dir, GLOBAL_NOTE_ID).await)
+pub async fn get_global(
+    State(state): State<AppState>,
+) -> Result<Json<Scratchpad>, (StatusCode, String)> {
+    read_one(&state.state_dir, GLOBAL_NOTE_ID).await.map(Json)
 }
 
 pub async fn put_global(

@@ -80,6 +80,25 @@ async fn global_notes_get_returns_empty_initially() {
     assert_eq!(body["project_id"], "__global__");
 }
 
+/// A notes file that exists but can't be parsed must surface as a 500,
+/// never as an empty note — an empty body makes the FE show a blank
+/// editor whose next autosave would overwrite the real file.
+#[tokio::test]
+async fn global_notes_corrupt_file_is_500_not_empty() {
+    let h = BeHarness::start().await;
+    let dir = h.state_dir.join("scratchpads");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("__global__.json"), b"{not json").unwrap();
+
+    let res = h.get("/api/notes").send().await.unwrap();
+    assert_eq!(res.status(), 500);
+    // The file must be left untouched.
+    assert_eq!(
+        std::fs::read(dir.join("__global__.json")).unwrap(),
+        b"{not json"
+    );
+}
+
 #[tokio::test]
 async fn global_notes_put_then_get_roundtrips_and_is_project_independent() {
     let h = BeHarness::start().await;
