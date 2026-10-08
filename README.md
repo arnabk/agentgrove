@@ -89,6 +89,7 @@ What you can do with it today.
 - **CodeMirror 6** — syntax highlighting for JS/TS, JSON, Markdown, Rust, and more
 - **Autosave** — debounced 600ms + blur + file-switch + Cmd/Ctrl+S; no save button
 - **Code folding** — fold/unfold with gutter markers and keyboard shortcuts
+- **Markdown preview** — `.md` files open rendered (headings, lists, tables, code); a Preview / Edit toggle in the header switches to the editor and back without losing autosave or undo, and the last mode is remembered
 - **File size guard** — very large files are blocked to prevent crashes
 
 ### Terminal

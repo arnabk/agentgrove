@@ -50,6 +50,10 @@ interface Props {
   source: string;
   /** Optional class added to the rendered wrapper. */
   class?: string;
+  /** Treat single newlines as line breaks (chat default). Set false for
+   *  documents (.md files), where a newline inside a paragraph is just
+   *  soft wrapping, like GitHub renders it. */
+  breaks?: boolean;
 }
 
 export default function Markdown(props: Props) {
@@ -58,7 +62,7 @@ export default function Markdown(props: Props) {
     if (!src) return "";
     // `marked` returns string|Promise — disable async via the default
     // sync config to keep the render simple.
-    const raw = marked.parse(src, { async: false }) as string;
+    const raw = marked.parse(src, { async: false, breaks: props.breaks ?? true }) as string;
     return DOMPurify.sanitize(raw, {
       USE_PROFILES: { html: true },
       ADD_ATTR: ["target", "rel"],

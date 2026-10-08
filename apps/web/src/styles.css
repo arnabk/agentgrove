@@ -1112,6 +1112,31 @@ textarea::placeholder {
   border: 0;
   border-top: 1px solid var(--ag-border);
 }
+/* Document elements (markdown file preview). */
+.ag-prose h4 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 1em 0 0.3em;
+}
+.ag-prose img {
+  max-width: 100%;
+}
+.ag-prose table {
+  border-collapse: collapse;
+  margin: 0.85em 0;
+  display: block;
+  overflow-x: auto;
+}
+.ag-prose th,
+.ag-prose td {
+  border: 1px solid var(--ag-border);
+  padding: 4px 10px;
+  text-align: left;
+}
+.ag-prose th {
+  background-color: var(--ag-bg-2);
+  font-weight: 600;
+}
 .ag-prose ul[data-type="taskList"] {
   list-style: none;
   padding-left: 0;

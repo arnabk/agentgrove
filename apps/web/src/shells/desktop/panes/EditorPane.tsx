@@ -11,13 +11,18 @@ import { rust } from "@codemirror/lang-rust";
 import { api } from "@/core/api/client";
 import { declareMemorySource, recordMemoryUsage } from "@/core/lib/memory";
 import { selectedFilePath } from "@/core/stores/app";
+import Markdown from "@/ui/Markdown";
+
+const isMarkdown = (p: string | null) => !!p && /\.(md|markdown|mdx)$/i.test(p);
+/** Remembered Preview/Edit choice for markdown files (default: preview). */
+const MD_MODE_KEY = "ag-md-mode";
 
 declareMemorySource("editor.document", "Editor document");
 
 function langFor(path: string): Extension {
   if (path.endsWith(".rs")) return rust();
   if (path.endsWith(".json")) return json();
-  if (path.endsWith(".md")) return markdown();
+  if (isMarkdown(path)) return markdown();
   if (/\.(ts|tsx|js|jsx)$/.test(path)) return javascript({ jsx: true, typescript: true });
   return javascript({ typescript: true });
 }
@@ -49,6 +54,19 @@ export default function EditorPane() {
   const [saving, setSaving] = createSignal(false);
   const [dirty, setDirty] = createSignal(false);
   const [loadErr, setLoadErr] = createSignal<string | null>(null);
+  /** Markdown files: rendered preview vs. CodeMirror source. The editor
+   *  buffer stays mounted underneath either way, so autosave and undo
+   *  history are unaffected by toggling. */
+  const [mdPreview, setMdPreview] = createSignal(localStorage.getItem(MD_MODE_KEY) !== "edit");
+  /** Snapshot of the buffer for the preview, taken when it's shown. */
+  const [previewSrc, setPreviewSrc] = createSignal("");
+  const showPreview = () => isMarkdown(openPath()) && mdPreview();
+  function setMdMode(preview: boolean) {
+    setMdPreview(preview);
+    localStorage.setItem(MD_MODE_KEY, preview ? "preview" : "edit");
+    if (preview) setPreviewSrc(view?.state.doc.toString() ?? "");
+    else queueMicrotask(() => view?.focus());
+  }
   let view: EditorView | null = null;
   /** Path the editor's current buffer belongs to. Distinct from
    *  `openPath()` so writes can target the correct file even if the
@@ -181,6 +199,7 @@ export default function EditorPane() {
       } finally {
         loading = false;
       }
+      setPreviewSrc(f.content);
       setDirty(false);
       setSavedAt(new Date());
       recordMemoryUsage("editor.document", f.content.length * 2);
@@ -258,6 +277,36 @@ export default function EditorPane() {
         >
           {openPath() ?? "No file selected"}
         </div>
+        <Show when={isMarkdown(openPath())}>
+          <div class="flex items-center rounded border border-border overflow-hidden text-[11px]">
+            <button
+              type="button"
+              class="px-2 py-0.5"
+              classList={{
+                "bg-bg-3 text-fg": mdPreview(),
+                "text-fg-subtle hover:text-fg": !mdPreview(),
+              }}
+              aria-pressed={mdPreview()}
+              onClick={() => setMdMode(true)}
+              data-testid="editor-md-preview"
+            >
+              Preview
+            </button>
+            <button
+              type="button"
+              class="px-2 py-0.5 border-l border-border"
+              classList={{
+                "bg-bg-3 text-fg": !mdPreview(),
+                "text-fg-subtle hover:text-fg": mdPreview(),
+              }}
+              aria-pressed={!mdPreview()}
+              onClick={() => setMdMode(false)}
+              data-testid="editor-md-edit"
+            >
+              Edit
+            </button>
+          </div>
+        </Show>
         <Show when={openPath()}>
           <span
             class="ag-chip text-[11px]"
@@ -294,6 +343,11 @@ export default function EditorPane() {
           aria-disabled={!openPath()}
           data-testid="editor-host"
         />
+        <Show when={showPreview()}>
+          <div class="absolute inset-0 overflow-auto bg-bg" data-testid="editor-md-view">
+            <Markdown source={previewSrc()} breaks={false} class="max-w-3xl mx-auto px-8 py-6" />
+          </div>
+        </Show>
         <Show when={!openPath()}>
           <div
             class="absolute inset-0 flex items-center justify-center pointer-events-none"
