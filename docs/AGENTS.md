@@ -67,20 +67,26 @@ list in `.github/workflows/ci.yml` must match).
 
 Every push to `main` makes `release.yml` cut a new version. After each
 push that produces a release, post its notes as a comment on the project's
-Reddit thread:
+Reddit thread (post id `1wwsrm2`):
 
 <https://www.reddit.com/r/coolgithubprojects/comments/1wwsrm2/agentgrove_opensource_local_workspace_for_running/>
 
+Use the `opencli` CLI (it drives the user's logged-in Chrome), not
+Playwright or the shared browser.
+
 1. Wait for the `release` run for your commit to succeed, then read the
    notes: `gh release view --json tagName,body`.
-2. Open the thread in a **new tab** of the shared browser. If Reddit isn't
-   logged in, stop and ask the user. Never enter credentials.
-3. Skip if a comment for this tag already exists on the thread (no
-   double posts).
-4. Post one top-level comment: the version (`vX.Y.Z`), the notes body
-   with commit hashes removed, and the release URL
-   (`https://github.com/arnabk/agentgrove/releases/tag/vX.Y.Z`).
-5. Confirm the comment shows on the thread, then close the tab.
+2. Preflight: `opencli doctor` must show the extension connected and
+   `opencli reddit whoami` must return the account. If not, stop and ask
+   the user. Never log in yourself.
+3. `opencli reddit read 1wwsrm2 -f json`: skip if a comment for this tag
+   already exists (no double posts).
+4. Show the user the exact comment and wait for approval in the same
+   turn: `opencli reddit comment` has no dry run. The comment holds the
+   version (`vX.Y.Z`), the notes body with commit hashes removed, and the
+   release URL (`https://github.com/arnabk/agentgrove/releases/tag/vX.Y.Z`).
+5. Post once with `opencli reddit comment 1wwsrm2 "<text>"`, then re-read
+   the thread and confirm exactly one copy is there.
 
 If more than one release landed since the last announcement, post one
 comment covering all of them, newest first.
@@ -89,6 +95,5 @@ Skip releases whose notes contain only `Chore` or `Documentation`
 entries: they're internal and not worth announcing. Their entries are
 also left out of the next combined comment.
 
-Gotcha: Reddit's composer overlay intercepts clicks on **Comment**, so a
-click can time out yet still post. After any failed or timed-out submit,
-re-read the thread before retrying; never resubmit blind.
+Gotcha: a failed or timed-out post can still have gone through. Re-read
+the thread before retrying; never resubmit blind.
