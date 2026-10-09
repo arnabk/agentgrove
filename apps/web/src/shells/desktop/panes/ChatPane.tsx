@@ -468,8 +468,13 @@ export default function ChatPane() {
     // Guard: if the scope key contains a worktree segment but wt is
     // still null, the store hasn't caught up yet — skip this run.
     if (key && key.includes("::") && key.split("::")[1] && !wt) return;
+    if (!key) return;
     try {
       const all = await api.listProjectChats(pid);
+      // The user may have switched scope while this was in flight. A
+      // late response must not touch the scope they moved to; the
+      // effect re-runs for the new scope with its own fetch.
+      if (currentScopeKey() !== key) return;
       const beChats = all.filter((c) => (c.worktree_id ?? null) === wt);
       const beById = new Map(beChats.map((c) => [c.id, c]));
       const current = scope()?.tabs.filter((t) => t.kind === "chat") ?? [];
@@ -479,7 +484,10 @@ export default function ChatPane() {
         // everything the BE knows about. Once hydrated=true is set
         // (via setScopeChats), an empty list means "user closed
         // everything" and we respect that rather than re-seeding.
-        setScopeChats(beChats.map((c) => ({ id: c.id, title: c.title })));
+        setScopeChats(
+          beChats.map((c) => ({ id: c.id, title: c.title })),
+          key,
+        );
         return;
       }
       if (current.length === 0 && hydrated && beChats.length === 0) {
@@ -491,7 +499,10 @@ export default function ChatPane() {
         // Edge case: hydrated flag was set (possibly from a buggy
         // earlier run) but BE has chats the user never saw. Re-seed
         // rather than hiding them forever.
-        setScopeChats(beChats.map((c) => ({ id: c.id, title: c.title })));
+        setScopeChats(
+          beChats.map((c) => ({ id: c.id, title: c.title })),
+          key,
+        );
         return;
       }
       // Reconcile: keep the local tab order, drop tabs whose chat
@@ -507,7 +518,7 @@ export default function ChatPane() {
           title: beById.get(t.id)!.title,
           ...(t.draft ? { draft: t.draft } : {}),
         }));
-      setScopeChats(reconciled);
+      setScopeChats(reconciled, key);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
@@ -1349,10 +1360,17 @@ export default function ChatPane() {
   async function changeModel(model: string) {
     const c = chat();
     if (!c || c.model === model) return;
+    const key = currentScopeKey();
     try {
       const updated = await api.updateChat(c.id, { model });
+      // Switched away while saving: the store and tab list belong to
+      // another scope now, so leave them alone.
+      if (!key || currentScopeKey() !== key) return;
       setChatStore("view", (v) => (v ? { ...v, ...updated } : v));
-      setScopeChats(tabs().map((t) => (t.id === updated.id ? { ...t, title: updated.title } : t)));
+      setScopeChats(
+        tabs().map((t) => (t.id === updated.id ? { ...t, title: updated.title } : t)),
+        key,
+      );
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }

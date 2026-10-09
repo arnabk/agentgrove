@@ -40,6 +40,7 @@ import {
   bootstrap,
   changesScope,
   currentScope,
+  currentScopeKey,
   currentWorktreeId,
   findChatTab,
   galaxyHistory,
@@ -130,7 +131,8 @@ export default function App() {
   });
 
   // Viewing a scope clears its "finished chat" attention dot — the user
-  // is now looking at it, so there's nothing to return to.
+  // is now looking at it, so there's nothing to return to. Dots on other
+  // scopes are persisted and survive a page refresh.
   createEffect(() => {
     const pid = state.selectedProjectId;
     if (!pid) return;
@@ -151,11 +153,18 @@ export default function App() {
     const scope = currentScope();
     const chatTabs = scope?.tabs?.filter((t: UnifiedTab) => t.kind === "chat") ?? [];
     if (chatTabs.length > 0) return;
+    const key = currentScopeKey();
+    if (!key) return;
     try {
       const all = await api.listProjectChats(pid);
       const beChats = all.filter((c: Chat) => (c.worktree_id ?? null) === wt);
       if (beChats.length > 0) {
-        setScopeChats(beChats.map((c: Chat) => ({ id: c.id, title: c.title })));
+        // Write to the scope this fetch was for, even if the user has
+        // already switched elsewhere.
+        setScopeChats(
+          beChats.map((c: Chat) => ({ id: c.id, title: c.title })),
+          key,
+        );
       }
     } catch {
       /* ignore */

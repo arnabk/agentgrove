@@ -192,27 +192,47 @@ export function isScopeWorking(projectId: string, worktreeId: string | null): bo
 /** Scopes with a background chat that FINISHED while the user was
  *  looking elsewhere. Drives a steady "attention" dot in the left rail
  *  so the user knows which scope to go back to. Keyed like `activeWork`
- *  (`pid` for root, `pid::wid` for a worktree). Cleared when the scope
- *  is focused. */
-export const [completedScopes, setCompletedScopes] = createSignal<Set<string>>(new Set());
+ *  (`pid` for root, `pid::wid` for a worktree). Persisted to
+ *  localStorage so a page refresh doesn't lose track of them; cleared
+ *  only when the user navigates to the scope. */
+const COMPLETED_KEY = "ag-completed-scopes";
+function loadCompleted(): Set<string> {
+  try {
+    const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(COMPLETED_KEY);
+    const arr: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+const [completedScopes, setCompletedSignal] = createSignal<Set<string>>(loadCompleted());
+export { completedScopes };
+function setCompletedScopes(next: Set<string>) {
+  setCompletedSignal(next);
+  try {
+    localStorage.setItem(COMPLETED_KEY, JSON.stringify([...next]));
+  } catch {
+    // Storage full or disabled: the dots still work for this session.
+  }
+}
 
 /** Mark a scope as having an unseen finished chat. No-op if the scope
  *  is currently focused (the user can already see the result). */
 export function markScopeCompleted(projectId: string, worktreeId: string | null) {
   const key = makeKey(projectId, worktreeId);
   if (key === currentScopeKey()) return;
-  setCompletedScopes((s) => (s.has(key) ? s : new Set(s).add(key)));
+  const s = completedScopes();
+  if (!s.has(key)) setCompletedScopes(new Set(s).add(key));
 }
 
-/** Clear the attention flag for a scope (called when it's focused). */
+/** Clear the attention flag for a scope (called when it's visited). */
 export function clearScopeCompleted(projectId: string, worktreeId: string | null) {
   const key = makeKey(projectId, worktreeId);
-  setCompletedScopes((s) => {
-    if (!s.has(key)) return s;
-    const next = new Set(s);
-    next.delete(key);
-    return next;
-  });
+  const s = completedScopes();
+  if (!s.has(key)) return;
+  const next = new Set(s);
+  next.delete(key);
+  setCompletedScopes(next);
 }
 
 /** Does the given scope have an unseen finished chat? */
@@ -488,8 +508,12 @@ export function addChatTab(chat: ChatTab): { ok: boolean; reason?: string } {
   });
 }
 
-export function setScopeChats(chats: ChatTab[]) {
-  const key = currentScopeKey();
+/** Replace the chat tabs of a scope. Pass `forKey` when the list came
+ *  from an async fetch: without it the write targets whatever scope is
+ *  current *now*, so a slow response for project A that lands after the
+ *  user switched to B would overwrite B's tabs (blank chat window). */
+export function setScopeChats(chats: ChatTab[], forKey?: string) {
+  const key = forKey ?? currentScopeKey();
   if (!key) return;
   ensureScope(key);
   setState(
