@@ -816,6 +816,8 @@ export const api = {
   /** Build the URL that streams an upload's raw bytes (used for
    *  thumbnails / previews in the chat input). */
   uploadRawUrl: (id: string) => `${baseUrl()}/api/uploads/${encodeURIComponent(id)}/raw`,
+  /** Raw PDF bytes for the browser's built-in viewer (iframe src). */
+  pdfRawUrl: (path: string) => `${baseUrl()}/api/editor/raw?path=${encodeURIComponent(path)}`,
   // Queue
   getQueue: (chatId: string) => req<QueueState>(`/api/chats/${encodeURIComponent(chatId)}/queue`),
   enqueue: (chatId: string, body: string) =>

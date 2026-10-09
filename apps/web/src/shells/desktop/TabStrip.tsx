@@ -1,4 +1,4 @@
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createEffect, createSignal } from "solid-js";
 import {
   activeTab,
   busyChats,
@@ -168,6 +168,14 @@ export default function TabStrip() {
             }}
             title={`${t.kind}: ${label(t)} — double-click to rename`}
             data-testid={`tab-${t.id}`}
+            aria-selected={t.id === active()}
+            ref={(el) => {
+              // Bring the active tab into view: opening a file from the tree
+              // appends a tab at the end of the strip, often off-screen.
+              createEffect(() => {
+                if (t.id === active()) el.scrollIntoView({ block: "nearest", inline: "nearest" });
+              });
+            }}
           >
             <span class="text-fg-subtle shrink-0">{icon(t.kind)}</span>
             {/* Pulsing dot when this chat has an in-flight agent turn.

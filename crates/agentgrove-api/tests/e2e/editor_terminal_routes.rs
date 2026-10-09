@@ -36,6 +36,48 @@ async fn editor_read_write_roundtrip() {
 }
 
 #[tokio::test]
+async fn editor_raw_serves_pdf_bytes_and_refuses_other_files() {
+    let h = BeHarness::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let pdf = dir.path().join("doc.PDF");
+    let bytes: &[u8] = b"%PDF-1.4\n\xff\x00binary\n%%EOF";
+    std::fs::write(&pdf, bytes).unwrap();
+    let txt = dir.path().join("secret.txt");
+    std::fs::write(&txt, "not a pdf").unwrap();
+    let raw = |p: &std::path::Path| {
+        format!(
+            "/api/editor/raw?path={}",
+            urlencoding::encode(&p.to_string_lossy())
+        )
+    };
+
+    // PDF (any extension case): exact bytes, rendered inline.
+    let r = h.get_auth(&raw(&pdf)).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.headers()["content-type"], "application/pdf");
+    assert_eq!(
+        r.headers()["content-disposition"],
+        "inline; filename=\"doc.PDF\""
+    );
+    // Needed to embed it from the cross-origin-isolated dev UI.
+    assert_eq!(r.headers()["cross-origin-resource-policy"], "cross-origin");
+    assert_eq!(r.headers()["cross-origin-embedder-policy"], "require-corp");
+    assert_eq!(r.bytes().await.unwrap().as_ref(), bytes);
+
+    // Anything else is refused, so this isn't a generic file download.
+    let r = h.get_auth(&raw(&txt)).send().await.unwrap();
+    assert_eq!(r.status(), 400);
+
+    // Missing file → 404.
+    let r = h
+        .get_auth(&raw(&dir.path().join("missing.pdf")))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 404);
+}
+
+#[tokio::test]
 async fn editor_delete_file_removes_it() {
     let h = BeHarness::start().await;
     let dir = tempfile::tempdir().unwrap();

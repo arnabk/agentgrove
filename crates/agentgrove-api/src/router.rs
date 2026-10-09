@@ -242,6 +242,7 @@ pub fn build_router(state: AppState) -> Router {
                 .post(editor::write_file)
                 .delete(editor::delete_file),
         )
+        .route("/api/editor/raw", get(editor::raw))
         .route("/api/editor/diff", get(editor::diff))
         .route("/api/editor/tree", get(editor::tree))
         // Themes

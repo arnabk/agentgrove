@@ -14,6 +14,7 @@ import { selectedFilePath } from "@/core/stores/app";
 import Markdown from "@/ui/Markdown";
 
 const isMarkdown = (p: string | null) => !!p && /\.(md|markdown|mdx)$/i.test(p);
+const isPdf = (p: string | null) => !!p && /\.pdf$/i.test(p);
 /** Remembered Preview/Edit choice for markdown files (default: preview). */
 const MD_MODE_KEY = "ag-md-mode";
 
@@ -183,6 +184,29 @@ export default function EditorPane() {
       await flush();
     }
     setLoadErr(null);
+    if (isPdf(p)) {
+      // Binary: shown by the browser's PDF viewer, never loaded into
+      // the text buffer. bufferPath stays null and the buffer is read-
+      // only, so autosave can't write decoded text over the file.
+      loading = true;
+      try {
+        setOpenPath(p);
+        bufferPath = null;
+        view?.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: "" },
+          effects: [
+            langComp.reconfigure([]),
+            editableComp.reconfigure([EditorView.editable.of(false)]),
+          ],
+        });
+      } finally {
+        loading = false;
+      }
+      setDirty(false);
+      setSavedAt(null);
+      recordMemoryUsage("editor.document", 0);
+      return;
+    }
     try {
       const f = await api.readFile(p);
       loading = true;
@@ -307,7 +331,7 @@ export default function EditorPane() {
             </button>
           </div>
         </Show>
-        <Show when={openPath()}>
+        <Show when={openPath() && !isPdf(openPath())}>
           <span
             class="ag-chip text-[11px]"
             classList={{
@@ -343,6 +367,14 @@ export default function EditorPane() {
           aria-disabled={!openPath()}
           data-testid="editor-host"
         />
+        <Show when={isPdf(openPath())}>
+          <iframe
+            class="absolute inset-0 w-full h-full border-0 bg-bg"
+            title={`PDF: ${openPath()}`}
+            src={api.pdfRawUrl(openPath()!)}
+            data-testid="editor-pdf-view"
+          />
+        </Show>
         <Show when={showPreview()}>
           <div class="absolute inset-0 overflow-auto bg-bg" data-testid="editor-md-view">
             <Markdown source={previewSrc()} breaks={false} class="max-w-3xl mx-auto px-8 py-6" />

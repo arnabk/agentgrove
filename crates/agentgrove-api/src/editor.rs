@@ -94,6 +94,66 @@ pub async fn read(
     }))
 }
 
+/// `GET /api/editor/raw?path=<abs>` — raw bytes of a PDF, so the FE can
+/// hand it to the browser's built-in PDF viewer. Limited to `.pdf` so
+/// this can't be used to fetch arbitrary binaries as a download.
+pub async fn raw(
+    Query(q): Query<ReadQuery>,
+) -> Result<impl axum::response::IntoResponse, (StatusCode, String)> {
+    use axum::http::header;
+    let path = PathBuf::from(&q.path);
+    if !path.is_absolute() {
+        return Err((StatusCode::BAD_REQUEST, "path must be absolute".into()));
+    }
+    let is_pdf = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("pdf"));
+    if !is_pdf {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "only .pdf files are served raw".into(),
+        ));
+    }
+    let bytes = fs::read(&path).await.map_err(|e| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("cannot read {}: {e}", path.display()),
+        )
+    })?;
+    // Render in place (not download), named after the file so the
+    // viewer's title and "save" use it instead of "raw". Quotes and
+    // non-ASCII are dropped to keep the header value valid.
+    let name: String = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("document.pdf")
+        .chars()
+        .filter(|c| c.is_ascii() && !c.is_ascii_control() && *c != '"' && *c != '\\')
+        .collect();
+    let disposition = format!("inline; filename=\"{name}\"");
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/pdf".to_string()),
+            (header::CONTENT_DISPOSITION, disposition),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
+            // The dev UI runs cross-origin-isolated (COEP require-corp, see
+            // apps/web/vite.config.ts) on :5173 while the API is :4317. A
+            // document framed by such a page must opt in with BOTH headers,
+            // or the iframe is blocked (ERR_BLOCKED_BY_RESPONSE).
+            (
+                header::HeaderName::from_static("cross-origin-resource-policy"),
+                "cross-origin".to_string(),
+            ),
+            (
+                header::HeaderName::from_static("cross-origin-embedder-policy"),
+                "require-corp".to_string(),
+            ),
+        ],
+        bytes,
+    ))
+}
+
 pub async fn write_file(
     State(_state): State<AppState>,
     Json(body): Json<WriteBody>,
