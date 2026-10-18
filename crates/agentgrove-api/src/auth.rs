@@ -135,6 +135,23 @@ impl AuthConfig {
     }
 }
 
+/// CSRF cookie for `/login`. Only localhost gets `Domain=localhost`: a
+/// browser rejects that attribute on any other host (e.g. the tunnel),
+/// which dropped the cookie and failed every tunnel login's state check.
+fn csrf_cookie(csrf: &str, public: &str) -> String {
+    let domain = if public.contains("://localhost") {
+        "; Domain=localhost"
+    } else {
+        ""
+    };
+    let secure = if public.starts_with("https") {
+        "; Secure"
+    } else {
+        ""
+    };
+    format!("ag_csrf={csrf}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600{domain}{secure}")
+}
+
 fn redirect_uri(public: &str) -> String {
     format!("{public}/api/auth/callback")
 }
@@ -280,16 +297,7 @@ pub async fn login(State(state): State<AppState>, req: Request<Body>) -> Respons
         cid = urlencode(&cfg.client_id),
         ru = urlencode(&redirect_uri(public)),
     );
-    let secure = public.starts_with("https");
-    // Domain-wide CSRF cookie so the callback always sees it: login can
-    // be started on the tunnel (host-only cookie) while the browser
-    // completes it on localhost (or vice versa) — the round-trip then
-    // lands on a different cookie host and a host-only ag_csrf would be
-    // missing → spurious "invalid oauth state".
-    let cookie = format!(
-        "ag_csrf={csrf}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600; Domain=localhost{}",
-        if secure { "; Secure" } else { "" }
-    );
+    let cookie = csrf_cookie(&csrf, public);
     (
         StatusCode::FOUND,
         [(header::SET_COOKIE, cookie), (header::LOCATION, url)],
@@ -550,6 +558,14 @@ mod tests {
     }
     fn cfg(domains: &[&str]) -> AuthConfig {
         cfg2(domains, &[])
+    }
+
+    #[test]
+    fn csrf_cookie_only_shares_domain_on_localhost() {
+        let local = csrf_cookie("s", "http://localhost:4317");
+        assert!(local.contains("; Domain=localhost") && !local.contains("Secure"));
+        let tunnel = csrf_cookie("s", "https://agentgrove.poc.dev.theysaid.io");
+        assert!(!tunnel.contains("Domain=") && tunnel.contains("; Secure"));
     }
 
     #[test]

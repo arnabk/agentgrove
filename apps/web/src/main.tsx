@@ -33,9 +33,9 @@ function Root() {
     if (me?.authenticated) return { show: "app" as const };
     // Forbidden account (BE bounced back with ?auth_error): show a
     // message instead of redirecting, else we'd loop back to Google.
-    if (new URLSearchParams(window.location.search).has("auth_error")) {
-      return { show: "forbidden" as const };
-    }
+    const authError = new URLSearchParams(window.location.search).get("auth_error");
+    if (authError === "forbidden") return { show: "forbidden" as const };
+    if (authError) return { show: "retry" as const };
     window.location.href = api.loginUrl();
     return { show: "redirecting" as const };
   });
@@ -53,6 +53,14 @@ function Root() {
             <p class="text-[14px]">That account isn't allowed.</p>
             <a href={api.loginUrl()} class="ag-btn ag-btn-primary ag-btn-sm">
               Try another account
+            </a>
+          </div>
+        </Match>
+        <Match when={gate()!.show === "retry"}>
+          <div class="flex h-screen w-screen flex-col items-center justify-center gap-3 bg-bg-1 text-fg">
+            <p class="text-[14px]">Sign-in didn't complete. Please try again.</p>
+            <a href={api.loginUrl()} class="ag-btn ag-btn-primary ag-btn-sm">
+              Sign in again
             </a>
           </div>
         </Match>
