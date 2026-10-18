@@ -17,6 +17,14 @@ set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
+# launchd/systemd start us with a bare env, so agent CLIs we spawn missed
+# what the user's shell rc sets up (secrets referenced by MCP configs,
+# PATH entries like gcloud) and their MCP servers failed to start.
+# Import the interactive shell's env once so agents match a terminal.
+while IFS= read -r -d '' kv; do
+  export "$kv" 2>/dev/null || true
+done < <("${SHELL:-/bin/zsh}" -ic 'env -0' 2>/dev/null </dev/null)
+
 # Optional local secrets (Google OAuth etc.), kept out of git under
 # .data/. Sourced if present so the service starts in auth mode; absent
 # → auth stays disabled and the app behaves as before.
