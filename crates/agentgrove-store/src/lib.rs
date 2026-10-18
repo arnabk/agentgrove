@@ -13,6 +13,7 @@ pub mod layout;
 pub mod project;
 pub mod provider_secret;
 pub mod queue;
+pub mod schedule;
 pub mod secret;
 pub mod team_chat;
 pub mod worktree;
@@ -30,6 +31,7 @@ pub use provider_secret::{
     ProviderSecret, ProviderSecretError, ProviderSecretRepo, ProviderSecretSummary,
 };
 pub use queue::{QueueError, QueueItemRow, QueueMode, QueueRepo, QueueStatus};
+pub use schedule::{ScheduleRepo, ScheduleRow};
 pub use secret::{SecretError, SecretKeyring};
 pub use team_chat::TeamChatMessage;
 pub use worktree::{NewWorktree, WorktreeError, WorktreeRecord, WorktreeRepo, WorktreeStatus};

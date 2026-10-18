@@ -18,6 +18,7 @@ import {
   type QueueState,
   type UploadDto,
 } from "@/core/api/client";
+import ChatSchedules from "@/shells/desktop/ChatSchedules";
 import QueueTimeline from "@/shells/desktop/QueueTimeline";
 import Select from "@/ui/Select";
 import ChatSettingsDialog from "@/features/chat/ChatSettingsDialog";
@@ -265,6 +266,11 @@ export default function ChatPane() {
   const queueLocked = () => queueState()?.items.some((i) => i.status === "running") ?? false;
   const queueMode = (): "auto" | "manual" => queueState()?.mode ?? "manual";
 
+  // Recurring messages: the strip registers its refresh here so WS
+  // frames from the server's schedule ticker can poke it.
+  const [scheduleCreating, setScheduleCreating] = createSignal(false);
+  let refreshSchedules: () => void = () => {};
+
   async function refreshQueue() {
     const id = activeId();
     if (!id) {
@@ -403,6 +409,7 @@ export default function ChatPane() {
   createEffect(() => {
     void activeId();
     setQueueState(null);
+    setScheduleCreating(false);
   });
 
   onMount(() => {
@@ -771,7 +778,20 @@ export default function ChatPane() {
               queue_dispatched?: string;
               chat_idle?: boolean;
               subscribed?: string;
+              schedule_fired?: string;
+              schedules_changed?: boolean;
             };
+            if (parsed.schedule_fired || parsed.schedules_changed) {
+              // The server sent (or changed) a recurring message on its
+              // own clock: pull the new prompt / queue card and the
+              // updated "next run" times.
+              refreshSchedules();
+              if (parsed.schedule_fired) {
+                void reconcileChat();
+                void refreshQueue();
+              }
+              return;
+            }
             if (parsed.subscribed) {
               // Fresh subscription (initial connect or reconnect).
               // Reconcile from the BE so we have the canonical events,
@@ -1589,6 +1609,18 @@ export default function ChatPane() {
             />
           </Show>
 
+          <Show when={activeId()} keyed>
+            {(id) => (
+              <ChatSchedules
+                chatId={id}
+                draft={() => (scheduleCreating() ? input() : "")}
+                creating={scheduleCreating()}
+                onCloseCreate={() => setScheduleCreating(false)}
+                onRef={(r) => (refreshSchedules = r)}
+              />
+            )}
+          </Show>
+
           {/* Composer renders ONLY when there's an active chat — the
           outer <Show when={activeId()}> on the timeline above already
           handles the empty-state for the whole body. This inner Show
@@ -1811,6 +1843,19 @@ export default function ChatPane() {
                       }
                     }}
                   />
+                  <button
+                    type="button"
+                    class="ag-btn ag-btn-ghost ag-btn-icon"
+                    classList={{ "!text-accent": scheduleCreating() }}
+                    title="Repeat a message on a schedule"
+                    aria-label="Schedule a recurring message"
+                    aria-pressed={scheduleCreating()}
+                    disabled={!activeId()}
+                    onClick={() => setScheduleCreating((v) => !v)}
+                    data-testid="chat-schedule-open"
+                  >
+                    ⏱
+                  </button>
                   <PromptsPicker
                     onInsert={(body) => {
                       composer?.insertAtCursor(body);

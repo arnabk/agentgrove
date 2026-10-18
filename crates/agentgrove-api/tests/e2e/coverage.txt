@@ -88,3 +88,7 @@ POST /api/backups
 POST /api/backups/{name}/restore
 POST /api/uploads
 GET /api/uploads/{id}/raw
+GET /api/chats/{id}/schedules
+POST /api/chats/{id}/schedules
+PATCH /api/chats/{chat_id}/schedules/{schedule_id}
+DELETE /api/chats/{chat_id}/schedules/{schedule_id}

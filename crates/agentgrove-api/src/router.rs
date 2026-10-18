@@ -4,7 +4,8 @@ use crate::{
     auth, backups, branch_center, branches, chats, db, diag, editor, files, fs as fsapi,
     git as gitapi,
     health::{health, version},
-    integrations, layout, notes, open, projects, providers, prs, queue, scratchpad, settings,
+    integrations, layout, notes, open, projects, providers, prs, queue, schedules, scratchpad,
+    settings,
     state::AppState,
     team_chat, terminal, themes, tickets, uploads, worktrees, ws,
 };
@@ -174,6 +175,15 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/chats/:chat_id/queue/:item_id/dispatch",
             post(queue::dispatch_item),
+        )
+        // Recurring messages
+        .route(
+            "/api/chats/:id/schedules",
+            get(schedules::list).post(schedules::create),
+        )
+        .route(
+            "/api/chats/:chat_id/schedules/:schedule_id",
+            delete(schedules::delete).patch(schedules::update),
         )
         // Notes (chat-scoped, legacy)
         .route("/api/chats/:id/notes", get(notes::list).post(notes::add))

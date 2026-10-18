@@ -3,7 +3,7 @@
 use crate::logbus::LogBus;
 use agentgrove_store::{
     ChatRepo, DbPool, IntegrationRepo, LayoutRepo, ProjectRepo, ProviderSecretRepo, QueueRepo,
-    SecretKeyring, WorktreeRepo,
+    ScheduleRepo, SecretKeyring, WorktreeRepo,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -28,6 +28,8 @@ pub struct AppState {
     pub chat_store: ChatRepo,
     /// Persistent per-chat queue + mode toggle.
     pub queue_store: QueueRepo,
+    /// Per-chat recurring messages (see `crate::schedules`).
+    pub schedules: ScheduleRepo,
     /// Per-(project, worktree?) UI layout blobs + a singleton
     /// global blob. The FE writes through to this on every
     /// scope mutation so the layout follows the user across
@@ -124,6 +126,7 @@ impl AppState {
         let worktrees = WorktreeRepo::new(db.clone());
         let chat_store = ChatRepo::new(db.clone());
         let queue_store = QueueRepo::new(db.clone());
+        let schedules = ScheduleRepo::new(db.clone());
         let layouts = LayoutRepo::new(db.clone());
         // Open (or create on first run) the at-rest encryption key.
         // We deliberately panic on failure here — a server that
@@ -145,6 +148,7 @@ impl AppState {
             worktrees,
             chat_store,
             queue_store,
+            schedules,
             layouts,
             provider_secrets,
             integration_store,

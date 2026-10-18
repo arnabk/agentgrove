@@ -267,6 +267,20 @@ export interface QueueItem {
   created_at: string;
 }
 
+/** A recurring message the server sends into a chat every
+ *  `interval_secs`. Timestamps are unix milliseconds. */
+export interface ChatSchedule {
+  id: string;
+  chat_id: string;
+  body: string;
+  interval_secs: number;
+  next_run_at: number;
+  last_run_at: number | null;
+  enabled: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
 export interface QueueState {
   chat_id: string;
   mode: "auto" | "manual";
@@ -856,6 +870,27 @@ export const api = {
       `/api/chats/${encodeURIComponent(chatId)}/queue/${encodeURIComponent(itemId)}/dispatch`,
       { method: "POST" },
     ),
+  // Recurring messages
+  listSchedules: (chatId: string) =>
+    req<ChatSchedule[]>(`/api/chats/${encodeURIComponent(chatId)}/schedules`),
+  createSchedule: (chatId: string, body: string, intervalSecs: number) =>
+    req<ChatSchedule>(`/api/chats/${encodeURIComponent(chatId)}/schedules`, {
+      method: "POST",
+      body: JSON.stringify({ body, interval_secs: intervalSecs }),
+    }),
+  updateSchedule: (
+    chatId: string,
+    id: string,
+    patch: { body?: string; interval_secs?: number; enabled?: boolean },
+  ) =>
+    req<ChatSchedule>(
+      `/api/chats/${encodeURIComponent(chatId)}/schedules/${encodeURIComponent(id)}`,
+      { method: "PATCH", body: JSON.stringify(patch) },
+    ),
+  deleteSchedule: (chatId: string, id: string) =>
+    req<void>(`/api/chats/${encodeURIComponent(chatId)}/schedules/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   // Notes
   listNotes: (chatId: string) => req<Note[]>(`/api/chats/${encodeURIComponent(chatId)}/notes`),
   addNote: (chatId: string, body: string) =>

@@ -25,6 +25,7 @@ pub mod providers;
 pub mod prs;
 pub mod queue;
 pub mod router;
+pub mod schedules;
 pub mod scratchpad;
 pub mod settings;
 pub mod state;

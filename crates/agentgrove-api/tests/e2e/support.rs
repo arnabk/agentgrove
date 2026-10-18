@@ -9,6 +9,10 @@ use tokio::net::TcpListener;
 pub struct BeHarness {
     pub base_url: String,
     pub client: reqwest::Client,
+    /// The server's state, for driving background work (e.g. the
+    /// schedule ticker) directly.
+    #[allow(dead_code)]
+    pub state: AppState,
     #[allow(dead_code)]
     pub state_dir: std::path::PathBuf,
     _tmp: TempDir,
@@ -22,7 +26,7 @@ impl BeHarness {
         run_migrations(&pool).await.expect("migrate");
 
         let state = AppState::new(tmp.path().to_path_buf(), pool);
-        let app = build_router(state);
+        let app = build_router(state.clone());
 
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local_addr");
@@ -48,6 +52,7 @@ impl BeHarness {
                 return Self {
                     base_url,
                     client,
+                    state,
                     state_dir: tmp.path().to_path_buf(),
                     _tmp: tmp,
                     _shutdown: sd_tx,
@@ -105,7 +110,7 @@ impl BeHarness {
         let _ = state.worktrees.recover_stale_lifecycle().await;
         let _ = state.queue_store.recover_stale_running().await;
         agentgrove_api::chats::hydrate_from_store(&state).await;
-        let app = build_router(state);
+        let app = build_router(state.clone());
 
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local_addr");
@@ -131,6 +136,7 @@ impl BeHarness {
                 return Self {
                     base_url,
                     client,
+                    state,
                     state_dir,
                     _tmp,
                     _shutdown: sd_tx,

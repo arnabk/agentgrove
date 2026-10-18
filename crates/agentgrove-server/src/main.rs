@@ -96,6 +96,7 @@ async fn main() -> Result<()> {
     // already populated.
     agentgrove_api::chats::hydrate_from_store(&state).await;
 
+    agentgrove_api::schedules::spawn_ticker(state.clone());
     let app = build_router(state);
 
     let addr = SocketAddr::new(bind_addr, port);
