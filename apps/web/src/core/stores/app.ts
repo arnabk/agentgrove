@@ -720,6 +720,25 @@ export async function refreshWorktreesForProject(pid: string) {
   }
 }
 
+/** The live worktree created for a ticket, if any. "Work on this" names
+ *  branches `ticket/<id>-<slug>`, so the branch itself is the link; no
+ *  extra column to keep in sync. */
+export function findTicketWorktree(ticketId: string): Worktree | undefined {
+  const prefix = `ticket/${ticketId}-`;
+  for (const list of Object.values(state.worktrees)) {
+    const wt = list.find((w) => !w.removed_at && w.branch.startsWith(prefix));
+    if (wt) return wt;
+  }
+  return undefined;
+}
+
+/** After a ticket's worktree is created: load it into the rail and switch
+ *  to it, so the user lands where the work happens. */
+export async function focusNewWorktree(wt: Worktree) {
+  await refreshWorktreesForProject(wt.project_id);
+  selectWorktree(wt.project_id, wt.id);
+}
+
 /** Back-compat alias. */
 export async function refreshWorktreesForCurrent() {
   const pid = state.selectedProjectId;

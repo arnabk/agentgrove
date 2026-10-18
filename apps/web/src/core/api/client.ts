@@ -538,7 +538,7 @@ export const api = {
   listTickets: (projectId: string) =>
     req<TicketRow[]>(`/api/projects/${encodeURIComponent(projectId)}/tickets`),
   workOnTicket: (projectId: string, ticketId: string, provider: string) =>
-    req<unknown>(
+    req<Worktree>(
       `/api/projects/${encodeURIComponent(projectId)}/tickets/${encodeURIComponent(ticketId)}/work`,
       {
         method: "POST",
@@ -558,7 +558,7 @@ export const api = {
       body: JSON.stringify(filters),
     }),
   workOnClickUpTask: (taskId: string, projectId: string) =>
-    req<unknown>(`/api/clickup/tasks/${encodeURIComponent(taskId)}/work`, {
+    req<Worktree>(`/api/clickup/tasks/${encodeURIComponent(taskId)}/work`, {
       method: "POST",
       body: JSON.stringify({ project_id: projectId }),
     }),

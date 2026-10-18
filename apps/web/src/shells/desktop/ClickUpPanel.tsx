@@ -9,7 +9,7 @@ import {
 } from "solid-js";
 import { api, type TicketRow } from "@/core/api/client";
 import { pushToast } from "@/ui/Toast";
-import { state } from "@/core/stores/app";
+import { findTicketWorktree, focusNewWorktree, selectWorktree, state } from "@/core/stores/app";
 import { pickDialog } from "@/ui/dialog";
 
 /** How many rows to reveal per lazy-load step. */
@@ -74,6 +74,8 @@ export default function ClickUpPanel() {
     return "";
   }
 
+  const projectName = (id: string) => state.projects.find((p) => p.id === id)?.name ?? "project";
+
   async function copy(text: string, what: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -105,10 +107,12 @@ export default function ClickUpPanel() {
     if (working()) return;
     setWorking(taskId);
     try {
-      await api.workOnClickUpTask(taskId, projectId);
+      const wt = await api.workOnClickUpTask(taskId, projectId);
+      await focusNewWorktree(wt);
+      const project = state.projects.find((p) => p.id === projectId)?.name ?? "";
       pushToast({
         title: "Worktree created",
-        message: taskId,
+        message: `${wt.branch}${project ? ` in ${project}` : ""}`,
         level: "info",
       });
     } catch (e) {
@@ -237,18 +241,38 @@ export default function ClickUpPanel() {
                             <span class="text-[10.5px] text-fg-subtle">@{t.assignee}</span>
                           </Show>
                           <span class="flex-1" />
-                          <button
-                            type="button"
-                            class="ag-btn ag-btn-primary ag-btn-xs shrink-0"
-                            disabled={working() !== null}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void startWork(t.id);
-                            }}
-                            data-testid={`clickup-work-${t.id}`}
+                          <Show
+                            when={findTicketWorktree(t.id)}
+                            fallback={
+                              <button
+                                type="button"
+                                class="ag-btn ag-btn-primary ag-btn-xs shrink-0"
+                                disabled={working() !== null}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void startWork(t.id);
+                                }}
+                                data-testid={`clickup-work-${t.id}`}
+                              >
+                                {working() === t.id ? "…" : "Work on this"}
+                              </button>
+                            }
                           >
-                            {working() === t.id ? "…" : "Work on this"}
-                          </button>
+                            {(wt) => (
+                              <button
+                                type="button"
+                                class="ag-btn ag-btn-ghost ag-btn-xs shrink-0 max-w-[60%] truncate font-mono"
+                                title={`Open worktree ${wt().branch} (${projectName(wt().project_id)})`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  selectWorktree(wt().project_id, wt().id);
+                                }}
+                                data-testid={`clickup-worktree-${t.id}`}
+                              >
+                                ⑂ {projectName(wt().project_id)}
+                              </button>
+                            )}
+                          </Show>
                         </div>
                       </div>
                     </li>

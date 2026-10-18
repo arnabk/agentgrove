@@ -1,6 +1,7 @@
 import { For, Show, createMemo, createResource, createSignal, onMount } from "solid-js";
 import { api, type TicketRow } from "@/core/api/client";
 import { pushToast } from "@/ui/Toast";
+import { findTicketWorktree, focusNewWorktree, selectWorktree } from "@/core/stores/app";
 
 export default function TicketListDialog(props: {
   projectId: string;
@@ -74,10 +75,11 @@ export default function TicketListDialog(props: {
     if (working()) return;
     setWorking(ticket.id);
     try {
-      await api.workOnTicket(props.projectId, ticket.id, ticket.provider);
+      const wt = await api.workOnTicket(props.projectId, ticket.id, ticket.provider);
+      await focusNewWorktree(wt);
       pushToast({
         title: "Worktree created",
-        message: `#${ticket.id} ${ticket.title}`,
+        message: wt.branch,
         level: "info",
       });
       props.onClose();
@@ -239,18 +241,39 @@ export default function TicketListDialog(props: {
                         >
                           #
                         </button>
-                        <button
-                          type="button"
-                          class="ag-btn ag-btn-primary ag-btn-sm shrink-0"
-                          disabled={working() !== null}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void work(t);
-                          }}
-                          data-testid={`ticket-work-${t.id}`}
+                        <Show
+                          when={findTicketWorktree(t.id)}
+                          fallback={
+                            <button
+                              type="button"
+                              class="ag-btn ag-btn-primary ag-btn-sm shrink-0"
+                              disabled={working() !== null}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void work(t);
+                              }}
+                              data-testid={`ticket-work-${t.id}`}
+                            >
+                              {working() === t.id ? "…" : "Work on this"}
+                            </button>
+                          }
                         >
-                          {working() === t.id ? "…" : "Work on this"}
-                        </button>
+                          {(wt) => (
+                            <button
+                              type="button"
+                              class="ag-btn ag-btn-ghost ag-btn-sm shrink-0 font-mono"
+                              title={`Open worktree ${wt().branch}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                selectWorktree(wt().project_id, wt().id);
+                                props.onClose();
+                              }}
+                              data-testid={`ticket-worktree-${t.id}`}
+                            >
+                              ⑂ Open worktree
+                            </button>
+                          )}
+                        </Show>
                       </div>
                     </li>
                   )}
