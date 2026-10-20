@@ -187,24 +187,25 @@ impl AgentProvider for OpencodeProvider {
         if opts.effort.is_some() {
             cmd.arg("--thinking");
         }
-        // Always pin opencode's working directory via `--dir`.
-        // Without this `--session` resume would land tool calls in
-        // the directory the session was ORIGINALLY created against
-        // (opencode binds sessions to a canonicalised project-path
-        // hash and otherwise ignores the spawn cwd on resume). With
-        // `--dir` set, opencode honours it for both fresh and
-        // resumed sessions, so worktree-scoped chats stay scoped.
-        // We also keep `cmd.current_dir()` set below so non-flag
-        // path resolution (relative attachments, etc.) works.
-        cmd.arg("--dir").arg(&opts.cwd);
+        // opencode's working directory is set via `cmd.current_dir()`
+        // below. opencode v2 dropped the old `--dir <path>` flag (an
+        // unknown flag makes the CLI dump its help to stdout and exit,
+        // which looks like a chat that silently never starts), and the
+        // `run [<directory>]` positional is ignored in favour of the
+        // spawn cwd — so current_dir is the only lever. opencode binds
+        // sessions to a canonicalised project-path hash; keeping the
+        // spawn cwd pinned to the worktree keeps resumes scoped.
+        // ponytail: resume cwd-rebind relies solely on current_dir;
+        // revisit if a future opencode re-adds an explicit dir flag.
         if let Some(session) = opts.resume_session_id.as_deref() {
             cmd.arg("--session").arg(session);
         }
         if opts.auto_approve_tools {
-            // Same rationale as Claude: opencode's permission
-            // prompts assume a TTY; we never give it one. Without
-            // this the run sits forever on the first tool call.
-            cmd.arg("--dangerously-skip-permissions");
+            // opencode's permission prompts assume a TTY; we never give
+            // it one. Without this the run sits forever on the first
+            // tool call. (v2 renamed `--dangerously-skip-permissions`
+            // to `--auto`.)
+            cmd.arg("--auto");
         }
         // End flag parsing with `--` so a markdown bullet-list /
         // dash-prefixed prompt isn't mistaken for a short option.
