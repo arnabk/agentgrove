@@ -6,6 +6,7 @@ import {
   createSignal,
   onCleanup,
   onMount,
+  untrack,
 } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import {
@@ -273,18 +274,53 @@ export default function LeftRail() {
       )
       .catch(() => {});
   }
-  createEffect(() => {
-    for (const p of state.projects) {
-      if (!isExpanded(p.id)) continue;
-      for (const w of state.worktrees[p.id] ?? []) fetchDrift(w.id);
-    }
-    const h = setInterval(() => {
+  // Poll drift + PR status for every expanded project's worktrees.
+  //
+  // Reads of `state` here MUST be untracked: this runs both on a fixed
+  // interval and whenever a project is expanded, but the enclosing
+  // scope must NOT re-subscribe to `state.projects` / `state.worktrees`
+  // / `isExpanded`. Those stores are rewritten every few seconds by the
+  // global active-chats poll (App.tsx), so a tracked effect would be
+  // torn down and recreated before its 60s interval ever fires —
+  // leaving PR chips frozen at first paint (never appearing when an MR
+  // is opened, never clearing when it's merged/closed).
+  function pollAllDrift() {
+    untrack(() => {
       for (const p of state.projects) {
-        if (!isExpanded(p.id)) continue;
+        // Poll a project's worktrees when they're actually on screen.
+        // A project renders its worktree rows when it's expanded in the
+        // left-rail OR when it's the selected project (selection auto-
+        // reveals the tree via the URL route without writing to the
+        // `expanded` store). Gating on `isExpanded` alone missed the
+        // selected-but-not-persisted-expanded case, so PR chips never
+        // polled for the project the user was actively looking at.
+        const visible = isExpanded(p.id) || state.selectedProjectId === p.id;
+        if (!visible) continue;
         for (const w of state.worktrees[p.id] ?? []) fetchDrift(w.id);
       }
-    }, DRIFT_POLL_MS);
+    });
+  }
+  onMount(() => {
+    // Initial sweep once the first project/worktree data is present.
+    pollAllDrift();
+    const h = setInterval(pollAllDrift, DRIFT_POLL_MS);
     onCleanup(() => clearInterval(h));
+  });
+  // Re-sweep promptly when the set of expanded projects or the worktree
+  // list changes (e.g. the user expands a project, or a new worktree is
+  // created) so a freshly-opened MR shows up without waiting a full
+  // poll interval. This effect only triggers the fetch; it does not own
+  // the interval, so being re-run by unrelated store churn is harmless.
+  createEffect(() => {
+    // Track the inputs that should trigger an immediate re-sweep:
+    // the selected project, each project's expanded flag, and the
+    // per-project worktree lists (a new worktree should poll at once).
+    void state.selectedProjectId;
+    for (const p of state.projects) {
+      isExpanded(p.id);
+      void state.worktrees[p.id];
+    }
+    pollAllDrift();
   });
 
   async function deleteWorktree(projectId: string, wtId: string, ev: MouseEvent) {
