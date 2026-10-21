@@ -115,8 +115,7 @@ export default function ChatSchedules(props: {
               data-testid={`chat-schedule-${s.id}`}
             >
               <span class="ag-chip font-mono !text-[10.5px] shrink-0">
-                ⏱{" "}
-                {s.interval_secs === null ? "once" : `every ${formatInterval(s.interval_secs)}`}
+                ⏱ {s.interval_secs === null ? "once" : `every ${formatInterval(s.interval_secs)}`}
               </span>
               <span class="flex-1 min-w-0 truncate text-fg" title={s.body}>
                 {s.body}

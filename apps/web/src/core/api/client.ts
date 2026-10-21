@@ -882,7 +882,12 @@ export const api = {
   updateSchedule: (
     chatId: string,
     id: string,
-    patch: { body?: string; interval_secs?: number | null; next_run_at?: number; enabled?: boolean },
+    patch: {
+      body?: string;
+      interval_secs?: number | null;
+      next_run_at?: number;
+      enabled?: boolean;
+    },
   ) =>
     req<ChatSchedule>(
       `/api/chats/${encodeURIComponent(chatId)}/schedules/${encodeURIComponent(id)}`,
