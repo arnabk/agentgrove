@@ -1593,3 +1593,12 @@ textarea::placeholder {
 .cm-mergeView .cm-editor .cm-activeLineGutter {
   background: transparent;
 }
+
+/* Native date/time pickers (schedule form) follow the active theme
+   instead of the browser's default light popup. */
+[data-theme="dark"] input[type="datetime-local"] {
+  color-scheme: dark;
+}
+[data-theme="light"] input[type="datetime-local"] {
+  color-scheme: light;
+}

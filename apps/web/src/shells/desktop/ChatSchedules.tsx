@@ -1,10 +1,22 @@
 import { For, Show, createSignal, onCleanup } from "solid-js";
 import { api, type ChatSchedule } from "@/core/api/client";
+import Select from "@/ui/Select";
 
 export const UNITS = { s: 1, m: 60, h: 3600, d: 86400 } as const;
 export type Unit = keyof typeof UNITS;
 /** Matches the server's minimum (crates/agentgrove-api/src/schedules.rs). */
 export const MIN_INTERVAL_SECS = 10;
+
+const MODE_OPTIONS = [
+  { value: "every", label: "Every" },
+  { value: "at", label: "Once at" },
+];
+const UNIT_OPTIONS = [
+  { value: "s", label: "seconds" },
+  { value: "m", label: "minutes" },
+  { value: "h", label: "hours" },
+  { value: "d", label: "days" },
+];
 
 /** Largest unit that divides `secs` evenly, e.g. 7200 → "2h". */
 export function formatInterval(secs: number): string {
@@ -167,18 +179,16 @@ export default function ChatSchedules(props: {
               onInput={(e) => setBody(e.currentTarget.value)}
               data-testid="chat-schedule-body"
             />
-            <label class="flex items-center gap-1 text-fg-subtle">
-              <select
-                class="ag-input w-auto"
-                aria-label="Schedule mode"
+            <div class="w-28 shrink-0">
+              <Select
                 value={mode()}
-                onChange={(e) => setMode(e.currentTarget.value as "every" | "at")}
-                data-testid="chat-schedule-mode"
-              >
-                <option value="every">every</option>
-                <option value="at">once at</option>
-              </select>
-            </label>
+                options={MODE_OPTIONS}
+                onChange={(v) => setMode(v as "every" | "at")}
+                ariaLabel="Schedule mode"
+                testId="chat-schedule-mode"
+                placement="top"
+              />
+            </div>
             <Show
               when={mode() === "every"}
               fallback={
@@ -202,18 +212,16 @@ export default function ChatSchedules(props: {
                 onInput={(e) => setEvery(Number(e.currentTarget.value) || 0)}
                 data-testid="chat-schedule-every"
               />
-              <select
-                class="ag-input w-auto"
-                aria-label="Interval unit"
-                value={unit()}
-                onChange={(e) => setUnit(e.currentTarget.value as Unit)}
-                data-testid="chat-schedule-unit"
-              >
-                <option value="s">seconds</option>
-                <option value="m">minutes</option>
-                <option value="h">hours</option>
-                <option value="d">days</option>
-              </select>
+              <div class="w-28 shrink-0">
+                <Select
+                  value={unit()}
+                  options={UNIT_OPTIONS}
+                  onChange={(v) => setUnit(v as Unit)}
+                  ariaLabel="Interval unit"
+                  testId="chat-schedule-unit"
+                  placement="top"
+                />
+              </div>
             </Show>
             <button
               type="submit"
