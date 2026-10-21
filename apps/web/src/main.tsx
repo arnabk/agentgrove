@@ -21,6 +21,10 @@ applyCachedZoom();
 //   screen). We show a blank splash while the redirect navigates so the
 //   app shell (and its "open a folder" empty state) never flashes and
 //   makes it look like data was lost.
+// Root CSS `zoom` scales 100vh too; divide it back out so these
+// screens fill exactly one viewport and stay centered at any zoom.
+const FULL_VIEWPORT = { height: "calc(100dvh * var(--ag-zoom-inv, 1))" };
+
 function Root() {
   const [gate] = createResource(async () => {
     const cfg = await api.authConfig().catch(() => ({ enabled: false, provider: "" }));
@@ -42,14 +46,23 @@ function Root() {
   return (
     <Show
       when={gate()}
-      fallback={<div class="flex h-screen w-screen items-center justify-center bg-bg-1" />}
+      fallback={
+        <div style={FULL_VIEWPORT} class="flex w-full items-center justify-center bg-bg-1" />
+      }
     >
-      <Switch fallback={<div class="flex h-screen w-screen items-center justify-center bg-bg-1" />}>
+      <Switch
+        fallback={
+          <div style={FULL_VIEWPORT} class="flex w-full items-center justify-center bg-bg-1" />
+        }
+      >
         <Match when={gate()!.show === "app"}>
           <Shell />
         </Match>
         <Match when={gate()!.show === "forbidden"}>
-          <div class="flex h-screen w-screen flex-col items-center justify-center gap-3 bg-bg-1 text-fg">
+          <div
+            style={FULL_VIEWPORT}
+            class="flex w-full flex-col items-center justify-center gap-3 bg-bg-1 text-fg"
+          >
             <p class="text-[14px]">That account isn't allowed.</p>
             <a href={api.loginUrl()} class="ag-btn ag-btn-primary ag-btn-sm">
               Try another account
@@ -57,7 +70,10 @@ function Root() {
           </div>
         </Match>
         <Match when={gate()!.show === "retry"}>
-          <div class="flex h-screen w-screen flex-col items-center justify-center gap-3 bg-bg-1 text-fg">
+          <div
+            style={FULL_VIEWPORT}
+            class="flex w-full flex-col items-center justify-center gap-3 bg-bg-1 text-fg"
+          >
             <p class="text-[14px]">Sign-in didn't complete. Please try again.</p>
             <a href={api.loginUrl()} class="ag-btn ag-btn-primary ag-btn-sm">
               Sign in again
