@@ -39,29 +39,57 @@ fn db_err(e: impl std::fmt::Display) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, format!("db: {e}"))
 }
 
-fn validate(body: Option<&str>, interval: Option<i64>) -> Result<(), (StatusCode, String)> {
+/// A schedule is either recurring (`interval_secs`) or one-time
+/// (`next_run_at` at an absolute time, fires once then disables).
+/// Both set, or neither, is rejected.
+/// `interval = Some(None)` means "switch to / stay one-time".
+fn validate(
+    body: Option<&str>,
+    interval: Option<Option<i64>>,
+    next_run: Option<i64>,
+) -> Result<(), (StatusCode, String)> {
     if body.is_some_and(|b| b.trim().is_empty()) {
         return Err((StatusCode::BAD_REQUEST, "message is empty".into()));
     }
-    if interval.is_some_and(|i| i < MIN_INTERVAL_SECS) {
-        return Err((
+    match (interval, next_run) {
+        (Some(Some(i)), _) if i < MIN_INTERVAL_SECS => Err((
             StatusCode::BAD_REQUEST,
             format!("interval must be at least {MIN_INTERVAL_SECS}s"),
-        ));
+        )),
+        (Some(Some(_)), Some(_)) => Err((
+            StatusCode::BAD_REQUEST,
+            "set either interval_secs or next_run_at, not both".into(),
+        )),
+        (Some(None), None) => Err((
+            StatusCode::BAD_REQUEST,
+            "a one-time schedule needs next_run_at".into(),
+        )),
+        (None, Some(t)) if t <= chrono::Utc::now().timestamp_millis() => Err((
+            StatusCode::BAD_REQUEST,
+            "next_run_at must be in the future".into(),
+        )),
+        (Some(None), Some(t)) if t <= chrono::Utc::now().timestamp_millis() => Err((
+            StatusCode::BAD_REQUEST,
+            "next_run_at must be in the future".into(),
+        )),
+        _ => Ok(()),
     }
-    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
 pub struct CreateBody {
     pub body: String,
-    pub interval_secs: i64,
+    pub interval_secs: Option<i64>,
+    pub next_run_at: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateBody {
     pub body: Option<String>,
-    pub interval_secs: Option<i64>,
+    /// `Some(Some(i))` = recurring with interval i, `Some(None)` =
+    /// one-time; `None` = leave unchanged.
+    pub interval_secs: Option<Option<i64>>,
+    pub next_run_at: Option<i64>,
     pub enabled: Option<bool>,
 }
 
@@ -84,13 +112,20 @@ pub async fn create(
     Path(chat_id): Path<String>,
     Json(b): Json<CreateBody>,
 ) -> Result<Json<ScheduleRow>, (StatusCode, String)> {
-    validate(Some(&b.body), Some(b.interval_secs))?;
+    validate(Some(&b.body), Some(b.interval_secs), b.next_run_at)?;
     if state.chats.read().await.get(&chat_id).is_none() {
         return Err((StatusCode::NOT_FOUND, format!("chat {chat_id} not found")));
     }
     let row = state
         .schedules
-        .create(&chat_id, b.body.trim(), b.interval_secs)
+        .create(
+            &chat_id,
+            b.body.trim(),
+            b.interval_secs,
+            b.next_run_at.unwrap_or_else(|| {
+                chrono::Utc::now().timestamp_millis() + b.interval_secs.unwrap() * 1000
+            }),
+        )
         .await
         .map_err(db_err)?;
     notify(&state, &chat_id);
@@ -103,7 +138,7 @@ pub async fn update(
     Path((chat_id, id)): Path<(String, String)>,
     Json(b): Json<UpdateBody>,
 ) -> Result<Json<ScheduleRow>, (StatusCode, String)> {
-    validate(b.body.as_deref(), b.interval_secs)?;
+    validate(b.body.as_deref(), b.interval_secs, b.next_run_at)?;
     let row = state
         .schedules
         .update(
@@ -111,6 +146,7 @@ pub async fn update(
             &id,
             b.body.as_deref().map(str::trim),
             b.interval_secs,
+            b.next_run_at,
             b.enabled,
         )
         .await

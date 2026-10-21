@@ -17,8 +17,9 @@ pub struct ScheduleRow {
     pub chat_id: String,
     /// Message text.
     pub body: String,
-    /// Seconds between sends.
-    pub interval_secs: i64,
+    /// Seconds between sends; `None` = one-time (fires once at
+    /// `next_run_at`, then disables itself).
+    pub interval_secs: Option<i64>,
     /// Next send time.
     pub next_run_at: i64,
     /// Last send time, if it has fired.
@@ -47,12 +48,14 @@ impl ScheduleRepo {
         Self { pool }
     }
 
-    /// Create an enabled schedule whose first run is one interval from now.
+    /// Create an enabled schedule. Recurring (`interval_secs = Some`)
+    /// fires one interval from now; one-time fires at `next_run_at`.
     pub async fn create(
         &self,
         chat_id: &str,
         body: &str,
-        interval_secs: i64,
+        interval_secs: Option<i64>,
+        next_run_at: i64,
     ) -> Result<ScheduleRow, sqlx::Error> {
         let now = Utc::now().timestamp_millis();
         let id = Uuid::now_v7().to_string();
@@ -64,7 +67,7 @@ impl ScheduleRepo {
         .bind(chat_id)
         .bind(body)
         .bind(interval_secs)
-        .bind(now + interval_secs * 1000)
+        .bind(next_run_at)
         .bind(now)
         .execute(&self.pool)
         .await?;
@@ -104,10 +107,14 @@ impl ScheduleRepo {
     /// tick doesn't push every later run back). If that slot has already
     /// passed too (server was down), restart from now, so a missed run
     /// fires once, not once per missed interval.
+    /// One-time schedules stop after their single run; re-enabling one
+    /// restarts its countdown from now (see `update`).
     pub async fn mark_ran(&self, id: &str, now_ms: i64) -> Result<(), sqlx::Error> {
         sqlx::query(
             "UPDATE chat_schedules SET last_run_at = ?2, updated_at = ?2, \
-             next_run_at = CASE WHEN next_run_at + interval_secs * 1000 > ?2 \
+             enabled = CASE WHEN interval_secs IS NULL THEN 0 ELSE enabled END, \
+             next_run_at = CASE WHEN interval_secs IS NULL THEN next_run_at \
+                 WHEN next_run_at + interval_secs * 1000 > ?2 \
                  THEN next_run_at + interval_secs * 1000 \
                  ELSE ?2 + interval_secs * 1000 END \
              WHERE id = ?1",
@@ -119,15 +126,16 @@ impl ScheduleRepo {
         Ok(())
     }
 
-    /// Patch body / interval / enabled. Changing the interval or
-    /// re-enabling restarts the countdown from now. Returns the updated
-    /// row, or `None` if it doesn't belong to `chat_id`.
+    /// Patch body / interval / one-time time / enabled. Changing the
+    /// timing or re-enabling restarts the countdown from now. Returns the
+    /// updated row, or `None` if it doesn't belong to `chat_id`.
     pub async fn update(
         &self,
         chat_id: &str,
         id: &str,
         body: Option<&str>,
-        interval_secs: Option<i64>,
+        interval_secs: Option<Option<i64>>,
+        next_run_at: Option<i64>,
         enabled: Option<bool>,
     ) -> Result<Option<ScheduleRow>, sqlx::Error> {
         let Some(cur) = self.get(id).await?.filter(|r| r.chat_id == chat_id) else {
@@ -135,12 +143,17 @@ impl ScheduleRepo {
         };
         let now = Utc::now().timestamp_millis();
         let interval = interval_secs.unwrap_or(cur.interval_secs);
+        let next = next_run_at.unwrap_or(cur.next_run_at);
         let enabled_now = enabled.unwrap_or(cur.enabled);
-        let restart = interval != cur.interval_secs || (enabled_now && !cur.enabled);
-        let next = if restart {
-            now + interval * 1000
-        } else {
-            cur.next_run_at
+        let restart = interval != cur.interval_secs
+            || next != cur.next_run_at
+            || (enabled_now && !cur.enabled);
+        let next = match (restart, interval) {
+            (true, Some(i)) => now + i * 1000,
+            // Re-enabling a one-time schedule reschedules it one minute
+            // out; the caller passes next_run_at for a specific time.
+            (true, None) => next_run_at.unwrap_or(now + 60_000),
+            (false, _) => next,
         };
         sqlx::query(
             "UPDATE chat_schedules SET body = ?2, interval_secs = ?3, enabled = ?4, \

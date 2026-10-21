@@ -34,10 +34,17 @@ async fn schedule_crud_validation_and_firing() {
     let chat_id = new_chat(&h).await;
     let base = format!("/api/chats/{chat_id}/schedules");
 
-    // Validation: too-short interval, empty body, unknown chat.
+    // Validation: too-short interval, empty body, both modes at once,
+    // neither mode, past time, unknown chat.
     for (body, code) in [
         (json!({"body":"hi","interval_secs":5}), 400),
         (json!({"body":"  ","interval_secs":60}), 400),
+        (
+            json!({"body":"hi","interval_secs":60,"next_run_at":4_000_000_000_000i64}),
+            400,
+        ),
+        (json!({"body":"hi"}), 400),
+        (json!({"body":"hi","next_run_at":1_000_000_000_000i64}), 400),
     ] {
         let r = h.post_auth(&base).json(&body).send().await.unwrap();
         assert_eq!(r.status(), code);
@@ -141,4 +148,45 @@ async fn schedule_crud_validation_and_firing() {
         .await
         .unwrap();
     assert!(list.as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn one_time_schedule_fires_once_and_disables() {
+    let h = BeHarness::start().await;
+    let chat_id = new_chat(&h).await;
+    let base = format!("/api/chats/{chat_id}/schedules");
+    let at = chrono::Utc::now().timestamp_millis() + 30_000;
+
+    let s: Value = h
+        .post_auth(&base)
+        .json(&json!({"body":"once only","next_run_at":at}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(s["interval_secs"], Value::Null);
+
+    // Fires exactly once, then disables itself; later ticks do nothing.
+    agentgrove_api::schedules::fire_due(&h.state, at).await;
+    for _ in 0..100 {
+        if !h.state.dispatching.lock().await.contains(&chat_id) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    agentgrove_api::schedules::fire_due(&h.state, at + 86_400_000).await;
+    assert_eq!(prompt_count(&h, &chat_id).await, 1);
+
+    let list: Value = h
+        .get_auth(&base)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(list[0]["enabled"], false);
+    assert!(!list[0]["last_run_at"].is_null());
 }

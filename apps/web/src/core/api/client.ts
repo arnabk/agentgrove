@@ -273,7 +273,8 @@ export interface ChatSchedule {
   id: string;
   chat_id: string;
   body: string;
-  interval_secs: number;
+  /** Null = one-time (fires once at next_run_at, then disables). */
+  interval_secs: number | null;
   next_run_at: number;
   last_run_at: number | null;
   enabled: boolean;
@@ -873,15 +874,15 @@ export const api = {
   // Recurring messages
   listSchedules: (chatId: string) =>
     req<ChatSchedule[]>(`/api/chats/${encodeURIComponent(chatId)}/schedules`),
-  createSchedule: (chatId: string, body: string, intervalSecs: number) =>
+  createSchedule: (chatId: string, body: string, intervalSecs: number | null, nextRunAt?: number) =>
     req<ChatSchedule>(`/api/chats/${encodeURIComponent(chatId)}/schedules`, {
       method: "POST",
-      body: JSON.stringify({ body, interval_secs: intervalSecs }),
+      body: JSON.stringify({ body, interval_secs: intervalSecs, next_run_at: nextRunAt }),
     }),
   updateSchedule: (
     chatId: string,
     id: string,
-    patch: { body?: string; interval_secs?: number; enabled?: boolean },
+    patch: { body?: string; interval_secs?: number | null; next_run_at?: number; enabled?: boolean },
   ) =>
     req<ChatSchedule>(
       `/api/chats/${encodeURIComponent(chatId)}/schedules/${encodeURIComponent(id)}`,

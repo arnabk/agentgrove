@@ -40,8 +40,10 @@ export default function ChatSchedules(props: {
   const [err, setErr] = createSignal<string | null>(null);
   const [now, setNow] = createSignal(Date.now());
   const [body, setBody] = createSignal("");
+  const [mode, setMode] = createSignal<"every" | "at">("every");
   const [every, setEvery] = createSignal(1);
   const [unit, setUnit] = createSignal<Unit>("h");
+  const [at, setAt] = createSignal("");
 
   async function refresh() {
     const id = props.chatId;
@@ -64,6 +66,13 @@ export default function ChatSchedules(props: {
 
   const secs = () => Math.round(every() * UNITS[unit()]);
   const message = () => (body() || props.draft()).trim();
+  /** Unix ms of the chosen one-time time, or 0 if unset/invalid. */
+  const atMs = () => {
+    const t = new Date(at()).getTime();
+    return Number.isFinite(t) ? t : 0;
+  };
+  const atOk = () => atMs() > Date.now();
+  const oneTime = () => mode() === "at";
 
   async function run(fn: () => Promise<unknown>) {
     setErr(null);
@@ -79,8 +88,17 @@ export default function ChatSchedules(props: {
 
   async function create(e: SubmitEvent) {
     e.preventDefault();
-    if (!message() || secs() < MIN_INTERVAL_SECS) return;
-    if (await run(() => api.createSchedule(props.chatId, message(), secs()))) {
+    if (!message() || (oneTime() ? !atOk() : secs() < MIN_INTERVAL_SECS)) return;
+    if (
+      await run(() =>
+        api.createSchedule(
+          props.chatId,
+          message(),
+          oneTime() ? null : secs(),
+          oneTime() ? atMs() : undefined,
+        ),
+      )
+    ) {
       setBody("");
       props.onCloseCreate();
     }
@@ -97,13 +115,18 @@ export default function ChatSchedules(props: {
               data-testid={`chat-schedule-${s.id}`}
             >
               <span class="ag-chip font-mono !text-[10.5px] shrink-0">
-                ⏱ every {formatInterval(s.interval_secs)}
+                ⏱{" "}
+                {s.interval_secs === null ? "once" : `every ${formatInterval(s.interval_secs)}`}
               </span>
               <span class="flex-1 min-w-0 truncate text-fg" title={s.body}>
                 {s.body}
               </span>
               <span class="text-fg-subtle text-[11px] shrink-0" data-testid="chat-schedule-next">
-                {s.enabled ? `next ${formatUntil(s.next_run_at, now())}` : "paused"}
+                {s.enabled
+                  ? `next ${formatUntil(s.next_run_at, now())}`
+                  : s.last_run_at !== null
+                    ? "sent"
+                    : "paused"}
               </span>
               <button
                 type="button"
@@ -146,7 +169,30 @@ export default function ChatSchedules(props: {
               data-testid="chat-schedule-body"
             />
             <label class="flex items-center gap-1 text-fg-subtle">
-              every
+              <select
+                class="ag-input w-auto"
+                aria-label="Schedule mode"
+                value={mode()}
+                onChange={(e) => setMode(e.currentTarget.value as "every" | "at")}
+                data-testid="chat-schedule-mode"
+              >
+                <option value="every">every</option>
+                <option value="at">once at</option>
+              </select>
+            </label>
+            <Show
+              when={mode() === "every"}
+              fallback={
+                <input
+                  type="datetime-local"
+                  class="ag-input w-auto"
+                  aria-label="Send at"
+                  value={at()}
+                  onInput={(e) => setAt(e.currentTarget.value)}
+                  data-testid="chat-schedule-at"
+                />
+              }
+            >
               <input
                 type="number"
                 min="1"
@@ -157,24 +203,30 @@ export default function ChatSchedules(props: {
                 onInput={(e) => setEvery(Number(e.currentTarget.value) || 0)}
                 data-testid="chat-schedule-every"
               />
-            </label>
-            <select
-              class="ag-input w-auto"
-              aria-label="Interval unit"
-              value={unit()}
-              onChange={(e) => setUnit(e.currentTarget.value as Unit)}
-              data-testid="chat-schedule-unit"
-            >
-              <option value="s">seconds</option>
-              <option value="m">minutes</option>
-              <option value="h">hours</option>
-              <option value="d">days</option>
-            </select>
+              <select
+                class="ag-input w-auto"
+                aria-label="Interval unit"
+                value={unit()}
+                onChange={(e) => setUnit(e.currentTarget.value as Unit)}
+                data-testid="chat-schedule-unit"
+              >
+                <option value="s">seconds</option>
+                <option value="m">minutes</option>
+                <option value="h">hours</option>
+                <option value="d">days</option>
+              </select>
+            </Show>
             <button
               type="submit"
               class="ag-btn ag-btn-primary ag-btn-xs"
-              disabled={!message() || secs() < MIN_INTERVAL_SECS}
-              title={secs() < MIN_INTERVAL_SECS ? `Minimum is ${MIN_INTERVAL_SECS} seconds` : ""}
+              disabled={!message() || (oneTime() ? !atOk() : secs() < MIN_INTERVAL_SECS)}
+              title={
+                oneTime()
+                  ? "Pick a future time"
+                  : secs() < MIN_INTERVAL_SECS
+                    ? `Minimum is ${MIN_INTERVAL_SECS} seconds`
+                    : ""
+              }
               data-testid="chat-schedule-save"
             >
               Schedule
