@@ -29,7 +29,11 @@ export default defineConfig({
     // silently fell back to :5174 (the default when 5173 is busy) the
     // app would load but never reach the backend. Fail loudly instead.
     strictPort: true,
-    host: "0.0.0.0",
+    // Loopback by default: the dev server proxies the whole app (API,
+    // websocket, terminals) and has no login unless Google auth is set.
+    // Opt in to LAN exposure with AGENTGROVE_BIND=0.0.0.0 (same knob as
+    // the backend). A tunnel on this machine still works on loopback.
+    host: process.env.AGENTGROVE_BIND || "127.0.0.1",
     allowedHosts: true,
     headers: isolationHeaders,
     // Same-origin BE access when the FE is reached through a reverse

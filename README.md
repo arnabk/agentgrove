@@ -27,6 +27,8 @@ just setup  # once: Rust components, frontend deps, test browser, git hooks
 just dev    # starts BE (hot reload) + FE (HMR) on http://localhost:5173
 ```
 
+By default it only listens on `127.0.0.1`. To open it from another device on your network, run `AGENTGROVE_BIND=0.0.0.0 just dev`, and turn on [Google login](./docs/SECURITY.md#google-login-optional) first, since there is no login otherwise.
+
 On Linux, install the same packages with your distro's package manager (e.g. `apt install nodejs pnpm` or `pacman -S node pnpm just`). Windows users can use `winget install Rustlang.Rustup OpenJS.NodeJS pnpm.just` or the [rustup](https://rustup.rs/) and [pnpm](https://pnpm.io/installation) installers.
 
 ### Keep it running (auto-start on login)
