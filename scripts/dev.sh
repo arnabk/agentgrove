@@ -43,8 +43,9 @@ if ! command -v cargo-watch >/dev/null 2>&1; then
   cargo install --locked cargo-watch
 fi
 
-echo "[dev] launching backend on http://0.0.0.0:$BE_PORT with hot reload..."
-AGENTGROVE_BIND="0.0.0.0" AGENTGROVE_PORT="$BE_PORT" cargo watch -q -c -w crates \
+BIND="${AGENTGROVE_BIND:-127.0.0.1}"
+echo "[dev] launching backend on http://$BIND:$BE_PORT with hot reload..."
+AGENTGROVE_BIND="$BIND" AGENTGROVE_PORT="$BE_PORT" cargo watch -q -c -w crates \
   -s "cargo run -q -p agentgrove-server" >"$BE_LOG" 2>&1 &
 BE_PID=$!
 
@@ -58,7 +59,7 @@ for i in $(seq 1 60); do
 done
 
 echo "[dev] backend ready"
-echo "[dev]   url: http://0.0.0.0:$BE_PORT (all interfaces)"
+echo "[dev]   url: http://$BIND:$BE_PORT"
 echo "[dev]   log: $BE_LOG"
 
 echo "[dev] launching frontend with HMR..."
@@ -71,7 +72,8 @@ for i in $(seq 1 30); do
 done
 
 echo "[dev] frontend ready"
-echo "[dev]   url: http://0.0.0.0:5173 (all interfaces)"
+echo "[dev]   url: http://$BIND:5173"
+[ "$BIND" = "127.0.0.1" ] || echo "[dev]   WARNING: listening on $BIND with no login unless Google auth is configured"
 echo "[dev]   log: $FE_LOG"
 echo
 echo "[dev] hot reload active. Edit code; both BE + FE reload on save."

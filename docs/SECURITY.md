@@ -33,8 +33,10 @@ Out of scope:
 - Remote bind (`AGENTGROVE_BIND=0.0.0.0`) is allowed but the server logs
   a warning. Front it with a reverse proxy that adds TLS, and enable
   auth.
-- The Vite dev server (`:5173`) listens on all interfaces and proxies
-  the API, so a tunnel to `:5173` exposes the whole app. Its `/@fs` file
+- The Vite dev server (`:5173`) also binds `127.0.0.1` by default and
+  follows `AGENTGROVE_BIND` (set `AGENTGROVE_BIND=0.0.0.0` to reach it
+  from your LAN). It proxies the API, so a tunnel to `:5173` exposes the
+  whole app. Its `/@fs` file
   route is outside backend auth; `vite.config.ts` confines it to the FE
   package and denies the state dir (`.data/` holds the OAuth secret,
   session key and DB), `.env*`, keys and `.git`.
