@@ -63,7 +63,7 @@ echo "[dev]   url: http://$BIND:$BE_PORT"
 echo "[dev]   log: $BE_LOG"
 
 echo "[dev] launching frontend with HMR..."
-AGENTGROVE_BIND="$BIND" pnpm -C apps/web dev >"$FE_LOG" 2>pnpm -C apps/web dev >"$FE_LOG" 2>&1 &1 &
+AGENTGROVE_BIND="$BIND" pnpm -C apps/web dev >"$FE_LOG" 2>&1 &
 FE_PID=$!
 
 for i in $(seq 1 30); do
