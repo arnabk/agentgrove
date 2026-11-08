@@ -4,7 +4,7 @@
 [![Release](https://github.com/arnabk/agentgrove/actions/workflows/release.yml/badge.svg)](https://github.com/arnabk/agentgrove/actions/workflows/release.yml)
 [![Nightly](https://github.com/arnabk/agentgrove/actions/workflows/nightly.yml/badge.svg)](https://github.com/arnabk/agentgrove/actions/workflows/nightly.yml)
 
-AgentGrove is a local developer workspace that keeps your projects, git worktrees, terminal, database, notes, team chat, and AI agents in one window — plus a light [mobile view](#mobile) on the same URL for when you're away from your desk. The backend is Rust; the UI is SolidJS. It runs on Linux, macOS, and Windows.
+AgentGrove is a local developer workspace that keeps your projects, git worktrees, terminal, database, notes, team chat, and AI agents in one window — plus a light [mobile view](#mobile) on the same URL for when you're away from your desk. The backend is Rust; the UI is SolidJS. It runs on Linux, macOS, and Windows; agent chat currently works on Linux and macOS only (the agent CLIs aren't supported on Windows yet).
 
 ## Demo
 
@@ -23,6 +23,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # Clone and run
 git clone https://github.com/arnabk/agentgrove.git
 cd agentgrove
+just setup  # once: Rust components, frontend deps, test browser, git hooks
 just dev    # starts BE (hot reload) + FE (HMR) on http://localhost:5173
 ```
 
@@ -40,8 +41,8 @@ just service-install     # macOS launchd · Linux systemd --user · Windows Task
 just service-uninstall   # stop + remove (your data in ./.data is untouched)
 ```
 
-The app then serves on http://localhost:4317 (backend + frontend on one
-port) and comes back on its own after a reboot. For a plain foreground run
+The app then serves on http://localhost:5173 (the backend API runs on
+:4317) and comes back on its own after a reboot. For a plain foreground run
 without hot reload, use `just console` (or `just start`). See
 [Troubleshooting](#troubleshooting) if the page ever looks blank or empty.
 
@@ -105,7 +106,7 @@ What you can do with it today.
 
 ### AI Chat
 
-- **Multi-provider** — Claude, opencode, Kimi, and Codex (OpenAI `codex exec`) via CLI subprocess passthrough (user-authenticated)
+- **Multi-provider** — Claude, opencode, Kimi, Codex (OpenAI `codex exec`), and Kiro (`kiro-cli chat`) via CLI subprocess passthrough (user-authenticated)
 - **Live model discovery** — models fetched live from providers with cache + manual refresh
 - **Per-chat settings** — model, effort (thinking level), and slash commands configurable per chat
 - **Default provider/model** — choose the agent and model that new chats start with
@@ -260,7 +261,7 @@ nothing to install and no second address to remember.
 - **MIT licensed** with a contributing guide, Code of Conduct, and security policy
 - **Tested** — BE endpoint e2e tests + FE Playwright specs across two projects (Desktop Chrome and a Pixel 7 for the mobile shell); route inventory enforced in CI
 - **3 green CI badges** — CI, Release, Nightly; cross-platform nightly matrix
-- **Auto-release** — every merge to main bumps the version and builds 4-platform binaries + a GitHub Release
+- **Auto-release** — every merge to main bumps the version and publishes a GitHub Release (source only; there are no prebuilt binaries)
 - **ADRs** — architecture decision records documenting key choices
 
 ## Troubleshooting
