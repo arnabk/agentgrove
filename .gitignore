@@ -21,6 +21,7 @@ test-results
 
 # Editors / OS
 .idea
+.serena/
 .vscode/*
 !.vscode/extensions.json
 .DS_Store

@@ -65,7 +65,7 @@ jobs:
 
   live-e2e:
     name: live e2e (binary + playwright)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
