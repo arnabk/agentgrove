@@ -58,7 +58,7 @@ impl ProviderDto {
             agentgrove_agents::ProviderId::Opencode => {
                 "https://github.com/opencode-ai/opencode#install"
             }
-            agentgrove_agents::ProviderId::Kimi => "https://moonshotai.github.io/kimi-cli/",
+            agentgrove_agents::ProviderId::Kimi => "https://moonshotai.github.io/kimi-code/",
             agentgrove_agents::ProviderId::Codex => "https://github.com/openai/codex#installation",
             agentgrove_agents::ProviderId::Kiro => "https://kiro.dev/docs/cli/",
         };

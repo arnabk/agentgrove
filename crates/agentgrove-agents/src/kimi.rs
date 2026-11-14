@@ -1,5 +1,13 @@
 //! Kimi CLI subprocess provider (Moonshot AI's `kimi` agent CLI).
 //!
+//! Two CLI generations share the `kimi` binary name:
+//! - v1 (python kimi-cli): flags below, config in `~/.kimi/`.
+//! - v2+ (kimi-code): `-p` alone is non-interactive (no `--print`,
+//!   `--work-dir`, `--mcp-config-file`, `--thinking`; `--yolo` is
+//!   rejected with `-p`), config in `~/.kimi-code/`, and the session id
+//!   arrives as a `{"role":"meta","type":"session.resume_hint"}` line.
+//!   We pick the arg set from `kimi --version`.
+//!
 //! Spawns `kimi --print --output-format stream-json --work-dir <cwd>
 //! -p <prompt>`. The CLI buffers streamed content parts into whole
 //! kosong `Message` objects and prints one JSON per line; we translate
@@ -52,7 +60,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
 const BINARY_NAME: &str = "kimi";
-const INSTALL_HINT: &str = "https://moonshotai.github.io/kimi-cli/";
+const INSTALL_HINT: &str = "https://moonshotai.github.io/kimi-code/";
 
 /// Fallback when `~/.kimi/config.toml` is unreadable or declares no
 /// models. `kimi-code/k3` is the managed flagship tier every kimi-code
@@ -129,11 +137,22 @@ async fn read_config() -> KimiConfig {
     let Some(base) = directories_next::BaseDirs::new() else {
         return KimiConfig::default();
     };
-    let path = base.home_dir().join(".kimi").join("config.toml");
-    match tokio::fs::read_to_string(&path).await {
-        Ok(text) => parse_config(&text),
-        Err(_) => KimiConfig::default(),
+    // v2 (kimi-code) first, then the v1 location.
+    for dir in [".kimi-code", ".kimi"] {
+        let path = base.home_dir().join(dir).join("config.toml");
+        if let Ok(text) = tokio::fs::read_to_string(&path).await {
+            return parse_config(&text);
+        }
     }
+    KimiConfig::default()
+}
+
+/// v2+ is kimi-code (new flag set). Unknown version -> assume current CLI.
+fn is_v2(version: Option<&str>) -> bool {
+    version
+        .and_then(|v| v.split('.').next())
+        .and_then(|m| m.parse::<u32>().ok())
+        .is_none_or(|m| m >= 2)
 }
 
 /// Path to a static empty MCP config, written on first use. See the
@@ -224,34 +243,44 @@ impl AgentProvider for KimiProvider {
             provider: "Kimi".into(),
             hint: INSTALL_HINT.into(),
         })?;
-        let mcp_config = empty_mcp_config_path().await?;
-
+        let v2 = is_v2(read_version(&path).await.as_deref());
         let mut cmd = Command::new(&path);
-        cmd.arg("--print")
-            .arg("--output-format")
-            .arg("stream-json")
-            .arg("--mcp-config-file")
-            .arg(&mcp_config)
-            // `--work-dir` pins the agent's root the same way
-            // opencode's `--dir` does; keep `current_dir` in sync so
-            // relative paths in tool args resolve the same.
-            .arg("--work-dir")
-            .arg(&opts.cwd);
-        // Omit `--model` entirely when unset so the CLI applies its
-        // own config default rather than a stale id we hard-coded.
-        if let Some(m) = opts.model.as_deref().filter(|m| !m.is_empty()) {
-            cmd.arg("--model").arg(m);
-        }
-        if opts.effort.is_some() {
-            cmd.arg("--thinking");
-        }
-        if let Some(session) = opts.resume_session_id.as_deref() {
-            cmd.arg("--session").arg(session);
-        }
-        if opts.auto_approve_tools {
-            // `--print` already auto-approves; `--yolo` makes the
-            // intent explicit and covers future CLI changes.
-            cmd.arg("--yolo");
+        if v2 {
+            cmd.arg("--output-format").arg("stream-json");
+            if let Some(m) = opts.model.as_deref().filter(|m| !m.is_empty()) {
+                cmd.arg("--model").arg(m);
+            }
+            if let Some(session) = opts.resume_session_id.as_deref() {
+                cmd.arg("--session").arg(session);
+            }
+        } else {
+            let mcp_config = empty_mcp_config_path().await?;
+            cmd.arg("--print")
+                .arg("--output-format")
+                .arg("stream-json")
+                .arg("--mcp-config-file")
+                .arg(&mcp_config)
+                // `--work-dir` pins the agent's root the same way
+                // opencode's `--dir` does; keep `current_dir` in sync so
+                // relative paths in tool args resolve the same.
+                .arg("--work-dir")
+                .arg(&opts.cwd);
+            // Omit `--model` entirely when unset so the CLI applies its
+            // own config default rather than a stale id we hard-coded.
+            if let Some(m) = opts.model.as_deref().filter(|m| !m.is_empty()) {
+                cmd.arg("--model").arg(m);
+            }
+            if opts.effort.is_some() {
+                cmd.arg("--thinking");
+            }
+            if let Some(session) = opts.resume_session_id.as_deref() {
+                cmd.arg("--session").arg(session);
+            }
+            if opts.auto_approve_tools {
+                // `--print` already auto-approves; `--yolo` makes the
+                // intent explicit and covers future CLI changes.
+                cmd.arg("--yolo");
+            }
         }
         cmd.arg("--prompt").arg(prompt);
         cmd.current_dir(&opts.cwd)
@@ -416,8 +445,26 @@ fn translate(
         return vec![];
     };
     match role {
+        // v2: session id arrives in-stream at exit.
+        "meta" if v.get("type").and_then(|x| x.as_str()) == Some("session.resume_hint") => v
+            .get("session_id")
+            .and_then(|x| x.as_str())
+            .map(|id| {
+                vec![AgentEvent::SessionStart {
+                    session_id: id.to_string(),
+                }]
+            })
+            .unwrap_or_default(),
         "assistant" => {
             let mut out = Vec::new();
+            // v2 sends plain-string content for text-only messages.
+            if let Some(t) = v.get("content").and_then(|x| x.as_str()) {
+                if !t.is_empty() {
+                    out.push(AgentEvent::Token {
+                        text: t.to_string(),
+                    });
+                }
+            }
             if let Some(parts) = v.get("content").and_then(|x| x.as_array()) {
                 for part in parts {
                     match part.get("type").and_then(|x| x.as_str()) {
@@ -476,6 +523,9 @@ fn translate(
                 .and_then(|i| tool_names.get(i).cloned())
                 .unwrap_or_default();
             let mut texts: Vec<String> = Vec::new();
+            if let Some(t) = v.get("content").and_then(|x| x.as_str()) {
+                texts.push(t.to_string());
+            }
             if let Some(parts) = v.get("content").and_then(|x| x.as_array()) {
                 for part in parts {
                     if let Some(t) = part.get("text").and_then(|x| x.as_str()) {
@@ -617,6 +667,38 @@ provider = "managed:kimi-code"
         let cfg = parse_config("default_model = \n[models.\"\"]garbage");
         assert!(cfg.default_model.is_none());
         assert!(cfg.models.is_empty());
+    }
+
+    #[test]
+    fn v2_stream_shapes_translate() {
+        let mut names = fresh();
+        let call = json!({"role":"assistant","tool_calls":[{"type":"function","id":"t1","function":{"name":"Bash","arguments":"{\"command\":\"echo hi\"}"}}]});
+        assert_eq!(translate(&call, &mut names).len(), 1);
+        let res = json!({"role":"tool","tool_call_id":"t1","content":"hi\n"});
+        assert_eq!(
+            translate(&res, &mut names),
+            vec![AgentEvent::ToolResult {
+                name: "Bash".into(),
+                result: json!("hi\n"),
+                id: Some("t1".into())
+            }]
+        );
+        let text = json!({"role":"assistant","content":"DONE"});
+        assert_eq!(
+            translate(&text, &mut names),
+            vec![AgentEvent::Token {
+                text: "DONE".into()
+            }]
+        );
+        let meta = json!({"role":"meta","type":"session.resume_hint","session_id":"session_abc"});
+        assert_eq!(
+            translate(&meta, &mut names),
+            vec![AgentEvent::SessionStart {
+                session_id: "session_abc".into()
+            }]
+        );
+        assert!(translate(&json!({"role":"meta","type":"system.version"}), &mut names).is_empty());
+        assert!(is_v2(Some("2.5.3")) && is_v2(None) && !is_v2(Some("1.49.0")));
     }
 
     #[test]
